@@ -6,7 +6,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 COINS = ["KOMAUSDT","LABUSDT","HEIUSDT","SIRENUSDT","GRASSUSDT","VELVETUSDT"]
 
 def tg(msg):
-    print(msg) # PRINT TO LOGS ALWAYS
+    print(msg)
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=15)
@@ -14,20 +14,56 @@ def tg(msg):
         print(f"TG FAIL: {e}")
 
 def get_klines(sym, interval, limit=200):
+    # 1. BYBIT - BEST, NEVER BLOCKED
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={sym}&interval={interval}&limit={limit}"
-        data = requests.get(url, timeout=10).json()
-        if not isinstance(data, list):
-            print(f"{sym} BINANCE ERROR: {data}")
-            return None,None,None,None
-        closes = [float(x[4]) for x in data]
-        highs = [float(x[2]) for x in data]
-        lows = [float(x[3]) for x in data]
-        vols = [float(x[5]) for x in data]
-        return closes, highs, lows, vols
+        by_interval = interval.replace("m","")
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}&interval={by_interval}&limit={limit}"
+        r = requests.get(url, timeout=10).json()
+        data = r.get("result",{}).get("list",[])
+        if data and len(data)>50:
+            data = data[::-1]
+            closes = [float(x[4]) for x in data]
+            highs = [float(x[2]) for x in data]
+            lows = [float(x[3]) for x in data]
+            vols = [float(x[5]) for x in data]
+            print(f"{sym}: OK Bybit {len(closes)} candles")
+            return closes, highs, lows, vols
     except Exception as e:
-        print(f"{sym} KLINE FAIL: {e}")
-        return None,None,None,None
+        print(f"{sym} Bybit fail: {e}")
+
+    # 2. OKX - 2nd BEST
+    try:
+        okx_sym = sym.replace("USDT","-USDT")
+        url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={interval}&limit={limit}"
+        r = requests.get(url, timeout=10).json()
+        data = r.get("data",[])
+        if data and len(data)>50:
+            data = data[::-1]
+            closes = [float(x[4]) for x in data]
+            highs = [float(x[2]) for x in data]
+            lows = [float(x[3]) for x in data]
+            vols = [float(x[5]) for x in data]
+            print(f"{sym}: OK OKX {len(closes)} candles")
+            return closes, highs, lows, vols
+    except Exception as e:
+        print(f"{sym} OKX fail: {e}")
+
+    # 3. BINANCE VISION - Unblocked binance
+    try:
+        url = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}&interval={interval}&limit={limit}"
+        data = requests.get(url, timeout=10).json()
+        if isinstance(data, list) and len(data)>50:
+            closes = [float(x[4]) for x in data]
+            highs = [float(x[2]) for x in data]
+            lows = [float(x[3]) for x in data]
+            vols = [float(x[5]) for x in data]
+            print(f"{sym}: OK BinanceVision {len(closes)} candles")
+            return closes, highs, lows, vols
+    except Exception as e:
+        print(f"{sym} Vision fail: {e}")
+
+    print(f"{sym}: ALL FAILED")
+    return None,None,None,None
 
 def ema(arr, period):
     k = 2/(period+1)
@@ -55,7 +91,6 @@ for sym in COINS:
         print(f"{sym}: SKIP - No data")
         continue
 
-    # CALCULATIONS
     price = closes[-1]
     ema20 = ema(closes, 20)
     ema50 = ema(closes, 50)
@@ -67,30 +102,26 @@ for sym in COINS:
     recent_high = max(highs[-20:-1])
     bos = price > recent_high
 
-    print(f"{sym}: Price={price:.6f} EMA20={ema20:.6f} EMA50={ema50:.6f} RSI={r:.1f} VOL={vol_ratio:.2f}x BOS={bos}")
+    print(f"{sym}: P={price:.6f} EMA20={ema20:.6f} EMA50={ema50:.6f} RSI={r:.1f} VOL={vol_ratio:.2f}x BOS={bos}")
 
-    # FILTERS A+ (looser for testing so you see signal)
     if vol_ratio < 1.2:
-        print(f" -> SKIP {sym}: VOL low {vol_ratio:.2f}x < 1.2x")
+        print(f" -> SKIP VOL {vol_ratio:.2f}x")
         continue
     if not bos:
-        print(f" -> SKIP {sym}: No BOS (price {price:.6f} < high {recent_high:.6f})")
+        print(f" -> SKIP No BOS")
         continue
-    if r > 70 or r < 40:
-        print(f" -> SKIP {sym}: RSI bad {r:.1f}")
+    if r > 70 or r < 38:
+        print(f" -> SKIP RSI {r:.1f}")
         continue
     if price < ema50 or ema20 < ema50:
-        print(f" -> SKIP {sym}: Trend down (price<EMA50 or EMA20<EMA50)")
+        print(f" -> SKIP Trend Down")
         continue
 
-    # SIGNAL!!!
     sl = min(lows[-5:]) * 0.99
     tp = price + (price - sl)*2.5
-    msg = f"🚀 *BUY SIGNAL {sym} 15m*\n\nEntry: `{price:.6f}`\nSL: `{sl:.6f}`\nTP: `{tp:.6f}`\n\nRSI: {r:.1f} | VOL: {vol_ratio:.2f}x | BOS: YES\nTrend: EMA20>EMA50>EMA200\nTime: {datetime.utcnow()} UTC"
+    msg = f"🚀 *BUY {sym} 15m*\n\nEntry: `{price:.6f}`\nSL: `{sl:.6f}`\nTP: `{tp:.6f}`\n\nRSI: {r:.1f} | VOL: {vol_ratio:.2f}x | BOS: YES\nTime: {datetime.utcnow()} UTC"
     tg(msg)
     print(f" -> SIGNAL SENT {sym}!!!")
 
 print("--- SCAN DONE ---")
-# Send alive message every 4 hours so you know bot alive (GitHub runs every 15m = 16 runs per 4h)
-# We send scan quiet message every run for now to debug
-tg(f"✅ Scan done {datetime.utcnow().strftime('%H:%M')} UTC - No A+ setup yet. Bot alive checking {len(COINS)} coins.")
+tg(f"✅ Scan done {datetime.utcnow().strftime('%H:%M')} UTC - Checked {len(COINS)} coins (Bybit/OKX). No A+ yet.")
