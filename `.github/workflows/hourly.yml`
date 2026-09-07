@@ -1,7 +1,7 @@
-name: KOMA Bot Hourly
+name: KOMA Bot 15m
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 jobs:
   run-bot:
@@ -10,9 +10,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - run: pip install requests
-      - run: python hourly_bot.py
+          python-version: '3.10'
+      - name: Install deps
+        run: pip install requests pandas numpy
+      - name: Run python main.py
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
