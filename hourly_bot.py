@@ -8,7 +8,8 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 def tg(m):
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=10)
-    except: print(m)
+    except:
+        print(m)
 
 def klines(sym, interval, lim=200):
     try:
@@ -80,4 +81,4 @@ for c in COINS:
         found=True
         tg(f"*{r['sym']} {r['sig']} SIGNAL* | 5m/15m ENTRY\n\nEntry: `{r['price']:.6f}`\nSL: `{r['sl']:.6f}` (-{r['risk']:.2f}%)\nTP1: `{r['tp1']:.6f}` (+{r['rew']:.2f}%)\nTP2: `{r['tp2']:.6f}`\nTP3: `{r['tp3']:.6f}`\n\n4H: {r['dir4h']} | 1H: {r['st1h']}\nBOS: {r['b5']} | Pattern: {r['pat']}\nRSI: {r['r5']:.1f} | VOL: x{r['vsp']:.2f}\nReasons: {', '.join(r['rsn'])}\nTime: {datetime.utcnow().strftime('%H:%M UTC')}")
 if not found:
-    tg(f"SCAN {datetime.utcnow().strftime('%H:%M UTC')} | Checked {', '.join(COINS)} | No A+ setup. Bot alive - 4H/1H/5m/BOS/RSI/Vol scanned. Next scan in 15m.")
+    tg(f"SCAN {datetime.utcnow().strftime('%H:%M UTC')} | Checked {', '.join(COINS)} | No A+ setup. Bot alive - Next scan in 15m.")
