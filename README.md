@@ -1,2 +1,0 @@
-# Koma-bot-
-Fire signals
