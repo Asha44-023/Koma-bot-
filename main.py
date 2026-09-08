@@ -1,60 +1,85 @@
 import ccxt, requests, os, numpy as np, pandas as pd
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def send_telegram(msg):
+BOT = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT = os.getenv("TELEGRAM_CHAT_ID")
+
+def tg(m):
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=15)
-    except Exception as e:
-        print(f"TG Error: {e}")
+        requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage", data={"chat_id":CHAT,"text":m}, timeout=10)
+    except:
+        pass
 
-def rsi_calc(closes, period=14):
-    delta = np.diff(closes); gain = np.where(delta>0, delta, 0); loss = np.where(delta<0, -delta, 0)
-    avg_gain = np.mean(gain[-period:]); avg_loss = np.mean(loss[-period:])
-    if avg_loss == 0: return 70
-    rs = avg_gain / avg_loss; return 100 - (100 / (1 + rs))
+def rsi(c,p=14):
+    d=np.diff(c); g=np.where(d>0,d,0); l=np.where(d<0,-d,0)
+    ag=np.mean(g[-p:]); al=np.mean(l[-p:])
+    return 70 if al==0 else 100-(100/(1+ag/al))
 
-def ema_calc(closes, period): return pd.Series(closes).ewm(span=period).mean().iloc[-1]
+def ema(c,p):
+    return pd.Series(c).ewm(span=p).mean().iloc[-1]
 
-symbols = ["HEI/USDT", "LAB/USDT", "SIREN/USDT", "GRASS/USDT", "KOMA/USDT", "VELVET/USDT"]
-send_telegram("⚡ *BOSS 5-15-60-240 CLEAN SETUP STARTED*")
+def atr(o,p=14):
+    trs=[]
+    for i in range(1,len(o)):
+        h=o[i][2]; l=o[i][3]; pc=o[i-1][4]
+        trs.append(max(h-l, abs(h-pc), abs(l-pc)))
+    return np.mean(trs[-p:])
 
-for sym in symbols:
+def detect_mw(c):
+    last=c[-20:]
+    # W Pattern - Double Bottom
+    low1=min(last[0:8]); low2=min(last[10:18])
+    if last[-1] > last[-3] and abs(low1-low2)/last[-1] < 0.012 and low1 < np.mean(last) and low2 < np.mean(last):
+        return "W PATTERN BULLISH"
+    # M Pattern - Double Top
+    high1=max(last[0:8]); high2=max(last[10:18])
+    if last[-1] < last[-3] and abs(high1-high2)/last[-1] < 0.012 and high1 > np.mean(last) and high2 > np.mean(last):
+        return "M PATTERN BEARISH"
+    return "NO M/W"
+
+# MEXC EXCHANGE
+ex = ccxt.mexc()
+syms = ["HEI/USDT","LAB/USDT","SIREN/USDT","GRASS/USDT","KOMA/USDT","VELVET/USDT"]
+
+tg("🚀 BOSS MEXC 15M AUTO SCAN START")
+
+for sym in syms:
     try:
-        ex = ccxt.mexc()
-        # === FETCH 4 TIMEFRAMES ===
-        o5 = ex.fetch_ohlcv(sym, '5m', limit=100)
-        o15 = ex.fetch_ohlcv(sym, '15m', limit=100)
-        o1h = ex.fetch_ohlcv(sym, '1h', limit=100)
-        o4h = ex.fetch_ohlcv(sym, '4h', limit=100)
+        o5=ex.fetch_ohlcv(sym,'5m',limit=100)
+        o15=ex.fetch_ohlcv(sym,'15m',limit=100)
+        o1h=ex.fetch_ohlcv(sym,'1h',limit=100)
+        o4h=ex.fetch_ohlcv(sym,'4h',limit=100)
 
-        c5 = [x[4] for x in o5]; v5 = [x[5] for x in o5]
-        c15 = [x[4] for x in o15]; v15 = [x[5] for x in o15]
-        price = c15[-1]
+        c5=[x[4] for x in o5]
+        c15=[x[4] for x in o15]
+        v15=[x[5] for x in o15]
+        price=c15[-1]
 
-        rsi5 = rsi_calc(np.array(c5)); rsi15 = rsi_calc(np.array(c15))
-        ema9 = ema_calc(c15, 9); ema21 = ema_calc(c15, 21); ema50 = ema_calc(c15, 50)
+        rsi5=rsi(np.array(c5))
+        rsi15=rsi(np.array(c15))
+        e9=ema(c15,9)
+        e21=ema(c15,21)
+        a=atr(o15)
+        vol=v15[-1]/np.mean(v15[-20:]) if np.mean(v15[-20:])>0 else 1
 
-        avg_vol = np.mean(v15[-20:]); vol_spike = v15[-1] / avg_vol if avg_vol>0 else 1
-        vol_trend = "INCREASING" if np.mean(v15[-5:]) > np.mean(v15[-10:-5]) else "DECREASING"
-        vol_loophole = vol_spike >= 1.0 and vol_trend == "INCREASING"
+        # 4H Direction
+        trend4h="UP" if o4h[-1][4] > o4h[-20][4] else "DOWN"
+        # 1H Structure + BOS
+        h1=max([x[4] for x in o1h[-20:-1]])
+        l1=min([x[4] for x in o1h[-20:-1]])
+        if o1h[-1][4] > h1:
+            bos="BOS UP"; struct1h="BULLISH"
+        elif o1h[-1][4] < l1:
+            bos="BOS DOWN"; struct1h="BEARISH"
+        else:
+            bos="RANGE"; struct1h="RANGE"
 
-        high_20 = max(c15[-20:-1]); low_20 = min(c15[-20:-1])
-        bos_up_real = price > high_20; bos_down_real = price < low_20
-        bos_up_loophole = price > high_20 * 0.995; bos_down_loophole = price < low_20 * 1.005
+        pattern=detect_mw(c15)
 
-        w_pat = c15[-1] > c15[-2] and c15[-2] < c15[-3]
-        m_pat = c15[-1] < c15[-2] and c15[-2] > c15[-3]
-        double_bottom_loophole = abs(c15[-2] - c15[-4]) / c15[-2] < 0.02 and c15[-2] < c15[-3]
-        double_top_loophole = abs(c15[-2] - c15[-4]) / c15[-2] < 0.02 and c15[-2] > c15[-3]
-
-        # === BOSS STRUCTURE ===
-        t4h = "UP" if o4h[-1][4] > o4h[-20][4] else "DOWN"
-        high_1h_20 = max([x[4] for x in o1h[-20:-1]]); low_1h_20 = min([x[4] for x in o1h[-20:-1]])
-        if o1h[-1][4] > high_1h_20: s1h = "BOS UP"
-        elif o1h[-1][4] < low_1h_20: s1h = "BOS DOWN"
-        else: s1h = "RANGE"
-
-        atr = np.mean([abs(o15[i][2]-o15[i][3]) for i in range(-14, 0)]); atr = atr if atr!=0 else price*0.01
-        sl_l = price - atr*1.5; tp1_l, tp2_l, tp3_l = price + atr*1.2, price + atr*2.5, price
+        # SCORE SYSTEM
+        buy_score=0; sell_score=0
+        if e9>e21: buy_score+=20
+        else: sell_score+=20
+        if 45<rsi15<68: buy_score+=15
+        if 32<rsi15<55: sell_score+=15
+        if rsi5>52: buy_score+=10
+        if
