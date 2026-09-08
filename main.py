@@ -6,7 +6,7 @@ BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 MIN_SCORE = 40
 COOLDOWN_FILE = "last_alerts.json"
-COOLDOWN_HOURS = 1 # <-- 1 HOUR COOLDOWN AS YOU WANTED
+COOLDOWN_HOURS = 1
 SYMBOLS = ["VELVET/USDT", "KOMA/USDT", "GRASS/USDT", "SIREN/USDT", "HEI/USDT", "LAB/USDT"]
 
 def tg(m):
@@ -36,23 +36,19 @@ def fetch_safe(ex, sym, tf='1h', lim=150):
     except: return None
 
 def get_exchange():
-    # DUAL EXCHANGE: MEXC FIRST, THEN KUCOIN FALLBACK
     try:
         ex_mexc = ccxt.mexc({'enableRateLimit': True})
         ex_mexc.fetch_ticker("BTC/USDT")
-        print("Using MEXC Exchange")
+        print("Using MEXC")
         return ex_mexc, "MEXC"
     except:
         try:
             ex_ku = ccxt.kucoin({'enableRateLimit': True})
             ex_ku.fetch_ticker("BTC/USDT")
-            print("MEXC failed, Using KuCoin Exchange")
+            print("Using KuCoin")
             return ex_ku, "KUCOIN"
         except:
-            ex_mexc = ccxt.mexc({'enableRateLimit': True})
-            return ex_mexc, "MEXC"
-
-# --- PAID BOT INPUTS ---
+            return ccxt.mexc({'enableRateLimit': True}), "MEXC"
 
 def check_btc_filter(ex):
     try:
@@ -73,7 +69,7 @@ def check_liquidity_hunt(df):
         return "NO_HUNT", 0
     except: return "NO_HUNT", 0
 
-def check_whale_manipulation(df):
+def check_whale(df):
     try:
         avg = df['vol'].iloc[-20:-1].mean(); curr = df.iloc[-1]
         body = abs(curr['close']-curr['open'])+0.000001
@@ -92,7 +88,7 @@ def check_cvd(df):
         return "CVD_NEUTRAL", 0
     except: return "CVD_NEUTRAL", 0
 
-def check_volume_profile(df):
+def check_vp(df):
     try:
         poc = df['close'].iloc[-50:].mode().iloc[0] if not df['close'].iloc[-50:].mode().empty else df['close'].iloc[-1]
         if abs(df['close'].iloc[-1]-poc)/df['close'].iloc[-1] < 0.01 and df['vol'].iloc[-1] > df['vol'].iloc[-20:-1].mean()*1.5:
@@ -100,46 +96,74 @@ def check_volume_profile(df):
         return "VOL_NORMAL", 0
     except: return "VOL_NORMAL", 0
 
-def check_head_shoulder(df):
-    # HEAD & SHOULDERS + INVERSE
+def check_hs(df):
     try:
         c = df['close'].iloc[-1]
         for i in range(-20, -5):
             try:
                 ls = df['low'].iloc[i-5:i].min(); head = df['low'].iloc[i:i+5].min()
-                rs = df['low'].iloc[i+5:i+10].min() if i+10<0 else df['low'].iloc[-10:-5].min()
-                neck = df['high'].iloc[i-5:i+10].max() if i+10<0 else df['high'].iloc[-15:].max()
-                if head < ls*0.99 and head < rs*0.99:
-                    if c > neck: return "INV_H&S_BULL_BREAKOUT", 25
+                rs = df['low'].iloc[-10:-5].min()
+                neck = df['high'].iloc[-15:].max()
+                if head < ls*0.99 and head < rs*0.99 and c > neck: return "INV_H&S_BULL_BREAKOUT", 25
             except: pass
             try:
                 ls = df['high'].iloc[i-5:i].max(); head = df['high'].iloc[i:i+5].max()
-                rs = df['high'].iloc[i+5:i+10].max() if i+10<0 else df['high'].iloc[-10:-5].max()
-                neck = df['low'].iloc[i-5:i+10].min() if i+10<0 else df['low'].iloc[-15:].min()
-                if head > ls*1.01 and head > rs*1.01:
-                    if c < neck: return "H&S_BEAR_BREAKOUT", 25
+                rs = df['high'].iloc[-10:-5].max()
+                neck = df['low'].iloc[-15:].min()
+                if head > ls*1.01 and head > rs*1.01 and c < neck: return "H&S_BEAR_BREAKOUT", 25
             except: pass
         return "NO_H&S", 0
     except: return "NO_H&S", 0
 
-def check_mw_bos_fvg(df_15m, df_1h):
+def check_mw_bos_fvg(df15, df1h):
     score=0; sigs=[]
     try:
-        h = df_15m['high'].iloc[-15:]; l = df_15m['low'].iloc[-15:]; c = df_15m['close']
+        h = df15['high'].iloc[-15:]; l = df15['low'].iloc[-15:]; c = df15['close']
         if l.iloc[2] < l.iloc[5]*0.99 and c.iloc[-1] > c.iloc[-5:-1].max(): sigs.append("W_PATTERN"); score+=15
         elif h.iloc[2] > h.iloc[5]*0.99 and c.iloc[-1] < c.iloc[-5:-1].min(): sigs.append("M_PATTERN"); score+=15
     except: pass
     try:
-        if df_1h['close'].iloc[-1] > df_1h['high'].iloc[-20:-1].max(): sigs.append("BOS_UP"); score+=15
-        elif df_1h['close'].iloc[-1] < df_1h['low'].iloc[-20:-1].min(): sigs.append("BOS_DOWN"); score+=15
+        if df1h['close'].iloc[-1] > df1h['high'].iloc[-20:-1].max(): sigs.append("BOS_UP"); score+=15
+        elif df1h['close'].iloc[-1] < df1h['low'].iloc[-20:-1].min(): sigs.append("BOS_DOWN"); score+=15
     except: pass
     try:
-        if df_15m['low'].iloc[-1] > df_15m['high'].iloc[-3]: sigs.append("FVG_BULL"); score+=10
-        if df_15m['high'].iloc[-1] < df_15m['low'].iloc[-3]: sigs.append("FVG_BEAR"); score+=10
+        if df15['low'].iloc[-1] > df15['high'].iloc[-3]: sigs.append("FVG_BULL"); score+=10
+        if df15['high'].iloc[-1] < df15['low'].iloc[-3]: sigs.append("FVG_BEAR"); score+=10
     except: pass
     return sigs, score
 
-def calc_sl_tp(entry, sig, df_1h):
+def calc_sl_tp(entry, sig, df1h):
     try:
-        atr = (df_1h['high']-df_1h['low']).rolling(14).mean().iloc[-1]
-        if pd.is
+        atr = (df1h['high']-df1h['low']).rolling(14).mean().iloc[-1]
+        if np.isnan(atr) or atr==0: atr=entry*0.02
+        if sig=="BUY":
+            sl=df1h['low'].iloc[-10:].min()*0.998
+            if sl>=entry: sl=entry-atr*1.5
+            risk=entry-sl
+            return sl, entry+risk*1.5, entry+risk*3, entry+risk*5, risk
+        else:
+            sl=df1h['high'].iloc[-10:].max()*1.002
+            if sl<=entry: sl=entry+atr*1.5
+            risk=sl-entry
+            return sl, entry-risk*1.5, entry-risk*3, entry-risk*5, risk
+    except:
+        return entry*0.98, entry*1.03, entry*1.06, entry*1.10, entry*0.02
+
+def main():
+    print("=== KILLER FIXED START ===")
+    last = load_cooldown()
+    ex, ex_name = get_exchange()
+    btc_trend,_ = check_btc_filter(ex)
+    print(f"Exchange: {ex_name} | BTC: {btc_trend}")
+
+    for sym in SYMBOLS:
+        if sym in last and datetime.now()-last[sym] < timedelta(hours=COOLDOWN_HOURS): continue
+        df1h = fetch_safe(ex, sym, '1h', 150)
+        if df1h is None:
+            try:
+                alt = ccxt.kucoin() if ex_name=="MEXC" else ccxt.mexc()
+                df1h = fetch_safe(alt, sym, '1h', 150)
+                if df1h is not None: ex=alt; ex_name="KUCOIN" if ex_name=="MEXC" else "MEXC"
+            except: pass
+            if df1h is None: continue
+        df15 = fetch_safe(ex, sym, '15m', 150) or
