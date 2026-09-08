@@ -1,11 +1,11 @@
-name: run-bot
+name: bot
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
-  bot:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -13,7 +13,8 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install ccxt requests numpy pandas
-      - run: python main.py
+      - name: Run python main.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
