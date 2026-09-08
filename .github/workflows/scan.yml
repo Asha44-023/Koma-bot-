@@ -1,25 +1,30 @@
-name: scan
+name: Whale Killer Bot - 15min Scan
+
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 * * * *'  # EVERY 15 MINUTES - MEXC/KUCOIN
   workflow_dispatch:
+
 jobs:
-  build:
+  scan:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - name: Load cooldown memory
-        uses: actions/cache@v4
-        with:
-          path: last_alerts.json
-          key: solid-cooldown
-      - uses: actions/setup-python@v5
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - name: Install deps
-        run: pip install ccxt requests numpy pandas
-      - name: Run Scanner
-        run: python main.py
+
+      - name: Install dependencies
+        run: |
+          pip install ccxt pandas numpy requests
+
+      - name: Run Killer Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python main.py
