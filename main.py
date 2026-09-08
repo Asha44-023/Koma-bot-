@@ -1,72 +1,90 @@
-import os, requests
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-COINS = ["KOMAUSDT", "HEIUSDT", "GRASSUSDT", "BTCUSDT", "SOLUSDT", "ETHUSDT"]
+import ccxt, requests, numpy as np, pandas as pd
 
-def send(t):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": t, "parse_mode": "Markdown"}, timeout=15)
+BOT_TOKEN = "YOUR_BOT_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
+symbols = ["GRASS/USDT", "KOMA/USDT", "HEI/USDT", "SIREN/USDT", "LAB/USDT", "VELVET/USDT"]
+TEST_MODE = False
+
+# ALL EXCHANGES LIST
+exchanges_list = {
+    "binance": ccxt.binance(),
+    "bybit": ccxt.bybit(),
+    "okx": ccxt.okx(),
+    "kucoin": ccxt.kucoin(),
+    "gate": ccxt.gate(),
+    "mexc": ccxt.mexc()
+}
+
+def send_telegram(msg):
+    try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}", timeout=10)
     except: pass
 
-def get_mexc(s, interval):
+def get_rsi(prices, period=14):
+    deltas = np.diff(prices); ups = deltas.clip(min=0); downs = -1*deltas.clip(max=0)
+    ma_up = pd.Series(ups).rolling(period).mean().iloc[-1]
+    ma_down = pd.Series(downs).rolling(period).mean().iloc[-1]
+    if ma_down == 0: return 50
+    rs = ma_up/ma_down; return 100 - (100/(1+rs))
+
+for sym in symbols:
+    best_price = 0; best_data = None; best_exchange = ""
+
+    # CHECK ALL EXCHANGES FOR THIS COIN
+    for ex_name, ex in exchanges_list.items():
+        try:
+            ohlcv_15m = ex.fetch_ohlcv(sym, '15m', limit=50)
+            if not ohlcv_15m: continue
+            price = ohlcv_15m[-1][4]
+            if price > best_price: # or use volume to find most active
+                best_price = price
+                best_data = ohlcv_15m
+                best_exchange = ex_name
+        except: continue
+
+    if not best_data:
+        print(f"{sym} not found on any exchange"); continue
+
     try:
-        # MEXC interval must be lowercase: 5m,15m,60m,4h
-        r = requests.get(f"https://api.mexc.com/api/v3/klines?symbol={s}&interval={interval}&limit=80", timeout=10).json()
-        if not r or len(r) < 20: return [],[],[],[]
-        return [float(x[4]) for x in r], [float(x[2]) for x in r], [float(x[3]) for x in r], [float(x[5]) for x in r]
-    except: return [],[],[],[]
+        # Use best exchange data for analysis
+        ex = exchanges_list[best_exchange]
+        ohlcv_4h = ex.fetch_ohlcv(sym, '4h', limit=50)
+        ohlcv_1h = ex.fetch_ohlcv(sym, '1h', limit=50)
+        ohlcv_15m = best_data
+        df15 = pd.DataFrame(ohlcv_15m)
+        price = df15[4].iloc[-1]; closes_4h = [x[4] for x in ohlcv_4h]; closes_1h = [x[4] for x in ohlcv_1h]
 
-def get_all_exchanges_price(symbol):
-    prices=[]
-    try:
-        r=requests.get(f"https://api.mexc.com/api/v3/ticker/price?symbol={symbol}", timeout=5).json()
-        prices.append(float(r['price']))
-    except: pass
-    return sum(prices)/len(prices) if prices else 0, prices
+        dir_4h = "UP" if closes_4h[-1] > np.mean(closes_4h[-20:]) else "DOWN"
+        struct_1h = "BOS UP" if closes_1h[-1] > max(closes_1h[-20:-1]) else "BOS DOWN" if closes_1h[-1] < min(closes_1h[-20:-1]) else "RANGE"
+        rsi_15m = get_rsi(df15[4].values)
+        vol = df15[5].values; vol_mult = vol[-1] / np.mean(vol[-20:-1]) if np.mean(vol[-20:-1])>0 else 1
+        vol_ok = vol_mult >= 1.2
+        lows = df15[3].values[-10:]; highs = df15[2].values[-10:]
+        pattern = "W PATTERN" if lows[-1] > lows[-5] else "M PATTERN" if highs[-1] < highs[-5] else "NO PATTERN"
 
-def get_rsi(c, p=14):
-    if len(c)<p+1: return 50
-    g=sum(max(0,c[i]-c[i-1]) for i in range(-p,0))/p
-    l=sum(max(0,c[i-1]-c[i]) for i in range(-p,0))/p
-    return 100-(100/(1+g/(l if l!=0 else 0.001)))
+        # ATR MATH
+        highs_all = df15[2].values; lows_all = df15[3].values; closes_all = df15[4].values
+        tr_list = [max(highs_all[i]-lows_all[i], abs(highs_all[i]-closes_all[i-1]), abs(lows_all[i]-closes_all[i-1])) for i in range(1,len(closes_all))]
+        atr = np.mean(tr_list[-14:]); swing_low = np.min(lows_all[-10:]); swing_high = np.max(highs_all[-10:])
 
-def detect_w_m(lows, highs):
-    if len(lows)<20: return "NONE"
-    l1,l2=min(lows[-20:-10]), min(lows[-10:])
-    h1,h2=max(highs[-20:-10]), max(highs[-10:])
-    if abs(l1-l2)/l1<0.02: return "W PATTERN 🟢"
-    if abs(h1-h2)/h1<0.02: return "M PATTERN 🔴"
-    return "NONE"
+        msg = None
+        if TEST_MODE and sym == "GRASS/USDT":
+            msg = f"✅ TEST {sym} on {best_exchange.upper()} Price:{price:.5f} RSI:{rsi_15m:.1f}"
 
-for coin in COINS:
-    # FIXED INTERVALS HERE!
-    c5,h5,l5,v5 = get_mexc(coin,"5m")
-    c15,h15,l15,v15 = get_mexc(coin,"15m")
-    c1h,h1h,l1h,v1h = get_mexc(coin,"60m") # FIXED WAS 1H
-    c4h,h4h,l4h,v4h = get_mexc(coin,"4h") # FIXED WAS 4H
+        elif dir_4h == "UP" and ("BOS UP" in struct_1h or "W" in pattern):
+            if rsi_15m > 30 and rsi_15m < 75 and vol_ok:
+                sl = swing_low - atr*0.5; risk = price-sl
+                if risk<=0: risk=price*0.03
+                tp1=price+risk*1.5; tp2=price+risk*3; tp3=price+risk*5
+                msg = f"🟢 LONG BUY {sym} [{best_exchange.upper()}]\nPrice:{price:.5f} RSI:{rsi_15m:.1f} Vol x{vol_mult:.1f}\n4H:{dir_4h} 1H:{struct_1h} {pattern}\nSL:{sl:.5f} TP1:{tp1:.5f} TP2:{tp2:.5f} TP3:{tp3:.5f}"
 
-    if len(c15)<25 or len(c1h)<25 or len(c4h)<25:
-        print(f"{coin} SKIP {len(c15)}/{len(c1h)}/{len(c4h)} data short")
-        continue
+        elif dir_4h == "DOWN" and ("BOS DOWN" in struct_1h or "M" in pattern):
+            if rsi_15m > 20 and rsi_15m < 70 and vol_ok:
+                sl = swing_high + atr*0.5; risk = sl-price
+                if risk<=0: risk=price*0.03
+                tp1=price-risk*1.5; tp2=price-risk*3; tp3=price-risk*5
+                msg = f"🔴 SHORT SELL {sym} [{best_exchange.upper()}]\nPrice:{price:.5f} RSI:{rsi_15m:.1f} Vol x{vol_mult:.1f}\n4H:{dir_4h} 1H:{struct_1h} {pattern}\nSL:{sl:.5f} TP1:{tp1:.5f} TP2:{tp2:.5f} TP3:{tp3:.5f}"
 
-    price, all_prices = get_all_exchanges_price(coin)
-    if price==0: price=c15[-1]
-    rsi5, rsi15 = get_rsi(c5), get_rsi(c15)
-    pattern = detect_w_m(l15,h15)
-    dir4h = "UP" if c4h[-1] > c4h[-25] else "DOWN"
-    bos_up = price > max(h1h[-20:-1])
-    bos_down = price < min(l1h[-20:-1])
-    struct = "BOS UP" if bos_up else "BOS DOWN" if bos_down else "RANGE"
-    avg_v = sum(v15[-20:])/20
-    vol_ok = v15[-1] > avg_v*1.5
-    news_ok = (c1h[-1]-c1h[-2])/c1h[-2]*100 > -4
+        if msg: print(msg); send_telegram(msg)
+        else: print(f"{sym} NO SIGNAL on {best_exchange} | RSI:{rsi_15m:.0f} Vol:{vol_ok}")
 
-    print(f"{coin} OK | 4H:{dir4h} 1H:{struct} RSI:{rsi15:.0f} Vol:{vol_ok} {pattern} Price:{price}")
-
-    signal=None
-    if dir4h=="UP" and bos_up and 40<=rsi15<=65 and vol_ok and "W" in pattern:
-        signal=f"🟢 *LONG SNIPER {coin}*\nPrice: {price}\n4H Dir: {dir4h} | 1H Struct: {struct}\nRSI 5m:{rsi5:.0f} 15m:{rsi15:.0f} | Vol x{v15[-1]/avg_v:.1f}\nPattern: {pattern}\nTP1 +1.5% TP2 +3.5% TP3 +6% SL -3%"
-    elif dir4h=="DOWN" and bos_down and 35<=rsi15<=62 and vol_ok and "M" in pattern:
-        signal=f"🔴 *SHORT SNIPER {coin}*\nPrice: {price}\n4H Dir: {dir4h} | 1H Struct: {struct}\nRSI 5m:{rsi5:.0f} 15m:{rsi15:.0f} | Vol x{v15[-1]/avg_v:.1f}\nPattern: {pattern}\nTP1 -1.5% TP2 -3.5% TP3 -6% SL +3%"
-
-    if signal:
-        send(signal)
+    except Exception as e: print(f"{sym} Error {e}")
