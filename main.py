@@ -1,159 +1,183 @@
-import requests
-import os
-from datetime import datetime
-
-# === CONFIG ===
-COINS = ["KOMAUSDT", "LABUSDT", "HEIUSDT", "SIRENUSDT", "GRASSUSDT", "VELVETUSDT"]
-INTERVAL = "15m"
-LIMIT = 200
+import os, requests, math
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+print(f"TOKEN SET? {bool(TOKEN)}")
 
-def send_telegram(msg):
-    if not TOKEN or not CHAT_ID:
-        print("Telegram not set")
-        return
+def send(text):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-        print("Telegram sent!")
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
     except Exception as e:
-        print(f"Telegram fail: {e}")
+        print(e)
 
-def calc_ema(data, period):
-    if len(data) < period: return sum(data)/len(data)
-    k = 2 / (period + 1)
-    ema = sum(data[:period]) / period
-    for price in data[period:]:
-        ema = price * k + ema * (1 - k)
-    return ema
+# === CONFIG - YOUR EXACT REQUIREMENTS ===
+SYMBOLS = ["HEIUSDT", "LABUSDT", "SIRENUSDT", "GRASSUSDT", "KOMAUSDT", "VELVETUSDT"]
 
-def calc_rsi(data, period=14):
-    if len(data) < period+1: return 50
-    gains = 0
-    losses = 0
-    for i in range(1, period+1):
-        diff = data[-i] - data[-i-1]
-        if diff > 0: gains += diff
-        else: losses -= diff
-    if losses == 0: return 100
-    rs = gains / losses
-    return 100 - (100 / (1 + rs))
+def get_mexc_klines(symbol, interval, limit=100):
+    # MEXC API - works for your coins
+    try:
+        url = f"https://api.mexc.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        r = requests.get(url, timeout=10).json()
+        # MEXC returns [openTime, open, high, low, close, volume...]
+        return r
+    except:
+        # Fallback to KuCoin
+        ku_interval = {"5m":"5min","15m":"15min","1h":"1hour","4h":"4hour"}[interval]
+        url = f"https://api.kucoin.com/api/v1/market/candles?symbol={symbol.replace('USDT','-USDT')}&type={ku_interval}"
+        r = requests.get(url, timeout=10).json()
+        data = r.get('data', [])
+        data.reverse()
+        # Convert to MEXC format
+        return [[float(x[0]), float(x[1]), float(x[2]), float(x[3]), float(x[4]), float(x[5])] for x in data]
 
-# === WIDE 6 EXCHANGE SEARCH - NEVER BLOCKED ===
-def get_klines(sym, interval, limit=200):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    # 1. MEXC
-    try:
-        url = f"https://api.mexc.com/api/v3/klines?symbol={sym}&interval={interval}&limit={limit}"
-        r = requests.get(url, headers=headers, timeout=10).json()
-        if isinstance(r, list) and len(r)>50:
-            print(f"{sym}: OK MEXC {len(r)}")
-            return [float(x[4]) for x in r], [float(x[2]) for x in r], [float(x[3]) for x in r], [float(x[5]) for x in r]
-    except: pass
-    # 2. OKX
-    try:
-        okx_sym = sym.replace("USDT","-USDT")
-        url = f"https://www.okx.com/api/v5/market/candles?instId={okx_sym}&bar={interval}&limit={limit}"
-        r = requests.get(url, headers=headers, timeout=10).json()
-        data = r.get("data",[])
-        if data and len(data)>50:
-            data = data[::-1]
-            print(f"{sym}: OK OKX {len(data)}")
-            return [float(x[4]) for x in data], [float(x[2]) for x in data], [float(x[3]) for x in data], [float(x[5]) for x in data]
-    except: pass
-    # 3. GATE.IO
-    try:
-        gate_sym = sym.replace("USDT","_USDT")
-        url = f"https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair={gate_sym}&interval={interval}&limit={limit}"
-        r = requests.get(url, headers=headers, timeout=10).json()
-        if isinstance(r, list) and len(r)>50:
-            r = r[::-1]
-            print(f"{sym}: OK GATE {len(r)}")
-            return [float(x[2]) for x in r], [float(x[3]) for x in r], [float(x[4]) for x in r], [float(x[5]) for x in r]
-    except: pass
-    # 4. KUCOIN
-    try:
-        ku_sym = sym.replace("USDT","-USDT")
-        k_interval = "15min" if interval=="15m" else interval
-        url = f"https://api.kucoin.com/api/v1/market/candles?type={k_interval}&symbol={ku_sym}&startAt=0"
-        r = requests.get(url, headers=headers, timeout=10).json()
-        data = r.get("data",[])
-        if data and len(data)>50:
-            data = data[::-1]
-            print(f"{sym}: OK KUCOIN {len(data)}")
-            return [float(x[2]) for x in data], [float(x[3]) for x in data], [float(x[4]) for x in data], [float(x[5]) for x in data]
-    except: pass
-    # 5. BINANCE VISION
-    try:
-        url = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}&interval={interval}&limit={limit}"
-        r = requests.get(url, headers=headers, timeout=10).json()
-        if isinstance(r, list) and len(r)>50:
-            print(f"{sym}: OK VISION {len(r)}")
-            return [float(x[4]) for x in r], [float(x[2]) for x in r], [float(x[3]) for x in r], [float(x[5]) for x in r]
-    except: pass
-    # 6. BYBIT
-    try:
-        by_int = interval.replace("m","")
-        url = f"https://api.bybit.com/v5/market/kline?category=spot&symbol={sym}&interval={by_int}&limit={limit}"
-        r = requests.get(url, headers=headers, timeout=10).json()
-        data = r.get("result",{}).get("list",[])
-        if data and len(data)>50:
-            data = data[::-1]
-            print(f"{sym}: OK BYBIT {len(data)}")
-            return [float(x[4]) for x in data], [float(x[2]) for x in data], [float(x[3]) for x in data], [float(x[5]) for x in data]
-    except: pass
+def ema(prices, period):
+    k = 2/(period+1)
+    ema_vals = [sum(prices[:period])/period]
+    for p in prices[period:]:
+        ema_vals.append(p*k + ema_vals[-1]*(1-k))
+    return ema_vals
 
-    print(f"{sym}: ALL 6 FAILED")
-    return None,None,None,None
+def rsi(prices, period=14):
+    deltas = [prices[i]-prices[i-1] for i in range(1,len(prices))]
+    gains = [d if d>0 else 0 for d in deltas]
+    losses = [-d if d<0 else 0 for d in deltas]
+    avg_gain = sum(gains[:period])/period
+    avg_loss = sum(losses[:period])/period
+    if avg_loss==0: return 100
+    rs = avg_gain/avg_loss
+    return 100 - (100/(1+rs))
+
+def detect_patterns(highs, lows, closes):
+    patterns = []
+    # Double Top
+    if highs[-1] < highs[-2] and highs[-3] < highs[-2] and abs(highs[-2]-highs[-4]) < highs[-2]*0.01:
+        patterns.append("DOUBLE TOP 🔴")
+    # Double Bottom
+    if lows[-1] > lows[-2] and lows[-3] > lows[-2] and abs(lows[-2]-lows[-4]) < lows[-2]*0.01:
+        patterns.append("DOUBLE BOTTOM 🟢")
+    # Triple Top/Bottom
+    if abs(highs[-1]-highs[-3])<highs[-1]*0.008 and abs(highs[-3]-highs[-5])<highs[-1]*0.008 and highs[-2]<highs[-1]:
+        patterns.append("TRIPLE TOP 🔴")
+    if abs(lows[-1]-lows[-3])<lows[-1]*0.008 and abs(lows[-3]-lows[-5])<lows[-1]*0.008 and lows[-2]>lows[-1]:
+        patterns.append("TRIPLE BOTTOM 🟢")
+    return patterns
+
+def check_bos(highs, lows):
+    # Break of Structure
+    if highs[-1] > max(highs[-10:-1]):
+        return "BOS BULLISH 🟢 - Breaks last High"
+    if lows[-1] < min(lows[-10:-1]):
+        return "BOS BEARISH 🔴 - Breaks last Low"
+    return None
 
 # === MAIN SCAN ===
-print(f"--- BOT START {datetime.utcnow()} UTC ---")
-print(f"TOKEN SET? {bool(TOKEN)} CHAT_ID SET? {bool(CHAT_ID)}")
+send("🤖 *KOMA SNIPER v2 Started*\nScanning HEI,LAB,SIREN,GRASS,KOMA,VELVET\n5m/15m Entry + 1H Structure + 4H Direction")
 
-for sym in COINS:
-    closes, highs, lows, vols = get_klines(sym, INTERVAL, LIMIT)
-    if not closes:
-        print(f"{sym}: SKIP - No data")
-        continue
+for symbol in SYMBOLS:
+    try:
+        k_5m = get_mexc_klines(symbol, "5m", 100)
+        k_15m = get_mexc_klines(symbol, "15m", 100)
+        k_1h = get_mexc_klines(symbol, "1h", 100)
+        k_4h = get_mexc_klines(symbol, "4h", 100)
 
-    price = closes[-1]
-    ema20 = calc_ema(closes, 20)
-    ema50 = calc_ema(closes, 50)
-    rsi = calc_rsi(closes)
-    avg_vol = sum(vols[-20:-1])/19 if len(vols)>20 else 1
-    vol_ratio = vols[-1]/avg_vol if avg_vol>0 else 1
-    bos_up = highs[-1] > max(highs[-20:-1]) if len(highs)>20 else False
-    bos_down = lows[-1] < min(lows[-20:-1]) if len(lows)>20 else False
+        if not k_5m or len(k_5m)<50: continue
 
-    print(f"{sym}: P={price:.6f} EMA20={ema20:.6f} EMA50={ema50:.6f} RSI={rsi:.1f} VOL={vol_ratio:.2f}x BOS_UP={bos_up} BOS_DOWN={bos_down}")
+        c_5m = [float(x[4]) for x in k_5m]
+        h_5m = [float(x[2]) for x in k_5m]
+        l_5m = [float(x[3]) for x in k_5m]
+        v_5m = [float(x[5]) for x in k_5m]
 
-    signal = None
-    sl = None
-    tp = None
+        c_15m = [float(x[4]) for x in k_15m]
+        c_1h = [float(x[4]) for x in k_1h]
+        c_4h = [float(x[4]) for x in k_4h]
 
-    # 🟢 BUY
-    if price > ema50 and ema20 > ema50 and bos_up and vol_ratio >= 1.2 and 38 <= rsi <= 70:
-        sl = min(lows[-5:]) * 0.99
-        risk = price - sl
-        tp = price + (risk * 2.5) if risk>0 else price*1.05
-        signal = "BUY"
+        # Indicators
+        ema9_15 = ema(c_15m, 9)[-1]
+        ema21_15 = ema(c_15m, 21)[-1]
+        ema50_1h = ema(c_1h, 50)[-1]
+        ema200_4h = ema(c_4h, 200)[-1] if len(c_4h)>=200 else ema(c_4h, 50)[-1]
+        rsi_15 = rsi(c_15m)
+        rsi_1h = rsi(c_1h)
 
-    # 🔴 SELL
-    elif price < ema50 and ema20 < ema50 and bos_down and vol_ratio >= 1.2 and 30 <= rsi <= 62:
-        sl = max(highs[-5:]) * 1.01
-        risk = sl - price
-        tp = price - (risk * 2.5) if risk>0 else price*0.95
-        signal = "SELL"
+        price = c_5m[-1]
+        avg_vol = sum(v_5m[-20:-1])/19
+        curr_vol = v_5m[-1]
+        vol_spike = curr_vol / avg_vol if avg_vol>0 else 1
 
-    if signal:
-        emoji = "🟢" if signal=="BUY" else "🔴"
-        msg = f"{emoji} {signal} A+ {sym} {INTERVAL}\nPrice: {price}\nEMA20: {ema20:.6f} EMA50: {ema50:.6f}\nRSI: {rsi:.1f} VOL: {vol_ratio:.2f}x\nSL: {sl:.6f}\nTP: {tp:.6f}\nTime: {datetime.utcnow().strftime('%H:%M UTC')}"
-        send_telegram(msg)
-        print(f" -> {signal} SENT!")
-    else:
-        print(f" -> SKIP - No A+")
+        # Structure
+        bos = check_bos(h_5m, l_5m)
+        patterns = detect_patterns(h_5m, l_5m, c_5m)
 
-print("--- SCAN DONE ---")
-send_telegram(f"✅ Scan done {datetime.utcnow().strftime('%H:%M UTC')} - Checked {len(COINS)} coins. No A+ yet." if True else "")
+        # 4H Direction
+        direction_4h = "BULLISH" if c_4h[-1] > ema200_4h else "BEARISH"
+        # 1H Structure
+        structure_1h = "BULLISH" if c_1h[-1] > ema50_1h else "BEARISH"
+
+        # === SNIPER ENTRY LOGIC ===
+        buy_cond = 0
+        sell_cond = 0
+
+        # Conditions for BUY
+        if ema9_15 > ema21_15: buy_cond+=1
+        if rsi_15 > 45 and rsi_15 < 68: buy_cond+=1
+        if structure_1h=="BULLISH": buy_cond+=1
+        if direction_4h=="BULLISH": buy_cond+=1
+        if vol_spike > 1.2: buy_cond+=1
+        if bos and "BULLISH" in bos: buy_cond+=1
+        if any("BOTTOM" in p for p in patterns): buy_cond+=1
+
+        # Conditions for SELL
+        if ema9_15 < ema21_15: sell_cond+=1
+        if rsi_15 < 55 and rsi_15 > 32: sell_cond+=1
+        if structure_1h=="BEARISH": sell_cond+=1
+        if direction_4h=="BEARISH": sell_cond+=1
+        if vol_spike > 1.2: sell_cond+=1
+        if bos and "BEARISH" in bos: sell_cond+=1
+        if any("TOP" in p for p in patterns): sell_cond+=1
+
+        # PRECISE TP/SL MATH
+        atr = sum([h_5m[i]-l_5m[i] for i in range(-14,0)])/14
+        if buy_cond >=5: # High precision entry
+            sl = price - atr*1.5
+            tp1 = price + atr*1.5
+            tp2 = price + atr*3
+            tp3 = price + atr*4.5
+            profit_pct = ((tp2-price)/price)*100
+            risk_pct = ((price-sl)/price)*100
+            msg = f"🟢 *BUY SIGNAL - {symbol}* 🟢\n\n"
+            msg+= f"💰 Entry: `{price:.6f}`\n"
+            msg+= f"📉 SL: `{sl:.6f}` (-{risk_pct:.2f}%)\n"
+            msg+= f"🎯 TP1: `{tp1:.6f}`\n🎯 TP2: `{tp2:.6f}` (+{profit_pct:.2f}%)\n🎯 TP3: `{tp3:.6f}`\n\n"
+            msg+= f"📊 *Analysis:*\n5m/15m: EMA9 {ema9_15:.4f} > EMA21 {ema21_15:.4f} ✅\n"
+            msg+= f"1H Structure: {structure_1h} {ema50_1h:.4f}\n"
+            msg+= f"4H Direction: {direction_4h} ✅\n"
+            msg+= f"RSI 15m: {rsi_15:.1f} | 1H: {rsi_1h:.1f}\n"
+            msg+= f"BOS: {bos if bos else 'Consolidation'}\n"
+            msg+= f"Pattern: {', '.join(patterns) if patterns else 'EMA Cross + Volume'}\n"
+            msg+= f"Volume: {vol_spike:.2f}x {'Spike 🟢' if vol_spike>1.2 else 'Normal'}\n"
+            msg+= f"R/R: 1:{(profit_pct/risk_pct):.1f} | Score: {buy_cond}/7 🔥"
+            send(msg)
+
+        elif sell_cond >=5:
+            sl = price + atr*1.5
+            tp1 = price - atr*1.5
+            tp2 = price - atr*3
+            tp3 = price - atr*4.5
+            profit_pct = ((price-tp2)/price)*100
+            risk_pct = ((sl-price)/price)*100
+            msg = f"🔴 *SELL SIGNAL - {symbol}* 🔴\n\n"
+            msg+= f"💰 Entry: `{price:.6f}`\n"
+            msg+= f"📈 SL: `{sl:.6f}` (-{risk_pct:.2f}%)\n"
+            msg+= f"🎯 TP1: `{tp1:.6f}`\n🎯 TP2: `{tp2:.6f}` (+{profit_pct:.2f}%)\n🎯 TP3: `{tp3:.6f}`\n\n"
+            msg+= f"📊 *Analysis:*\n5m/15m: EMA9 {ema9_15:.4f} < EMA21 {ema21_15:.4f} ✅\n"
+            msg+= f"1H Structure: {structure_1h}\n4H Direction: {direction_4h}\n"
+            msg+= f"RSI 15m: {rsi_15:.1f}\nBOS: {bos}\nPattern: {', '.join(patterns)}\nVolume: {vol_spike:.2f}x\nR/R: 1:{(profit_pct/risk_pct):.1f} | Score: {sell_cond}/7"
+            send(msg)
+
+        print(f"{symbol} {price} - B:{buy_cond} S:{sell_cond} - {patterns}")
+
+    except Exception as e:
+        print(f"{symbol} error: {e}")
+
+send("✅ Scan Complete Boss!")
