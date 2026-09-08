@@ -1,60 +1,20 @@
-import ccxt, requests, os, numpy as np, pandas as pd, time
-from datetime import datetime
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-def send_telegram(msg):
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=10)
-
-def rsi(c, p=14):
-    d = np.diff(c); g = np.where(d>0,d,0); l = np.where(d<0,-d,0)
-    ag = np.mean(g[-p:]); al = np.mean(l[-p:])
-    return 70 if al==0 else 100 - (100/(1+ag/al))
-
-def ema(c, p): return pd.Series(c).ewm(span=p).mean().iloc[-1]
-
-symbols = ["HEI/USDT","LAB/USDT","SIREN/USDT","GRASS/USDT","KOMA/USDT","VELVET/USDT"]
-
-def run_scan():
-    now = datetime.utcnow().strftime("%H:%M UTC")
-    send_telegram(f"BOSS 15M ENTRY SCAN - {now}")
-    ex = ccxt.mexc()
-    for sym in symbols:
-        try:
-            o15 = ex.fetch_ohlcv(sym,'15m',limit=100)
-            o1h = ex.fetch_ohlcv(sym,'1h',limit=100)
-            o4h = ex.fetch_ohlcv(sym,'4h',limit=100)
-            c15 = [x[4] for x in o15]; v15 = [x[5] for x in o15]
-            price = c15[-1]; r = rsi(np.array(c15))
-            e9 = ema(c15,9); e21 = ema(c15,21)
-            vol = v15[-1] / np.mean(v15[-20:]) if np.mean(v15[-20:])>0 else 1
-            t4 = "UP" if o4h[-1][4] > o4h[-20][4] else "DOWN"
-            h1 = max([x[4] for x in o1h[-20:-1]]); l1 = min([x[4] for x in o1h[-20:-1]])
-            s1 = "BOS UP" if o1h[-1][4]>h1 else "BOS DOWN" if o1h[-1][4]<l1 else "RANGE"
-            if t4=="UP" and e9>e21 and r>45 and vol>=1.0:
-                send_telegram(f"🟢 BUY {sym} ENTRY ${price:.5f} 1H {s1} 4H {t4} RSI {r:.0f}")
-            elif t4=="DOWN" and e9<e21 and r<55 and vol>=1.0:
-                send_telegram(f"🔴 SELL {sym} ENTRY ${price:.5f} 1H {s1} 4H {t4} RSI {r:.0f}")
-            else:
-                send_telegram(f"⚪ SKIP {sym} ${price:.5f} {s1} {t4}")
-        except Exception as e: print(e)
-
-# --- 15 MIN CANDLE SYNC LOGIC ---
-def seconds_to_next_15min():
-    now = datetime.utcnow()
-    minute = now.minute
-    next_min = ((minute // 15) + 1) * 15
-    if next_min == 60:
-        next_min = 0
-        wait_min = 60 - minute
-    else:
-        wait_min = next_min - minute
-    wait_sec = wait_min * 60 - now.second
-    return wait_sec + 5 # +5 sec after candle close
-
-while True:
-    wait = seconds_to_next_15min()
-    print(f"Waiting {wait}s to next 15m candle...")
-    time.sleep(wait)
-    run_scan()
+name: scan
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run Scanner
+        run: python main.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
