@@ -14,23 +14,29 @@ def tg(m):
         pass
 
 def rsi(c, p=14):
-    d = np.diff(c)
-    g = np.where(d>0, d, 0)
-    l = np.where(d<0, -d, 0)
-    ag = np.mean(g[-p:])
-    al = np.mean(l[-p:])
-    if al == 0:
-        return 70
-    rs = ag / al
-    return 100 - (100 / (1 + rs))
+    try:
+        d = np.diff(c)
+        g = np.where(d>0, d, 0)
+        l = np.where(d<0, -d, 0)
+        ag = np.mean(g[-p:])
+        al = np.mean(l[-p:])
+        if al == 0:
+            return 50
+        rs = ag / al
+        return 100 - (100 / (1 + rs))
+    except:
+        return 50
 
 def ema(c, p):
-    return pd.Series(c).ewm(span=p).mean().iloc[-1]
+    try:
+        return pd.Series(c).ewm(span=p).mean().iloc[-1]
+    except:
+        return c[-1]
 
 ex = ccxt.mexc()
 syms = ["HEI/USDT","LAB/USDT","SIREN/USDT","GRASS/USDT","KOMA/USDT"]
 
-tg("🚀 MEXC SCAN STARTED - Fixed Version")
+tg("🚀 SCAN PRO STARTED - TP/SL Edition")
 
 for sym in syms:
     try:
@@ -45,7 +51,9 @@ for sym in syms:
         r = rsi(np.array(c15))
         e9 = ema(c15, 9)
         e21 = ema(c15, 21)
-        vol = v15[-1] / np.mean(v15[-20:])
+
+        avg_vol = np.mean(v15[-20:]) if len(v15)>=20 else 1
+        vol = v15[-1] / avg_vol if avg_vol>0 else 1.0
 
         trend = "UP" if o4h[-1][4] > o4h[-20][4] else "DOWN"
         h1 = max([x[4] for x in o1h[-20:-1]])
@@ -71,29 +79,38 @@ for sym in syms:
         if 32 < r < 55:
             sell += 20
 
-        if vol >= 1.2:
-            buy += 15
-            sell += 15
+        if vol >= 1.1:
+            buy += 10
+            sell += 10
 
         if bos == "BOS UP":
-            buy += 20
+            buy += 25
         if bos == "BOS DOWN":
-            sell += 20
+            sell += 25
 
         if trend == "UP":
             buy += 15
         if trend == "DOWN":
             sell += 15
 
+        # TP SL
+        sl_buy = price * 0.93
+        tp1_buy = price * 1.08
+        tp2_buy = price * 1.15
+
+        sl_sell = price * 1.07
+        tp1_sell = price * 0.92
+        tp2_sell = price * 0.85
+
         if buy >= 65:
-            tg(f"🟢 BUY {sym} {buy}/100 Price ${price:.6f} RSI {r:.0f} {bos} 4H {trend} VOL x{vol:.1f}")
+            tg(f"🟢 BUY {sym} {buy}/100\nPrice ${price:.6f} RSI {r:.0f}\n{bos} 4H {trend} VOL x{vol:.1f}\nSL ${sl_buy:.6f} TP1 ${tp1_buy:.6f} TP2 ${tp2_buy:.6f}")
         elif sell >= 65:
-            tg(f"🔴 SELL {sym} {sell}/100 Price ${price:.6f} RSI {r:.0f} {bos} 4H {trend} VOL x{vol:.1f}")
+            tg(f"🔴 SELL {sym} {sell}/100\nPrice ${price:.6f} RSI {r:.0f}\n{bos} 4H {trend} VOL x{vol:.1f}\nSL ${sl_sell:.6f} TP1 ${tp1_sell:.6f} TP2 ${tp2_sell:.6f}")
         else:
-            tg(f"⚪ SKIP {sym} BUY {buy} SELL {sell} RSI {r:.0f}")
+            tg(f"⚪ SKIP {sym} B{buy} S{sell} RSI {r:.0f} VOL x{vol:.1f}")
 
     except Exception as e:
         print(f"Error {sym}: {e}")
         continue
 
-tg("✅ SCAN DONE")
+tg("✅ PRO SCAN DONE")
