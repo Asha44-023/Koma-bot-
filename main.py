@@ -7,30 +7,22 @@ CHAT = os.getenv("TELEGRAM_CHAT_ID")
 MIN_SCORE = 45
 COOLDOWN_FILE = "last_alerts.json"
 TRADES_FILE = "trades.json"
-COOLDOWN_HOURS = 1
+COOLDOWN_HOURS = 2
 SYMBOLS = ["VELVET/USDT:USDT", "KOMA/USDT:USDT", "GRASS/USDT:USDT", "SIREN/USDT:USDT", "HEI/USDT:USDT", "LAB/USDT:USDT"]
 
-# === INJECTED - UNIVERSAL TREND FILTER (READ-ONLY, SAFE) ===
 def get_24h_change(mexc_symbol):
     try:
         clean = mexc_symbol.replace("/", "").replace(":USDT","").replace(":","")
-        if not clean.endswith("USDT"):
-            clean = clean + "USDT"
+        if not clean.endswith("USDT"): clean = clean + "USDT"
         url = f"https://api.mexc.com/api/v3/ticker/24hr?symbol={clean}"
         data = requests.get(url, timeout=5).json()
-        change = float(data.get('priceChangePercent', 0))
-        return change
-    except:
-        return 0.0
+        return float(data.get('priceChangePercent', 0))
+    except: return 0.0
 
 def should_take_signal(mexc_sym, signal_type):
     daily_change = get_24h_change(mexc_sym)
-    if signal_type == "SHORT" and daily_change > 8.0:
-        print(f"SKIP {mexc_sym} SHORT Pump +{daily_change:.1f}%")
-        return False
-    if signal_type == "LONG" and daily_change < -8.0:
-        print(f"SKIP {mexc_sym} LONG Dump {daily_change:.1f}%")
-        return False
+    if signal_type == "SHORT" and daily_change > 8.0: return False
+    if signal_type == "LONG" and daily_change < -8.0: return False
     if abs(daily_change) > 10:
         if daily_change > 10 and signal_type == "LONG": return True
         if daily_change < -10 and signal_type == "SHORT": return True
@@ -250,11 +242,10 @@ def calc_sl_tp(entry, sig, df1h):
     except: return entry*0.98, entry*1.03, entry*1.06, entry*1.10
 
 def main():
-    print("=== V6 PRO MAX + TREND FILTER ===")
+    print("=== V6.2 FINAL NO-DUP FIXED ===")
     last = load_cooldown(); trades = load_trades(); still_open = {}
     ex, ex_name = get_exchange(); btc_trend = check_btc(ex)
     print(f"Exchange: {ex_name} BTC: {btc_trend}")
-
     for sym, data in trades.items():
         df1h_g = fetch_safe(ex, sym, "1h", 100); df15_g = fetch_safe(ex, sym, "15m", 100)
         if df1h_g is None or df15_g is None: still_open[sym]=data; continue
@@ -264,17 +255,19 @@ def main():
         pnl = (curr_price-entry_price)/entry_price*100 if entry_type=="BUY" else (entry_price-curr_price)/entry_price*100
         shift_score, shift_reasons = check_market_shift(df15_g, df1h_g, entry_type)
         if shift_score >= 40:
-            tg(f"🚨 *{sym.replace(':USDT','')} FLIP ALERT - CLOSE {entry_type}* 🚨\nScore: {shift_score}/100\nWhy: {', '.join(shift_reasons)}\nEntry: {entry_price:.6f} Now: {curr_price:.6f} PnL: {pnl:.2f}%\nOpen: {hours_open:.1f}h ago\nACTION: Close 50-100%, SL to BE!")
+            tg(f"FLIP ALERT {sym} CLOSE {entry_type} Score {shift_score} PnL {pnl:.2f}%")
             if shift_score < 70: still_open[sym]=data
         elif hours_open > 3 and abs(pnl) < 1.0 and shift_score>=20:
-            tg(f"⚠️ *{sym.replace(':USDT','')} NEUTRAL SHIFT* ⚠️\nStuck {hours_open:.1f}h, PnL {pnl:.2f}%\nReasons: {', '.join(shift_reasons) if shift_reasons else ['NO_MOMENTUM']}\nACTION: Take partials + BE!")
+            tg(f"NEUTRAL SHIFT {sym} Stuck {hours_open:.1f}h PnL {pnl:.2f}%")
             if hours_open < 24: still_open[sym]=data
         else:
             if hours_open < 48: still_open[sym]=data
     save_trades(still_open)
-
+    sent_this_run = set()
     for sym in SYMBOLS:
         if sym in last and datetime.now()-last[sym] < timedelta(hours=COOLDOWN_HOURS): continue
+        if sym in still_open: continue
+        if sym in sent_this_run: continue
         df1h = fetch_safe(ex, sym, "1h", 150)
         if df1h is None: continue
         df15 = fetch_safe(ex, sym, "15m", 150)
@@ -284,7 +277,6 @@ def main():
         entry = df5['close'].iloc[-1]
         total=0; triggers=[]; sig=None
         triggers.append(ex_name); triggers.append(btc_trend)
-
         hs, hs_s = check_hs(df1h)
         if hs_s>0: triggers.append(hs); total+=hs_s; sig="BUY" if "BULL" in hs else "SELL" if "BEAR" in hs else sig
         liq, liq_s = check_liq(df15)
@@ -299,18 +291,12 @@ def main():
         if sig is None:
             if "W_PATTERN" in mw_sigs or "BOS_UP" in mw_sigs or "FVG_BULL" in mw_sigs: sig="BUY"
             if "M_PATTERN" in mw_sigs or "BOS_DOWN" in mw_sigs or "FVG_BEAR" in mw_sigs: sig="SELL"
-
         ob, ob_s = check_order_block(df15)
         if ob_s>0: triggers.append(ob); total+=ob_s; sig="BUY" if "BULL" in ob else "SELL" if "BEAR" in ob else sig
         eq, eq_s = check_equal_levels(df15)
         if eq_s>0: triggers.append(eq); total+=eq_s; sig="BUY" if "BULL" in eq else "SELL"
-
         tur, tur_s = check_turtle_soup(df15)
-        if tur_s>0:
-            triggers.append(tur)
-            total+=tur_s
-            sig="BUY" if "BULL" in tur else "SELL"
-
+        if tur_s>0: triggers.append(tur); total+=tur_s; sig="BUY" if "BULL" in tur else "SELL"
         mss, mss_s = check_mss(df1h)
         if mss_s>0: triggers.append(mss); total+=mss_s; sig="BUY" if "BULL" in mss else "SELL"
         pd_zone, pd_s = check_premium_discount(df1h)
@@ -319,11 +305,9 @@ def main():
         triggers.append(kz); total+=kz_s
         volp, volp_s = check_volume_profile(df15)
         if volp_s>0: triggers.append(volp); total+=volp_s
-
         r = rsi(df15['close']).iloc[-1]
         if r<30: triggers.append("RSI_OS"); total+=15; sig="BUY" if sig is None else sig
         if r>70: triggers.append("RSI_OB"); total+=15; sig="SELL" if sig is None else sig
-
         if sig=="SELL":
             if "DISCOUNT_BULL" in triggers: triggers.remove("DISCOUNT_BULL"); total-=10
             if "RSI_OS" in triggers: triggers.remove("RSI_OS"); total-=15
@@ -338,25 +322,23 @@ def main():
             if "EQ_HIGHS_SWEEP_BEAR" in triggers: triggers.remove("EQ_HIGHS_SWEEP_BEAR"); total-=25
             if "TURTLE_SOUP_BEAR" in triggers: triggers.remove("TURTLE_SOUP_BEAR"); total-=25
             if "VOL_WEAK_BULL_TRAP" in triggers: triggers.remove("VOL_WEAK_BULL_TRAP"); total-=15
-
         if total>100: total=100
         if total<0: total=0
         print(f"{sym} {total}/100 {sig} {triggers}")
-
         if total >= MIN_SCORE and sig is not None:
             if btc_trend=="BTC_BEAR" and sig=="BUY" and total<60: continue
             signal_for_filter = "SHORT" if sig == "SELL" else "LONG"
-            if not should_take_signal(sym, signal_for_filter):
-                print(f"FILTERED {sym} {signal_for_filter}")
-                continue
+            if not should_take_signal(sym, signal_for_filter): continue
+            if sym in sent_this_run: continue
             sl,tp1,tp2,tp3 = calc_sl_tp(entry, sig, df1h)
             clean_sym = sym.replace(":USDT","").replace(":USDT","")
             msg = f"🔥 *{clean_sym} {sig} - {total}/100 PRO MAX ({ex_name})* 🔥\n\nTriggers: {', '.join(triggers[:12])}\nEntry: `{entry:.6f}`\nSL: `{sl:.6f}`\nTP1: `{tp1:.6f}`\nTP2: `{tp2:.6f}`\nTP3: `{tp3:.6f}`\n\nFUTURES + Whale Vision"
             tg(msg)
             last[sym]=datetime.now(); save_cooldown(last)
+            sent_this_run.add(sym)
             still_open[sym] = {"type": sig, "entry": entry, "time": datetime.now().isoformat()}
             save_trades(still_open)
         time.sleep(1.5)
-    print("=== SCAN SUCCESS V6 + TREND FILTER ===")
+    print("=== SCAN SUCCESS V6.2 NO DUP ===")
 
 if __name__ == "__main__": main()
