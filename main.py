@@ -242,7 +242,7 @@ def calc_sl_tp(entry, sig, df1h):
     except: return entry*0.98, entry*1.03, entry*1.06, entry*1.10
 
 def main():
-    print("=== V6.2 FINAL NO-DUP FIXED ===")
+    print("=== V6.3 MANIPULATION FLIP EDITION ===")
     last = load_cooldown(); trades = load_trades(); still_open = {}
     ex, ex_name = get_exchange(); btc_trend = check_btc(ex)
     print(f"Exchange: {ex_name} BTC: {btc_trend}")
@@ -308,6 +308,24 @@ def main():
         r = rsi(df15['close']).iloc[-1]
         if r<30: triggers.append("RSI_OS"); total+=15; sig="BUY" if sig is None else sig
         if r>70: triggers.append("RSI_OB"); total+=15; sig="SELL" if sig is None else sig
+
+        # ===== V6.3 MANIPULATION FLIP - INJECTED ONLY =====
+        is_bear_trap = ("LIQ_HUNT_SELL" in triggers and "WHALE_SPOOF_SELL" in triggers) or ("TURTLE_SOUP_BEAR" in triggers and "WHALE_SPOOF_SELL" in triggers and "EQ_HIGHS_SWEEP_BEAR" in triggers) or ("EQ_HIGHS_SWEEP_BEAR" in triggers and "VOL_WEAK_BEAR_TRAP" in triggers and "WHALE_SPOOF_SELL" in triggers)
+        is_bull_trap = ("LIQ_HUNT_BUY" in triggers and "WHALE_SPOOF_BUY" in triggers) or ("TURTLE_SOUP_BULL" in triggers and "WHALE_SPOOF_BUY" in triggers and "EQ_LOWS_SWEEP_BULL" in triggers) or ("EQ_LOWS_SWEEP_BULL" in triggers and "VOL_WEAK_BULL_TRAP" in triggers and "WHALE_SPOOF_BUY" in triggers)
+        if is_bear_trap and sig == "SELL":
+            sig = "BUY"
+            triggers.append("MANIPULATION_TRAP_BULL_FLIP")
+            triggers.append("FAKE_SELL_REAL_BUY")
+            triggers.append("WHALE_LIQ_GRAB_SHORTS")
+            total = 75
+        if is_bull_trap and sig == "BUY":
+            sig = "SELL"
+            triggers.append("MANIPULATION_TRAP_BEAR_FLIP")
+            triggers.append("FAKE_BUY_REAL_SELL")
+            triggers.append("WHALE_LIQ_GRAB_LONGS")
+            total = 75
+        # ===== END V6.3 INJECTION =====
+
         if sig=="SELL":
             if "DISCOUNT_BULL" in triggers: triggers.remove("DISCOUNT_BULL"); total-=10
             if "RSI_OS" in triggers: triggers.remove("RSI_OS"); total-=15
@@ -332,13 +350,16 @@ def main():
             if sym in sent_this_run: continue
             sl,tp1,tp2,tp3 = calc_sl_tp(entry, sig, df1h)
             clean_sym = sym.replace(":USDT","").replace(":USDT","")
-            msg = f"🔥 *{clean_sym} {sig} - {total}/100 PRO MAX ({ex_name})* 🔥\n\nTriggers: {', '.join(triggers[:12])}\nEntry: `{entry:.6f}`\nSL: `{sl:.6f}`\nTP1: `{tp1:.6f}`\nTP2: `{tp2:.6f}`\nTP3: `{tp3:.6f}`\n\nFUTURES + Whale Vision"
+            if "MANIPULATION_TRAP" in ",".join(triggers):
+                msg = f"⚠️ *MANIPULATION TRAP DETECTED {clean_sym} {sig} - {total}/100* ⚠️\n\nFake {'SELL' if sig=='BUY' else 'BUY'} → Real {sig}\nTriggers: {', '.join(triggers[:14])}\nEntry: `{entry:.6f}`\nSL: `{sl:.6f}`\nTP1: `{tp1:.6f}`\nTP2: `{tp2:.6f}`\nTP3: `{tp3:.6f}`\n\nFUTURES + Whale Vision"
+            else:
+                msg = f"🔥 *{clean_sym} {sig} - {total}/100 PRO MAX ({ex_name})* 🔥\n\nTriggers: {', '.join(triggers[:12])}\nEntry: `{entry:.6f}`\nSL: `{sl:.6f}`\nTP1: `{tp1:.6f}`\nTP2: `{tp2:.6f}`\nTP3: `{tp3:.6f}`\n\nFUTURES + Whale Vision"
             tg(msg)
             last[sym]=datetime.now(); save_cooldown(last)
             sent_this_run.add(sym)
             still_open[sym] = {"type": sig, "entry": entry, "time": datetime.now().isoformat()}
             save_trades(still_open)
         time.sleep(1.5)
-    print("=== SCAN SUCCESS V6.2 NO DUP ===")
+    print("=== SCAN SUCCESS V6.3 FLIP EDITION ===")
 
 if __name__ == "__main__": main()
