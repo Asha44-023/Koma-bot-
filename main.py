@@ -293,7 +293,25 @@ def main():
         if r<30: triggers.append("RSI_OS"); total+=15; sig="BUY" if sig is None else sig
         if r>70: triggers.append("RSI_OB"); total+=15; sig="SELL" if sig is None else sig
 
+        # --- ANTI-CONFLICT FILTER - ONLY NEW PART - NOTHING REMOVED ABOVE ---
+        if sig=="SELL":
+            if "DISCOUNT_BULL" in triggers: triggers.remove("DISCOUNT_BULL"); total-=10
+            if "RSI_OS" in triggers: triggers.remove("RSI_OS"); total-=15
+            if "BULL_OB" in triggers: triggers.remove("BULL_OB"); total-=20
+            if "EQ_LOWS_SWEEP_BULL" in triggers: triggers.remove("EQ_LOWS_SWEEP_BULL"); total-=25
+            if "TURTLE_SOUP_BULL" in triggers: triggers.remove("TURTLE_SOUP_BULL"); total-=25
+            if "VOL_WEAK_BEAR_TRAP" in triggers: triggers.remove("VOL_WEAK_BEAR_TRAP"); total-=15
+        if sig=="BUY":
+            if "PREMIUM_BEAR" in triggers: triggers.remove("PREMIUM_BEAR"); total-=10
+            if "RSI_OB" in triggers: triggers.remove("RSI_OB"); total-=15
+            if "BEAR_OB" in triggers: triggers.remove("BEAR_OB"); total-=20
+            if "EQ_HIGHS_SWEEP_BEAR" in triggers: triggers.remove("EQ_HIGHS_SWEEP_BEAR"); total-=25
+            if "TURTLE_SOUP_BEAR" in triggers: triggers.remove("TURTLE_SOUP_BEAR"); total-=25
+            if "VOL_WEAK_BULL_TRAP" in triggers: triggers.remove("VOL_WEAK_BULL_TRAP"); total-=15
+        # --- END ANTI-CONFLICT ---
+
         if total>100: total=100
+        if total<0: total=0
         print(f"{sym} {total}/100 {sig} {triggers}")
 
         if total >= MIN_SCORE and sig is not None:
