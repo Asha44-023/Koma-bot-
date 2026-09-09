@@ -91,8 +91,8 @@ def pd_c(df):
   h=df['high'].iloc[-50:].max();l=df['low'].iloc[-50:].min();c=df['close'].iloc[-1]
   if c<l+(h-l)*0.25:return "DISCOUNT_BULL",10
   if c>h-(h-l)*0.25:return "PREMIUM_BEAR",10
-  return "EQ",0
- except:return "EQ",0
+  return "EQ_ZONE",0
+ except:return "EQ_ZONE",0
 def kz_c():
  try:
   h=datetime.utcnow().hour
@@ -104,8 +104,8 @@ def kz_c():
 def wh_c(df):
  try:
   avg=df['vol'].iloc[-20:-1].mean();cr=df.iloc[-1];bo=abs(cr['close']-cr['open'])+0.000001;wu=cr['high']-max(cr['open'],cr['close']);wd=min(cr['open'],cr['close'])-cr['low'];rg=cr['high']-cr['low']+0.000001
-  if cr['vol']>avg*2.5 and wd>bo*1.5 and wu<bo*0.5:return "WHALE_BUY",15
-  if cr['vol']>avg*2.5 and wu>bo*1.5 and wd<bo*0.5:return "WHALE_SELL",15
+  if cr['vol']>avg*2.5 and wd>bo*1.5 and wu<bo*0.5:return "WHALE_BUY_WICK",15
+  if cr['vol']>avg*2.5 and wu>bo*1.5 and wd<bo*0.5:return "WHALE_SELL_WICK",15
   if cr['vol']>avg*2 and wu>rg*0.6 and cr['close']<cr['open']*1.001:return "SPOOF_SELL",20
   if cr['vol']>avg*2 and wd>rg*0.6 and cr['close']>cr['open']*0.999:return "SPOOF_BUY",20
   return "NO_WHALE",0
@@ -169,10 +169,7 @@ def main():
  last=lc();tr=lt();still={}
  ex,exn=ge();btc=btc_t(ex)
  for sym,data in tr.items():
-  df1h=fs(ex,sym,"1h",100);df15=fs(ex,sym,"15m",100)
-  if df1h is None or df15 is None:still[sym]=data;continue
-  et=data['type'];ep=data['entry'];tm=datetime.fromisoformat(data['time']);ho=(datetime.now()-tm).total_seconds()/3600;cp=df15['close'].iloc[-1];pnl=(cp-ep)/ep*100 if et=="BUY" else (ep-cp)/ep*100
-  if ho<48:still[sym]=data
+  if (datetime.now()-datetime.fromisoformat(data['time'])).total_seconds()/3600<48:still[sym]=data
  st(still);sent=set()
  for sym in SYMBOLS:
   if sym in last and datetime.now()-last[sym]<timedelta(hours=COOLDOWN_HOURS):continue
@@ -213,18 +210,33 @@ def main():
   r=rsi(df15['close']).iloc[-1]
   if r<30:trigs.append("RSI_OS");total+=15;sig="BUY" if sig is None else sig
   if r>70:trigs.append("RSI_OB");total+=15;sig="SELL" if sig is None else sig
+  # FIX OPPOSITE SIGNALS
+  if sig=="SELL":
+   if "DISCOUNT_BULL" in trigs:trigs.remove("DISCOUNT_BULL");total-=10
+   if "RSI_OS" in trigs:trigs.remove("RSI_OS");total-=15
+   if "BULL_OB" in trigs:trigs.remove("BULL_OB");total-=20
+   if "INV_HS_BULL" in trigs:trigs.remove("INV_HS_BULL");total-=25
+  if sig=="BUY":
+   if "PREMIUM_BEAR" in trigs:trigs.remove("PREMIUM_BEAR");total-=10
+   if "RSI_OB" in trigs:trigs.remove("RSI_OB");total-=15
+   if "BEAR_OB" in trigs:trigs.remove("BEAR_OB");total-=20
+   if "HS_BEAR" in trigs:trigs.remove("HS_BEAR");total-=25
   is_bear=("LIQ_SELL" in trigs and "SPOOF_SELL" in trigs)
   is_bull=("LIQ_BUY" in trigs and "SPOOF_BUY" in trigs)
-  if is_bear and sig=="SELL":sig="BUY";trigs.append("TRAP_BULL_FLIP");total=75
-  if is_bull and sig=="BUY":sig="SELL";trigs.append("TRAP_BEAR_FLIP");total=75
+  if is_bear and sig=="SELL":sig="BUY";trigs.append("REAL_TRAP_BULL");total=75
+  if is_bull and sig=="BUY":sig="SELL";trigs.append("REAL_TRAP_BEAR");total=75
   if total>100:total=100
   if total<0:total=0
   if total>=MIN_SCORE and sig is not None:
    if btc=="BTC_BEAR" and sig=="BUY" and total<60:continue
    if not filt(sym,"SHORT" if sig=="SELL" else "LONG"):continue
    sl,tp1,tp2,tp3=calc(entry,sig,df1h);clean=sym.replace(":USDT","")
-   q="WEAK-SKIP" if total<55 else "GOOD" if total<70 else "STRONG" if total<85 else "MAX"
-   if "TRAP" in ",".join(trigs):q="TRAP-TAKE!"
+   # FIX QUALITY - ONLY REAL TRAP
+   if "REAL_TRAP" in ",".join(trigs):q="TRAP-TAKE!"
+   elif total<55:q="WEAK-SKIP"
+   elif total<70:q="GOOD"
+   elif total<85:q="STRONG"
+   else:q="MAX"
    dc=gc(sym)
    msg=f"{clean} {sig} {total}/100 {q} Price {entry:.6f} ({dc:+.2f}%) SL {sl:.6f} TP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f} {','.join(trigs[:8])}"
    tg(msg);last[sym]=datetime.now();sc(last);sent.add(sym);still[sym]={"type":sig,"entry":entry,"time":datetime.now().isoformat()};st(still)
