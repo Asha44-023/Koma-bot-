@@ -38,7 +38,8 @@ def lt():
 def st(d):
  try:
   with open(TF,"w") as f:json.dump(d,f,default=str)
- except:passdef rsi(c,p=14):
+ except:pass
+def rsi(c,p=14):
  d=c.diff();g=d.where(d>0,0).rolling(p).mean();l=-d.where(d<0,0).rolling(p).mean();return 100-(100/(1+g/l))
 def fs(ex,sym,tf,lim):
  try:
@@ -103,7 +104,8 @@ def kz_c():
   if 13<=h<=16:return "NY_KZ",10
   if 0<=h<=2:return "ASIAN_LOW",-5
   return "NO_KZ",0
- except:return "NO_KZ",0def score(df,ex):
+ except:return "NO_KZ",0
+def score(df,ex):
  s=50;re=[]
  try:
   rs=rsi(df['close']).iloc[-1]
