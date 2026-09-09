@@ -185,7 +185,7 @@ def main():
    if strength=="WEAK":continue
    is_fake="FAKE" if len(fake)>0 else "REAL"
    tag="⚠️ FAKE SETUP" if is_fake=="FAKE" else "✅ REAL SETUP"
-   if is_fake=="FAKE" and total_score<75:continue
+   if is_fake=="FAKE":continue
    msg=f"{action} *{sym} {typ} {strength} ({total_score}/100)*\n{tag}\nPrice: `{price:.5f}`\nSL: `{sl:.5f}` | TP: `{tp:.5f}`\nReasons: {', '.join(re[:6])}\n"
    if fake:msg+=f"Warnings: {', '.join(fake)}\n"
    msg+=f"Exchange: {exn} | {now.strftime('%H:%M UTC')}"
