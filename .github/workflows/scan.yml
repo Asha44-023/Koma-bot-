@@ -2,29 +2,37 @@ name: Whale Killer Bot - 15min Scan
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # EVERY 15 MINUTES - MEXC/KUCOIN
+    - cron: '*/15 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: whale-killer-bot
+  cancel-in-progress: true
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
       - name: Install dependencies
         run: |
           pip install ccxt pandas numpy requests
-
       - name: Run Killer Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python main.py
+      - name: Save cooldown state
+        if: always()
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@bot.com"
+          git add last_alerts.json trades.json || true
+          git commit -m "save bot state [skip ci]" || true
+          git push || true
