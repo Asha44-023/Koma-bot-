@@ -164,7 +164,7 @@ def score_v8(df,ex):
 
 def main():
  ex,exn=ge();ca=lc();tr=lt();now=datetime.utcnow()
- tg(f"🚀 *V8 MIGHTY STARTED* on {exn} | MIN={MIN_SCORE} | 6h Cooldown")
+ tg(f"🚀 *V8 MIGHTY STARTED* on {exn} | MIN={MIN_SCORE} | 1h Cooldown")
  for sym in SYMBOLS:
   try:
    df=fs(ex,sym,"15m",200)
