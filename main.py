@@ -3,10 +3,10 @@ from datetime import datetime,timedelta
 import time
 BOT=os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT=os.getenv("TELEGRAM_CHAT_ID")
-MIN_SCORE=55
+MIN_SCORE=75
 CF="last_alerts.json"
 TF="trades.json"
-COOLDOWN_HOURS=6
+COOLDOWN_HOURS=2
 SYMBOLS=["VELVET/USDT:USDT","KOMA/USDT:USDT","GRASS/USDT:USDT","SIREN/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT"]
 
 def gc(s):
@@ -111,6 +111,41 @@ def pd_c(df):
   return "EQ_ZONE",0,"NONE"
  except:return "EQ_ZONE",0,"NONE"
 
+def liq_sweep_c(df):
+ try:
+  low_wick = min(df['open'].iloc[-1], df['close'].iloc[-1]) - df['low'].iloc[-1]
+  atr = (df['high']-df['low']).rolling(14).mean().iloc[-1]
+  if low_wick > atr*1.5 and df['close'].iloc[-1] > df['open'].iloc[-1]:
+   return "LIQ_SWEEP_BULL",30,"BULL"
+  high_wick = df['high'].iloc[-1] - max(df['open'].iloc[-1], df['close'].iloc[-1])
+  if high_wick > atr*1.5 and df['close'].iloc[-1] < df['open'].iloc[-1]:
+   return "LIQ_SWEEP_BEAR",30,"BEAR"
+  return "NO_SWEEP",0,"NONE"
+ except:return "NO_SWEEP",0,"NONE"
+
+def whale_manip_c(df):
+ try:
+  vol_avg = df['vol'].iloc[-20:-1].mean()
+  vol_now = df['vol'].iloc[-1]
+  price_change = abs(df['close'].iloc[-1]-df['open'].iloc[-1]) / df['open'].iloc[-1]
+  if vol_now > vol_avg*3.0 and price_change < 0.002:
+   return "WHALE_ABSORPTION_FAKE",0,"FAKE"
+  if vol_now > vol_avg*2.5 and df['close'].iloc[-1] > df['open'].iloc[-1] and df['close'].iloc[-1] > df['high'].iloc[-2]:
+   return "WHALE_BUY_REAL",20,"BULL"
+  if vol_now > vol_avg*2.5 and df['close'].iloc[-1] < df['open'].iloc[-1] and df['close'].iloc[-1] < df['low'].iloc[-2]:
+   return "WHALE_SELL_REAL",20,"BEAR"
+  return "NO_WHALE",0,"NONE"
+ except:return "NO_WHALE",0,"NONE"
+
+def fvg_c(df):
+ try:
+  if df['low'].iloc[-1] > df['high'].iloc[-3]:
+   return "BULL_FVG",15,"BULL"
+  if df['high'].iloc[-1] < df['low'].iloc[-3]:
+   return "BEAR_FVG",15,"BEAR"
+  return "NO_FVG",0,"NONE"
+ except:return "NO_FVG",0,"NONE"
+
 def kz_c():
  try:
   h=datetime.utcnow().hour
@@ -127,53 +162,56 @@ def score_v8(df,ex):
   if rs<30:bull+=15;re.append(f"RSI_OVERSOLD_{rs:.0f}")
   elif rs>70:bear+=15;re.append(f"RSI_OVERB_{rs:.0f}")
   else:re.append(f"RSI_{rs:.0f}")
-
   ema20=df['close'].ewm(span=20).mean().iloc[-1];ema50=df['close'].ewm(span=50).mean().iloc[-1]
   if df['close'].iloc[-1]>ema20>ema50:bull+=10;re.append("EMA_BULL")
   elif df['close'].iloc[-1]<ema20<ema50:bear+=10;re.append("EMA_BEAR")
-
   vol_avg=df['vol'].iloc[-20:-1].mean()
   vol_spike=df['vol'].iloc[-1]>vol_avg*1.5
   if vol_spike:
    if df['close'].iloc[-1]>df['open'].iloc[-1]:bull+=10;re.append("VOL_BUY_SPIKE")
    else:bear+=10;re.append("VOL_SELL_SPIKE")
-
-  for func in [ob_c,eq_c,tur_c,mss_c,pd_c]:
+  # --- ALL LIQUIDITY & WHALE ---
+  for func in [ob_c,eq_c,tur_c,mss_c,pd_c,liq_sweep_c,whale_manip_c,fvg_c]:
    name,pts,direct=func(df)
    re.append(name)
+   if direct=="FAKE":
+    fake.append(f"FAKE_{name}_WHALE_TRAP")
+    continue
    if direct=="BULL":bull+=pts
    elif direct=="BEAR":bear+=pts
-
   kname,kpts=kz_c();re.append(kname)
   if kname=="ASIAN_FAKE":fake.append("FAKE_ASIAN_SESSION")
   elif kpts>0:
    if bull>bear:bull+=kpts
    else:bear+=kpts
-
   bt=btc_t(ex);re.append(bt)
   if bt=="BTC_BULL" and bear>bull:fake.append("FAKE_AGAINST_BTC")
   if bt=="BTC_BEAR" and bull>bear:fake.append("FAKE_AGAINST_BTC")
   if bt=="BTC_BULL" and bull>bear:bull+=10
   if bt=="BTC_BEAR" and bear>bull:bear+=10
-
   if abs(bull-bear)<10:fake.append("FAKE_CHOP_NO_CLEAR_DIR")
   if not vol_spike and (bull>20 or bear>20):fake.append("FAKE_NO_VOLUME")
-
  except:pass
  return bull,bear,re,fake
 
 def main():
  ex,exn=ge();ca=lc();tr=lt();now=datetime.utcnow()
- tg(f"🚀 *V8 MIGHTY STARTED* on {exn} | MIN={MIN_SCORE} | 1h Cooldown")
+ tg(f"🚀 *V9 WHALE HUNTER STARTED* on {exn} | MIN={MIN_SCORE} | 2h CD | LIQ+WHALE+FVG")
  for sym in SYMBOLS:
   try:
    df=fs(ex,sym,"15m",200)
-   if df is None:continue
+   if df is None:
+    continue
+   vol_avg = df['vol'].rolling(20).mean().iloc[-1]
+   last_5_vol = df['vol'].iloc[-5:].mean()
+   if last_5_vol < vol_avg * 1.3:
+    continue
    bull,bear,re,fake=score_v8(df,ex)
    total_score=50+max(bull,bear)
-   if total_score<MIN_SCORE:continue
-   if bull>bear:typ="LONG";action="🟢 BUY";score_pts=bull
-   elif bear>bull:typ="SHORT";action="🔴 SELL";score_pts=bear
+   if total_score<MIN_SCORE:
+    continue
+   if bull>bear:typ="LONG";action="🟢 BUY"
+   elif bear>bull:typ="SHORT";action="🔴 SELL"
    else:continue
    if not filt(sym,typ):continue
    key=f"{sym}_{typ}"
@@ -183,15 +221,14 @@ def main():
    tp=price*1.06 if typ=="LONG" else price*0.94
    strength="WEAK" if total_score<60 else "STRONG" if total_score<80 else "MAX"
    if strength=="WEAK":continue
-   is_fake="FAKE" if len(fake)>0 else "REAL"
-   tag="⚠️ FAKE SETUP" if is_fake=="FAKE" else "✅ REAL SETUP"
-   if is_fake=="FAKE":continue
-   msg=f"{action} *{sym} {typ} {strength} ({total_score}/100)*\n{tag}\nPrice: `{price:.5f}`\nSL: `{sl:.5f}` | TP: `{tp:.5f}`\nReasons: {', '.join(re[:6])}\n"
-   if fake:msg+=f"Warnings: {', '.join(fake)}\n"
-   msg+=f"Exchange: {exn} | {now.strftime('%H:%M UTC')}"
+   if len(fake)>0:continue
+   msg=f"{action} *{sym} {typ} {strength} ({total_score}/100)*\n✅ REAL SETUP\nPrice: `{price:.5f}`\nSL: `{sl:.5f}` | TP: `{tp:.5f}`\nReasons: {', '.join(re[:8])}\nExchange: {exn} | {now.strftime('%H:%M UTC')}"
    tg(msg);ca[key]=now;sc(ca)
    if key not in tr:tr[key]={"entry":price,"sl":sl,"tp":tp,"time":now.isoformat(),"score":total_score,"type":typ,"bull":bull,"bear":bear}
    st(tr)
-  except Exception as e:print(f"ERR {sym}: {e}");time.sleep(1)
+  except Exception as e:
+   print(f"ERR {sym}: {e}")
+   time.sleep(1)
 
-if __name__=="__main__":main()
+if __name__=="__main__":
+ main()
