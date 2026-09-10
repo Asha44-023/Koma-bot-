@@ -155,6 +155,46 @@ def kz_c():
   return "NO_KZ",0
  except:return "NO_KZ",0
 
+# --- NEW V9.1 JUNCTION BRAIN - 15M ONLY ---
+def is_consolidating(df):
+ try:
+  last20 = df.tail(20)
+  high = last20['high'].max()
+  low = last20['low'].min()
+  range_pct = (high - low) / low * 100
+  vol_avg = last20['vol'].head(15).mean()
+  vol_now = last20['vol'].tail(5).mean()
+  vol_drop = vol_now < vol_avg * 0.75
+  # Tight box 2.8% + volume drying = junction
+  return range_pct < 2.8 and vol_drop
+ except:return False
+
+def junction_decision(df, position_type):
+ try:
+  if not is_consolidating(df):
+   return None, None
+  rs = rsi(df['close']).iloc[-1]
+  close = df['close'].iloc[-1]
+  ema20 = df['close'].ewm(span=20).mean().iloc[-1]
+
+  if position_type=="LONG":
+   if rs>58 and close>ema20:
+    return "HOLD_BULL", f"🟢 *HOLD LONG* - Bullish box on 15m (RSI {rs:.0f}). Whale reloading, continuation likely. Keep SL, don't exit."
+   elif rs<48 or close<ema20:
+    return "EXIT_WARN", f"🟡 *JUNCTION LONG* - Weak box on 15m (RSI {rs:.0f}). Volume drying, reversal risk. Action: Exit 50% / Move SL to Entry"
+   else:
+    return "HOLD_NEUTRAL", f"⚪ *HOLD NEUTRAL LONG* - Consolidating on 15m (RSI {rs:.0f}). Wait for breakout confirmation."
+
+  if position_type=="SHORT":
+   if rs<42 and close<ema20:
+    return "HOLD_BEAR", f"🔴 *HOLD SHORT* - Bearish box on 15m (RSI {rs:.0f}). Whale distributing, continuation likely. Keep SL."
+   elif rs>52 or close>ema20:
+    return "EXIT_WARN_SHORT", f"🟡 *JUNCTION SHORT* - Weak box on 15m (RSI {rs:.0f}). Short squeeze risk. Action: Exit 50% / Move SL to Entry"
+   else:
+    return "HOLD_NEUTRAL_SHORT", f"⚪ *HOLD NEUTRAL SHORT* - Consolidating on 15m (RSI {rs:.0f}). Wait for breakdown."
+  return None,None
+ except:return None,None
+
 def score_v8(df,ex):
  bull=0;bear=0;re=[];fake=[]
  try:
@@ -170,7 +210,6 @@ def score_v8(df,ex):
   if vol_spike:
    if df['close'].iloc[-1]>df['open'].iloc[-1]:bull+=10;re.append("VOL_BUY_SPIKE")
    else:bear+=10;re.append("VOL_SELL_SPIKE")
-  # --- ALL LIQUIDITY & WHALE ---
   for func in [ob_c,eq_c,tur_c,mss_c,pd_c,liq_sweep_c,whale_manip_c,fvg_c]:
    name,pts,direct=func(df)
    re.append(name)
@@ -196,7 +235,7 @@ def score_v8(df,ex):
 
 def main():
  ex,exn=ge();ca=lc();tr=lt();now=datetime.utcnow()
- 
+
  for sym in SYMBOLS:
   try:
    df=fs(ex,sym,"15m",200)
@@ -229,6 +268,39 @@ def main():
   except Exception as e:
    print(f"ERR {sym}: {e}")
    time.sleep(1)
+
+ # --- NEW: CHECK EXISTING TRADES FOR JUNCTION ---
+ for key, data in list(tr.items()):
+  try:
+   sym = key.split("_")[0] + "/" + key.split("_")[1].split("/")[0] + "/USDT:USDT" if "/USDT" in key else key.split("_")[0]
+   # reconstruct symbol - if fails use direct from key
+   if key.replace(f"_{data['type']}","") in SYMBOLS:
+    sym = key.replace(f"_{data['type']}","")
+   else:
+    # try find symbol in list
+    for s in SYMBOLS:
+     if s.split("/")[0] in key:
+      sym=s
+      break
+
+   df=fs(ex,sym,"15m",200)
+   if df is None:continue
+   typ = data.get("type","LONG")
+   entry = data.get("entry",0)
+   now_price = df['close'].iloc[-1]
+   pnl_pct = (now_price-entry)/entry*100 if typ=="LONG" else (entry-now_price)/entry*100
+
+   decision, j_msg = junction_decision(df, typ)
+   if decision:
+    # cooldown for junction alerts - 1h
+    j_key = f"JUNC_{key}"
+    if j_key in ca and (now-ca[j_key])<timedelta(hours=1):continue
+    full_msg = f"{j_msg}\nCoin: *{sym}*\nEntry: `{entry:.5f}` | Now: `{now_price:.5f}` | PnL: `{pnl_pct:.2f}%`\n15m Junction Box Detected"
+    tg(full_msg)
+    ca[j_key]=now;sc(ca)
+  except Exception as e:
+   print(f"JUNCTION ERR {key}: {e}")
+   continue
 
 if __name__=="__main__":
  main()
