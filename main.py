@@ -204,7 +204,7 @@ def main():
     continue
    vol_avg = df['vol'].rolling(20).mean().iloc[-1]
    last_5_vol = df['vol'].iloc[-5:].mean()
-   if last_5_vol < vol_avg * 1.1:
+   if last_5_vol < vol_avg * 1.3:
     continue
    bull,bear,re,fake=score_v8(df,ex)
    total_score=50+max(bull,bear)
