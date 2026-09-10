@@ -196,7 +196,9 @@ def score_v8(df,ex):
 
 def main():
  ex,exn=ge();ca=lc();tr=lt();now=datetime.utcnow()
- tg(f"🚀 *V9 WHALE HUNTER STARTED* on {exn} | MIN={MIN_SCORE} | 2h CD | LIQ+WHALE+FVG")
+ if not os.path.exists("started.flag"):
+        tg(f"🚀 *V9 WHALE HUNTER STARTED* on {exn}")
+        open("started.flag","w").write("1")
  for sym in SYMBOLS:
   try:
    df=fs(ex,sym,"15m",200)
