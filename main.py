@@ -44,18 +44,22 @@ def get_exchange():
     ex = ccxt.mexc({'apiKey': MEXC_KEY,'secret': MEXC_SECRET,'options': {'defaultType': 'swap'},'enableRateLimit': True})
     return ex
 
-def is_already_in_position(exchange, symbol):
+def close_position(exchange, symbol):
     try:
         positions = exchange.fetch_positions([symbol])
         for p in positions:
             contracts = float(p.get('contracts', 0) or 0)
-            side = p.get('side', '')
-            if abs(contracts) > 0 or side in ['long', 'short']:
-                print(f"⚠️ Already in {symbol} {side} {contracts} - SKIP")
+            if abs(contracts) > 0:
+                side = p.get('side', '')
+                close_side = "sell" if side == "long" else "buy"
+                print(f"🔄 CLOSING {symbol} {side} {contracts} -> {close_side}")
+                exchange.create_market_order(symbol, close_side, abs(contracts), params={"reduceOnly": True})
+                send_telegram(f"🔄 *CLOSED* {symbol} {side.upper()} {contracts} in profit - Flipping!")
+                time.sleep(1)
                 return True
         return False
     except Exception as e:
-        print(f"Pos check error {symbol}: {e}")
+        print(f"Close error {symbol}: {e}")
         return False
 
 def get_killzone():
@@ -80,25 +84,51 @@ def is_best_time_to_trade():
 
 def safe_autopilot_enter(exchange, symbol, side, price, session):
     global TRADED_THIS_RUN
-    if TRADED_THIS_RUN:
-        print(f"⚠️ SKIP {symbol} - Already traded this run")
-        return False
     try:
-        if is_already_in_position(exchange, symbol):
-            send_telegram(f"⚠️ SKIP {symbol} Already in position | Session {session}")
+        positions = exchange.fetch_positions([symbol])
+        has_pos = False
+        pos_side = ""
+        pos_pnl = 0
+        for p in positions:
+            contracts = float(p.get('contracts', 0) or 0)
+            if abs(contracts) > 0:
+                has_pos = True
+                pos_side = p.get('side', '')
+                pos_pnl = float(p.get('unrealizedPnl', 0) or 0)
+                break
+
+        if has_pos:
+            wanted_long = "buy" in side.lower()
+            currently_long = pos_side == "long"
+            if (wanted_long and currently_long) or (not wanted_long and not currently_long):
+                print(f"⚠️ Already same direction {symbol} {pos_side} - SKIP")
+                return False
+            if pos_pnl > 0:
+                print(f"🔄 FLIP {symbol} {pos_side} PnL ${pos_pnl} >0 to {side}")
+                send_telegram(f"🔄 *FLIP SIGNAL* {symbol} {pos_side.upper()} profit ${pos_pnl:.2f} -> {side.upper()} | Session {session}")
+                close_position(exchange, symbol)
+                time.sleep(1)
+            else:
+                print(f"⚠️ {symbol} opposite but PnL ${pos_pnl} negative - HOLD")
+                send_telegram(f"⚠️ HOLD {symbol} {pos_side} PnL ${pos_pnl:.2f} negative - No flip")
+                return False
+
+        if TRADED_THIS_RUN and not has_pos:
+            print(f"⚠️ SKIP {symbol} - Already traded this run")
             return False
+
         qty = int(NOTIONAL / price)
         qty = max(1, min(qty, MAX_QTY_CAP))
         print(f"🚀 TRY {symbol} {side} QTY {qty} = ${NOTIONAL} @ {price} LEV {LEVERAGE}x | {session}")
         try:
             exchange.set_leverage(LEVERAGE, symbol)
             exchange.set_margin_mode('isolated', symbol)
-        except Exception as e:
-            print(f"Lev warning: {e}")
+        except:
+            pass
         order = exchange.create_market_order(symbol, side.lower(), qty)
         TRADED_THIS_RUN = True
-        send_telegram(f"✅ *AUTOPILOT ENTERED* {symbol} {side.upper()} {qty} @ {price}\nSession {session} | Lev {LEVERAGE}x | LOCKED")
-        print(f"✅ ENTERED {symbol} {side} {qty} - LOCK ON")
+        send_telegram(f"✅ *AUTOPILOT ENTERED* {symbol} {side.upper()} {qty} @ {price}\nSession {session} | Lev {LEVERAGE}x {'(FLIP)' if has_pos else '(NEW)'}")
+        print(f"✅ ENTERED {symbol} {side} {qty}")
         return True
     except Exception as e:
         err = str(e)
@@ -109,10 +139,10 @@ def safe_autopilot_enter(exchange, symbol, side, price, session):
                 qty_small = max(1, min(qty_small, 10))
                 order = exchange.create_market_order(symbol, side.lower(), qty_small)
                 TRADED_THIS_RUN = True
-                send_telegram(f"✅ *ENTERED SMALL* {symbol} {side} {qty_small} @ {price} (Retry) | {session} | LOCKED")
+                send_telegram(f"✅ *ENTERED SMALL* {symbol} {side} {qty_small} @ {price} (Retry) | {session}")
                 return True
             except Exception as e2:
-                send_telegram(f"⚠️ *FAILED* {symbol} {err} | Retry: {e2} | {session}")
+                send_telegram(f"⚠️ *FAILED* {symbol} {err} | {e2} | {session}")
                 return False
         else:
             send_telegram(f"⚠️ *FAILED* {symbol} {err} | {session}")
@@ -194,6 +224,14 @@ def scan():
         usdt_free = bal['USDT']['free'] if 'USDT' in bal else bal.get('free', {}).get('USDT', 0)
         print(f"💰 Balance: ${usdt_free}")
         send_telegram(f"💰 *BALANCE* ${usdt_free} | Session {session} {hour_utc}UTC {vol}")
+        positions = exchange.fetch_positions()
+        open_pos = [p for p in positions if float(p.get('contracts', 0) or 0) > 0]
+        for p in open_pos:
+            sym = p['symbol']
+            contracts = p['contracts']
+            entry = p['entryPrice']
+            pnl = p.get('unrealizedPnl', 0)
+            send_telegram(f"📌 *OPEN* {sym} {contracts} @ {entry} PnL ${pnl}")
     except Exception as e:
         print(f"Balance error: {e}")
     for symbol in SYMBOLS:
