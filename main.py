@@ -30,6 +30,10 @@ SYMBOLS = [
  "LAB/USDT:USDT"
 ]
 
+# --- FIXED: FOR 3 LOGIC MONITORING ALL 6 COINS ---
+last_volume = {}
+last_monitor_alert = {}
+
 def ge():
  ex = ccxt.mexc({'enableRateLimit': True})
  return ex, "MEXC-FUT"
@@ -442,7 +446,7 @@ def main():
    print(f"❌ ERR {sym} {e}")
    time.sleep(1)
 
- # ===== FLIP BRAIN + HOLD/TP =====
+ # ===== FIXED FOR ALL 6 COINS - 15 MIN ALERTS =====
  for key,data in list(tr.items()):
   try:
    sym = key.replace(f"_{data['type']}","")
@@ -464,17 +468,32 @@ def main():
    v_name,_,v_dir = vol_profit_c(df, pnl)
    dec, j_msg = junction_decision(df, typ)
 
-   # HOLD/TP Telegram
-   jv_key = f"VOL_{key}_{v_name}"
-   if v_dir!= "NONE" and (jv_key not in ca or (now - ca[jv_key]) > timedelta(hours=1)):
-    if v_dir == "HOLD_LONG": tg(f"HOLD {sym} LONG Vol UP PnL {pnl:.2f}% Keep HOLD Price {now_p:.5f}")
-    if v_dir == "TP_LONG": tg(f"TAKE PROFIT {sym} LONG Vol DOWN PnL {pnl:.2f}% Secure 50% Price {now_p:.5f}")
-    if v_dir == "HOLD_SHORT": tg(f"HOLD {sym} SHORT Vol UP PnL {pnl:.2f}% Keep HOLD")
-    if v_dir == "TP_SHORT": tg(f"TAKE PROFIT {sym} SHORT Vol DOWN PnL {pnl:.2f}%")
-    ca[jv_key] = now
-    sc(ca)
+   now_check = datetime.utcnow()
+   monitor_key = f"MON_{key}_{v_dir}"
+   last_alert = last_monitor_alert.get(monitor_key)
+   can_send = last_alert is None or (now_check - last_alert) > timedelta(minutes=15)
 
-   # --- FLIP CHECK ---
+   if can_send and v_dir!= "NONE":
+       vol_now = df['vol'].iloc[-1]
+       vol_prev = last_volume.get(sym, vol_now)
+       vol_chg = ((vol_now - vol_prev)/vol_prev*100) if vol_prev>0 else 0
+       last_volume[sym] = vol_now
+
+       if v_dir in ["HOLD_LONG","HOLD_SHORT"] and pnl > 0:
+           tg(f"📊 *HOLD* {sym} {typ}\nPrice: {now_p:.5f} | PnL: {pnl:.2f}%\nVol: {vol_chg:.1f}% UP -> Keep HOLDING\n{v_name}")
+           last_monitor_alert[monitor_key] = now_check
+
+       elif v_dir in ["TP_LONG","TP_SHORT"] and pnl > 0.5:
+           tg(f"💰 *TAKE 50%* {sym} {typ}\nPrice: {now_p:.5f} | PnL: {pnl:.2f}%\nVol: {vol_chg:.1f}% DOWN -> Book 50%\n{v_name}")
+           last_monitor_alert[monitor_key] = now_check
+
+       if abs(vol_chg) > 100 and -1 < pnl < 1.0:
+           exit_key = f"EXIT_{key}"
+           if exit_key not in last_monitor_alert or (now_check - last_monitor_alert[exit_key]) > timedelta(minutes=15):
+               tg(f"🚪 *EXIT ALL* {sym} {typ}\nPrice: {now_p:.5f} | PnL: {pnl:.2f}%\nVol EXPLOSION {vol_chg:.1f}% -> CLOSE ALL!")
+               last_monitor_alert[exit_key] = now_check
+
+   # FLIP LOGIC
    should_flip = False
    flip_reason = ""
    if pnl > 0.8 and flip_signal:
@@ -489,36 +508,26 @@ def main():
      flip_reason = f"STRONG OPPOSITE {new_typ} {new_total}/100"
 
    if should_flip:
-    print(f"🔄 FLIP TRIGGER {sym} {typ}->{new_typ} PnL {pnl:.2f}% Reason: {flip_reason}")
-    try:
-     from autopilot import close_position
-     closed = close_position(sym)
-     if closed:
+    from autopilot import close_position
+    closed = close_position(sym)
+    if closed:
       tg(f"🔄 *AUTO FLIPPED*\nClosed {sym} {typ} PnL {pnl:.2f}%\nReason: {flip_reason}\nFlipping to {new_typ}")
       price = df['close'].iloc[-1]
       sl = price*0.97 if new_typ == "LONG" else price*1.03
       tp = price*1.06 if new_typ == "LONG" else price*0.94
       ok = auto_trade(sym, new_typ, sl, tp, new_total)
       if ok:
-       tg(f"🤖 *FLIP EXECUTED* {sym} {new_typ} {new_total}/100 Entry ${price:.5f}")
        new_key = f"{sym}_{new_typ}"
        tr[new_key] = {"entry": price, "type": new_typ, "time": now.isoformat()}
        if key in tr: del tr[key]
        st(tr)
        ca[new_key] = now
        sc(ca)
-       print(f"✅ FLIP SUCCESS {sym} to {new_typ}")
-      else:
-       print(f"❌ FLIP OPEN FAILED {sym}")
-     else:
-      print(f"❌ FLIP CLOSE FAILED {sym}")
-    except Exception as e:
-     print(f"❌ FLIP ERR {e} - did you update autopilot.py?")
     continue
 
    if dec:
     j_key = f"JUNC_{key}"
-    if j_key not in ca or (now - ca[j_key]) > timedelta(hours=1):
+    if j_key not in ca or (now - ca[j_key]) > timedelta(minutes=30):
      full = f"{j_msg}\nCoin: {sym}\nEntry {entry:.5f} Now {now_p:.5f} PnL {pnl:.2f}%"
      tg(full)
      ca[j_key] = now
