@@ -107,16 +107,16 @@ def rsi(c, p=14):
 def fs(ex, sym, tf, lim):
  try:
   o = ex.fetch_ohlcv(sym, tf, limit=lim)
-  if not o:
-   return None
-  if len(o) < 60:
+  if not o or len(o) < 60:
+   print(f"❌ FETCH FAIL {sym} len={len(o) if o else 0}")
    return None
   df = pd.DataFrame(o)
   df.columns = ['ts','open','high','low','close','vol']
   for col in ['close','high','low','open','vol']:
    df[col] = df[col].astype(float)
   return df
- except:
+ except Exception as e:
+  print(f"❌ FETCH ERR {sym}: {e}")
   return None
 
 def btc_t(ex):
@@ -369,6 +369,7 @@ def score_v8(df, ex):
  return bull,bear,re,fake
 
 def main():
+ print(f"🚀 KILLER BOT START {datetime.utcnow()} UTC - {len(SYMBOLS)} coins")
  ex, exn = ge()
  ca = lc()
  tr = lt()
@@ -377,14 +378,18 @@ def main():
   try:
    df = fs(ex, sym, "15m", 200)
    if df is None:
+    print(f"⏭️ {sym} SKIP - No data")
     continue
    va = df['vol'].rolling(20).mean().iloc[-1]
    v5 = df['vol'].iloc[-5:].mean()
    if v5 < va*1.3:
+    print(f"⏭️ {sym} BLOCKED - VOL low {v5:.2f} < {va*1.3:.2f} (1.3x avg)")
     continue
    bull,bear,re,fake = score_v8(df, ex)
    total = 50+max(bull,bear)
+   print(f"📊 {sym} Score {total} Bull {bull} Bear {bear} Reasons: {re}")
    if total < MIN_SCORE:
+    print(f"⏭️ {sym} BLOCKED - Score {total} < {MIN_SCORE}")
     continue
    if bull > bear:
     typ = "LONG"
@@ -393,6 +398,7 @@ def main():
     typ = "SHORT"
     action = "SELL"
    else:
+    print(f"⏭️ {sym} BLOCKED - No clear direction bull={bull} bear={bear}")
     continue
    try:
     price_now = df['close'].iloc[-1]
@@ -411,50 +417,54 @@ def main():
         btc_trend_simple = "DOWN"
     else:
         btc_trend_simple = "NEUTRAL"
-    # FIXED: handle both bool and tuple returns
     filter_result = check_all_filters(price_now, low_24, high_24, low_4, high_4, rsi_now, premium_now, vol_now, vol_avg, btc_trend_simple, typ)
     if isinstance(filter_result, tuple):
         blocked, reason = filter_result
     else:
         blocked = filter_result
-        reason = "Blocked"
+        reason = "Blocked by premium/btc filter"
     if blocked:
-        print(f"FILTER BLOCK {sym} {typ}: {reason}")
+        print(f"🛡️ FILTER BLOCK {sym} {typ}: {reason} Price {price_now:.5f} RSI {rsi_now:.0f}")
         continue
    except Exception as e:
     print(f"Filter err {e} for {sym}")
     continue
    if is_duplicate(sym, 30):
-       print(f"DUPLICATE BLOCK {sym} - sent <30min ago, skip")
+       print(f"⏭️ DUPLICATE BLOCK {sym} - sent <30min ago")
        continue
    if not filt(sym, typ):
+    d = gc(sym)
+    print(f"⏭️ {sym} BLOCKED - 24h change {d:.1f}% extreme")
     continue
    key = f"{sym}_{typ}"
    if key in ca:
     diff = now - ca[key]
     if diff < timedelta(hours=2):
+     print(f"⏭️ {sym} {typ} BLOCKED - Cooldown {diff}")
      continue
    price = df['close'].iloc[-1]
    sl = price*0.97 if typ == "LONG" else price*1.03
    tp = price*1.06 if typ == "LONG" else price*0.94
-   if total < 60:
-    continue
    if len(fake) > 0:
+    print(f"⏭️ {sym} BLOCKED - Fake whale {fake}")
     continue
    strength = "STRONG" if total < 80 else "MAX"
    reasons = ', '.join(re[:6])
    msg = f"{action} {sym} {typ} {strength} ({total}/100)\nPrice: {price:.5f}\nSL: {sl:.5f} TP: {tp:.5f}\nReasons: {reasons}\n{exn}"
    tg(msg)
+   print(f"✅ PASSED & SENT {sym} {typ} {total}/100")
 
-   # ===== AUTO PILOT - FIXED 5 ARGS =====
    if sym in ["KOMA/USDT:USDT", "GRASS/USDT:USDT"] and total >= 75:
        print(f"🤖 AUTO FIRING {sym} {typ} {total}")
        try:
            ok = auto_trade(sym, typ, sl, tp, total)
            if ok:
                tg(f"🤖 *AUTO EXECUTED*\n{sym} {typ} {total}/100\nEntry ${price:.5f} SL ${sl:.5f} TP ${tp:.5f}")
+               print(f"💰 AUTO SUCCESS {sym}")
+           else:
+               print(f"❌ AUTO FAILED {sym} - check MEXC balance/leverage")
        except Exception as e:
-           print(f"Auto trade err {e}")
+           print(f"❌ Auto trade err {e}")
 
    ca[key] = now
    sc(ca)
@@ -462,8 +472,10 @@ def main():
     tr[key] = {"entry": price, "type": typ, "time": now.isoformat()}
    st(tr)
   except Exception as e:
-   print(f"ERR {sym} {e}")
+   print(f"❌ ERR {sym} {e}")
    time.sleep(1)
+
+ # Check existing trades for HOLD/TP
  for key,data in list(tr.items()):
   try:
    sym = key.replace(f"_{data['type']}","")
@@ -485,12 +497,7 @@ def main():
    v_name,_,v_dir = vol_profit_c(df, pnl)
    jv_key = f"VOL_{key}_{v_name}"
    if v_dir!= "NONE":
-    if jv_key not in ca:
-     need_send = True
-    else:
-     diff = now - ca[jv_key]
-     need_send = diff > timedelta(hours=1)
-    if need_send:
+    if jv_key not in ca or (now - ca[jv_key]) > timedelta(hours=1):
      if v_dir == "HOLD_LONG":
       tg(f"HOLD {sym} LONG Vol UP PnL {pnl:.2f}% Keep HOLD Price {now_p:.5f}")
      if v_dir == "TP_LONG":
@@ -504,17 +511,15 @@ def main():
    dec, j_msg = junction_decision(df, typ)
    if dec:
     j_key = f"JUNC_{key}"
-    if j_key in ca:
-     diff = now - ca[j_key]
-     if diff < timedelta(hours=1):
-      continue
-    full = f"{j_msg}\nCoin: {sym}\nEntry {entry:.5f} Now {now_p:.5f} PnL {pnl:.2f}%"
-    tg(full)
-    ca[j_key] = now
-    sc(ca)
+    if j_key not in ca or (now - ca[j_key]) > timedelta(hours=1):
+     full = f"{j_msg}\nCoin: {sym}\nEntry {entry:.5f} Now {now_p:.5f} PnL {pnl:.2f}%"
+     tg(full)
+     ca[j_key] = now
+     sc(ca)
   except Exception as e:
    print(f"JUNC ERR {e}")
    continue
+ print("🏁 SCAN COMPLETE")
 
 if __name__ == "__main__":
  main()
