@@ -60,9 +60,7 @@ def ge():
  try:ex=ccxt.mexc({'enableRateLimit':True,'options':{'defaultType':'swap'}});ex.fetch_ticker("BTC/USDT:USDT");return ex,"MEXC-FUT"
  except:
   try:ex=ccxt.kucoin({'enableRateLimit':True,'options':{'defaultType':'swap'}});ex.fetch_ticker("BTC/USDT:USDT");return ex,"KUCOIN-FUT"
-  except:ex=ccxt.mexc({'enableRateLimit':True});return ex,"MEXC-FUT"
-
-def btc_t(ex):
+  except:ex=ccxt.mexc({'enableRateLimit':True});return ex,"MEXC-FUT" def btc_t(ex):
  try:
   df=fs(ex,"BTC/USDT:USDT","4h",50)
   if df is None:return "BTC_NEUTRAL"
@@ -115,11 +113,9 @@ def liq_sweep_c(df):
  try:
   low_wick = min(df['open'].iloc[-1], df['close'].iloc[-1]) - df['low'].iloc[-1]
   atr = (df['high']-df['low']).rolling(14).mean().iloc[-1]
-  if low_wick > atr*1.5 and df['close'].iloc[-1] > df['open'].iloc[-1]:
-   return "LIQ_SWEEP_BULL",30,"BULL"
+  if low_wick > atr*1.5 and df['close'].iloc[-1] > df['open'].iloc[-1]:return "LIQ_SWEEP_BULL",30,"BULL"
   high_wick = df['high'].iloc[-1] - max(df['open'].iloc[-1], df['close'].iloc[-1])
-  if high_wick > atr*1.5 and df['close'].iloc[-1] < df['open'].iloc[-1]:
-   return "LIQ_SWEEP_BEAR",30,"BEAR"
+  if high_wick > atr*1.5 and df['close'].iloc[-1] < df['open'].iloc[-1]:return "LIQ_SWEEP_BEAR",30,"BEAR"
   return "NO_SWEEP",0,"NONE"
  except:return "NO_SWEEP",0,"NONE"
 
@@ -128,21 +124,16 @@ def whale_manip_c(df):
   vol_avg = df['vol'].iloc[-20:-1].mean()
   vol_now = df['vol'].iloc[-1]
   price_change = abs(df['close'].iloc[-1]-df['open'].iloc[-1]) / df['open'].iloc[-1]
-  if vol_now > vol_avg*3.0 and price_change < 0.002:
-   return "WHALE_ABSORPTION_FAKE",0,"FAKE"
-  if vol_now > vol_avg*2.5 and df['close'].iloc[-1] > df['open'].iloc[-1] and df['close'].iloc[-1] > df['high'].iloc[-2]:
-   return "WHALE_BUY_REAL",20,"BULL"
-  if vol_now > vol_avg*2.5 and df['close'].iloc[-1] < df['open'].iloc[-1] and df['close'].iloc[-1] < df['low'].iloc[-2]:
-   return "WHALE_SELL_REAL",20,"BEAR"
+  if vol_now > vol_avg*3.0 and price_change < 0.002:return "WHALE_ABSORPTION_FAKE",0,"FAKE"
+  if vol_now > vol_avg*2.5 and df['close'].iloc[-1] > df['open'].iloc[-1] and df['close'].iloc[-1] > df['high'].iloc[-2]:return "WHALE_BUY_REAL",20,"BULL"
+  if vol_now > vol_avg*2.5 and df['close'].iloc[-1] < df['open'].iloc[-1] and df['close'].iloc[-1] < df['low'].iloc[-2]:return "WHALE_SELL_REAL",20,"BEAR"
   return "NO_WHALE",0,"NONE"
  except:return "NO_WHALE",0,"NONE"
 
 def fvg_c(df):
  try:
-  if df['low'].iloc[-1] > df['high'].iloc[-3]:
-   return "BULL_FVG",15,"BULL"
-  if df['high'].iloc[-1] < df['low'].iloc[-3]:
-   return "BEAR_FVG",15,"BEAR"
+  if df['low'].iloc[-1] > df['high'].iloc[-3]:return "BULL_FVG",15,"BULL"
+  if df['high'].iloc[-1] < df['low'].iloc[-3]:return "BEAR_FVG",15,"BEAR"
   return "NO_FVG",0,"NONE"
  except:return "NO_FVG",0,"NONE"
 
@@ -153,9 +144,22 @@ def kz_c():
   if 13<=h<=16:return "NY_KZ",10
   if 0<=h<=2:return "ASIAN_FAKE",-5
   return "NO_KZ",0
- except:return "NO_KZ",0
+ except:return "NO_KZ",0 def vol_profit_c(df,pnl):
+ try:
+  if pnl<=0:return "NO_VOL",0,"NONE"
+  vp=df['vol'].iloc[-2]
+  vn=df['vol'].iloc[-1]
+  va=df['vol'].iloc[-20:-1].mean()
+  bull_candle=df['close'].iloc[-1]>df['open'].iloc[-1]
+  if vn>vp*1.30 and vn>va*1.2:
+   if bull_candle:return "VOLBUYINCREASE",15,"HOLD_LONG"
+   else:return "VOLSELLINCREASE",15,"HOLD_SHORT"
+  if vn<vp*0.70:
+   if bull_candle or rsi(df['close']).iloc[-1]>55:return "VOLBUYDECREASE",0,"TP_LONG"
+   else:return "VOLSELLDECREASE",0,"TP_SHORT"
+  return "NO_VOL",0,"NONE"
+ except:return "NO_VOL",0,"NONE"
 
-# --- NEW V9.1 JUNCTION BRAIN - 15M ONLY ---
 def is_consolidating(df):
  try:
   last20 = df.tail(20)
@@ -165,33 +169,23 @@ def is_consolidating(df):
   vol_avg = last20['vol'].head(15).mean()
   vol_now = last20['vol'].tail(5).mean()
   vol_drop = vol_now < vol_avg * 0.75
-  # Tight box 2.8% + volume drying = junction
   return range_pct < 2.8 and vol_drop
  except:return False
 
 def junction_decision(df, position_type):
  try:
-  if not is_consolidating(df):
-   return None, None
+  if not is_consolidating(df):return None, None
   rs = rsi(df['close']).iloc[-1]
   close = df['close'].iloc[-1]
   ema20 = df['close'].ewm(span=20).mean().iloc[-1]
-
   if position_type=="LONG":
-   if rs>58 and close>ema20:
-    return "HOLD_BULL", f"🟢 *HOLD LONG* - Bullish box on 15m (RSI {rs:.0f}). Whale reloading, continuation likely. Keep SL, don't exit."
-   elif rs<48 or close<ema20:
-    return "EXIT_WARN", f"🟡 *JUNCTION LONG* - Weak box on 15m (RSI {rs:.0f}). Volume drying, reversal risk. Action: Exit 50% / Move SL to Entry"
-   else:
-    return "HOLD_NEUTRAL", f"⚪ *HOLD NEUTRAL LONG* - Consolidating on 15m (RSI {rs:.0f}). Wait for breakout confirmation."
-
+   if rs>58 and close>ema20:return "HOLD_BULL", f"🟢 *HOLD LONG* - Bullish box (RSI {rs:.0f})"
+   elif rs<48 or close<ema20:return "EXIT_WARN", f"🟡 *JUNCTION LONG* - Weak box (RSI {rs:.0f}) Exit 50%"
+   else:return "HOLD_NEUTRAL", f"⚪ *HOLD NEUTRAL LONG* - Consolidating (RSI {rs:.0f})"
   if position_type=="SHORT":
-   if rs<42 and close<ema20:
-    return "HOLD_BEAR", f"🔴 *HOLD SHORT* - Bearish box on 15m (RSI {rs:.0f}). Whale distributing, continuation likely. Keep SL."
-   elif rs>52 or close>ema20:
-    return "EXIT_WARN_SHORT", f"🟡 *JUNCTION SHORT* - Weak box on 15m (RSI {rs:.0f}). Short squeeze risk. Action: Exit 50% / Move SL to Entry"
-   else:
-    return "HOLD_NEUTRAL_SHORT", f"⚪ *HOLD NEUTRAL SHORT* - Consolidating on 15m (RSI {rs:.0f}). Wait for breakdown."
+   if rs<42 and close<ema20:return "HOLD_BEAR", f"🔴 *HOLD SHORT* - Bearish box (RSI {rs:.0f})"
+   elif rs>52 or close>ema20:return "EXIT_WARN_SHORT", f"🟡 *JUNCTION SHORT* - Weak box (RSI {rs:.0f})"
+   else:return "HOLD_NEUTRAL_SHORT", f"⚪ *HOLD NEUTRAL SHORT* - Consolidating (RSI {rs:.0f})"
   return None,None
  except:return None,None
 
@@ -213,9 +207,7 @@ def score_v8(df,ex):
   for func in [ob_c,eq_c,tur_c,mss_c,pd_c,liq_sweep_c,whale_manip_c,fvg_c]:
    name,pts,direct=func(df)
    re.append(name)
-   if direct=="FAKE":
-    fake.append(f"FAKE_{name}_WHALE_TRAP")
-    continue
+   if direct=="FAKE":fake.append(f"FAKE_{name}_WHALE_TRAP");continue
    if direct=="BULL":bull+=pts
    elif direct=="BEAR":bear+=pts
   kname,kpts=kz_c();re.append(kname)
@@ -231,24 +223,18 @@ def score_v8(df,ex):
   if abs(bull-bear)<10:fake.append("FAKE_CHOP_NO_CLEAR_DIR")
   if not vol_spike and (bull>20 or bear>20):fake.append("FAKE_NO_VOLUME")
  except:pass
- return bull,bear,re,fake
-
-def main():
+ return bull,bear,re,fake def main():
  ex,exn=ge();ca=lc();tr=lt();now=datetime.utcnow()
-
  for sym in SYMBOLS:
   try:
    df=fs(ex,sym,"15m",200)
-   if df is None:
-    continue
+   if df is None:continue
    vol_avg = df['vol'].rolling(20).mean().iloc[-1]
    last_5_vol = df['vol'].iloc[-5:].mean()
-   if last_5_vol < vol_avg * 1.3:
-    continue
+   if last_5_vol < vol_avg * 1.3:continue
    bull,bear,re,fake=score_v8(df,ex)
    total_score=50+max(bull,bear)
-   if total_score<MIN_SCORE:
-    continue
+   if total_score<MIN_SCORE:continue
    if bull>bear:typ="LONG";action="🟢 BUY"
    elif bear>bull:typ="SHORT";action="🔴 SELL"
    else:continue
@@ -269,35 +255,40 @@ def main():
    print(f"ERR {sym}: {e}")
    time.sleep(1)
 
- # --- NEW: CHECK EXISTING TRADES FOR JUNCTION ---
  for key, data in list(tr.items()):
   try:
-   sym = key.split("_")[0] + "/" + key.split("_")[1].split("/")[0] + "/USDT:USDT" if "/USDT" in key else key.split("_")[0]
-   # reconstruct symbol - if fails use direct from key
-   if key.replace(f"_{data['type']}","") in SYMBOLS:
-    sym = key.replace(f"_{data['type']}","")
-   else:
-    # try find symbol in list
+   sym = key.replace(f"_{data['type']}","")
+   if sym not in SYMBOLS:
     for s in SYMBOLS:
      if s.split("/")[0] in key:
-      sym=s
-      break
-
+      sym=s;break
    df=fs(ex,sym,"15m",200)
    if df is None:continue
    typ = data.get("type","LONG")
    entry = data.get("entry",0)
    now_price = df['close'].iloc[-1]
    pnl_pct = (now_price-entry)/entry*100 if typ=="LONG" else (entry-now_price)/entry*100
-
+   v_name,_,v_dir = vol_profit_c(df,pnl_pct)
+   jv_key = f"VOL_{key}_{v_name}"
+   if v_dir!="NONE" and (jv_key not in ca or (now-ca[jv_key])>timedelta(hours=1)):
+    if v_dir=="HOLD_LONG":
+     tg(f"🟢 *HOLD {sym} LONG - VOLBUYINCREASE*\nPnL: `{pnl_pct:.2f}%` Vol UP - Whale reloading KEEP HOLD\nPrice: {now_price:.5f}")
+     ca[jv_key]=now;sc(ca)
+    elif v_dir=="TP_LONG":
+     tg(f"🟡 *TAKE PROFIT {sym} LONG - VOLBUYDECREASE*\nPnL: `{pnl_pct:.2f}%` Vol DOWN - Dump risk Secure 50%\nPrice: {now_price:.5f}")
+     ca[jv_key]=now;sc(ca)
+    elif v_dir=="HOLD_SHORT":
+     tg(f"🔴 *HOLD {sym} SHORT - VOLSELLINCREASE*\nPnL: `{pnl_pct:.2f}%` Sell Vol UP - KEEP HOLD\nPrice: {now_price:.5f}")
+     ca[jv_key]=now;sc(ca)
+    elif v_dir=="TP_SHORT":
+     tg(f"🟡 *TAKE PROFIT {sym} SHORT - VOLSELLDECREASE*\nPnL: `{pnl_pct:.2f}%` Sell Vol DOWN - Squeeze risk Secure 50%\nPrice: {now_price:.5f}")
+     ca[jv_key]=now;sc(ca)
    decision, j_msg = junction_decision(df, typ)
    if decision:
-    # cooldown for junction alerts - 1h
     j_key = f"JUNC_{key}"
     if j_key in ca and (now-ca[j_key])<timedelta(hours=1):continue
-    full_msg = f"{j_msg}\nCoin: *{sym}*\nEntry: `{entry:.5f}` | Now: `{now_price:.5f}` | PnL: `{pnl_pct:.2f}%`\n15m Junction Box Detected"
-    tg(full_msg)
-    ca[j_key]=now;sc(ca)
+    full_msg = f"{j_msg}\nCoin: *{sym}*\nEntry: `{entry:.5f}` | Now: `{now_price:.5f}` | PnL: `{pnl_pct:.2f}%`\n15m Junction"
+    tg(full_msg);ca[j_key]=now;sc(ca)
   except Exception as e:
    print(f"JUNCTION ERR {key}: {e}")
    continue
