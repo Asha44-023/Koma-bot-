@@ -1,9 +1,15 @@
-import os, ccxt, pandas as pd, requests, time
+import os, ccxt, pandas as pd, requests, time, json
 from datetime import datetime, timezone
 
 BALANCE, TARGET, LEVERAGE, NOTIONAL, MAX_QTY_CAP = 14.99, 10000.0, 10, 3.0, 50
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
-LAST_ALERT = {} # COOLDOWN TRACKER
+
+# PERSISTENT COOLDOWN - NO MORE SPAM EVEN AFTER RESTART
+try:
+    LAST_ALERT = json.load(open("cooldown.json"))
+except:
+    LAST_ALERT = {}
+
 SYMBOLS = ["KOMA/USDT:USDT","GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","VELVET/USDT:USDT"]
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -62,6 +68,8 @@ def can_send(symbol, typ, mins):
     last=LAST_ALERT.get(key,0)
     if now-last>mins*60:
         LAST_ALERT[key]=now
+        try: json.dump(LAST_ALERT, open("cooldown.json","w"))
+        except: pass
         return True
     return False
 
@@ -76,12 +84,10 @@ def detect_whale_manipulation(df):
         body=abs(df['close'].iloc[-1]-df['open'].iloc[-1])
         upper=df['high'].iloc[-1]-max(df['open'].iloc[-1],df['close'].iloc[-1])
         lower=min(df['open'].iloc[-1],df['close'].iloc[-1])-df['low'].iloc[-1]
-
         if vol_ratio>2.0: reasons.append(f"WHALEVOLx{vol_ratio:.1f}")
         elif vol_ratio>1.5: reasons.append(f"VOLUPx{vol_ratio:.1f}")
         elif vol_ratio<0.5: reasons.append(f"VOLDOWNx{vol_ratio:.1f}")
         else: reasons.append(f"VOLx{vol_ratio:.1f}")
-
         if vol_ratio>1.8 and price_change<0.15: reasons.append("LIQABSORPTION")
         if body>0:
             if upper>body*2 and vol_ratio>1.3: reasons.append("BEARLIQGRAB")
@@ -125,7 +131,7 @@ def monitor_profit_rule(exchange,symbol,df,reasons,session):
                 avg=df['volume'].rolling(20).mean().iloc[-1]; last=df['volume'].iloc[-1]; ratio=last/avg if avg>0 else 1
                 if pnl>0.05 and ("WHALEPUMPING" in reasons or "MARKETPUMPING" in reasons) and ratio>1.5:
                     if can_send(symbol,"HOLD_PUMP",30):
-                        send_telegram(f"💎 *HOLD PROFIT* {symbol} {s.upper()} PnL ${pnl:.4f} VOL x{ratio:.1f} PUMPING - Let it run! (General rule)")
+                        send_telegram(f"💎 *HOLD PROFIT* {symbol} {s.upper()} PnL ${pnl:.4f} VOL x{ratio:.1f} PUMPING - Let it run!")
                     return "HOLD"
                 if "LIQABSORPTION" in reasons and pnl>=0:
                     if can_send(symbol,"ABSORPTION",30):
@@ -211,8 +217,6 @@ def scan():
             price=df['close'].iloc[-1]; reasons,mom,rsi=check_filters(df,sym)
             sess,v,h=get_killzone()
             if sess in ["LONDON","NEW YORK"]: reasons.append(f"{sess}KILLZONE")
-            score=85 if "KOMAPUMPOVERRIDE" in reasons or "BULLLIQGRAB" in reasons else 75
-            if "WHALEPUMPING" in reasons: score+=5
             side="BUY LONG" if "BULLOB" in reasons or "WPATTERN" in reasons or "BULLLIQGRAB" in reasons or "WHALEPUMPING" in reasons or "KOMAPUMPOVERRIDE" in reasons else "SELL SHORT"
             if "BEARLIQGRAB" in reasons or "WHALEDUMPING" in reasons: side="SELL SHORT"
             ALL_SIGNALS.append(f"{side} {sym} @ {price:.5f} mom {mom:.1f}% RSI {int(rsi)} | {','.join(reasons)}")
@@ -224,6 +228,6 @@ def scan():
         summary=f"📊 *SCAN {session} {h}UTC {vol}* | Bal ${free}\n$14.99 -> $10000 LEV 10x\n\n" + "\n".join(ALL_SIGNALS)
         send_telegram(summary)
     except: pass
-    print("✅ Done Whale + Cooldown")
+    print("✅ Done Whale + Cooldown Persistent")
 
 if __name__=="__main__": scan()
