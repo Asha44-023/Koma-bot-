@@ -444,7 +444,7 @@ def main():
    tg(msg)
 
    # ===== AUTO PILOT INJECTION - ONLY KOMA + GRASS 80+ =====
-   if sym in ["KOMA/USDT:USDT", "GRASS/USDT:USDT"] and total >= 80:
+   if sym in ["KOMA/USDT:USDT", "GRASS/USDT:USDT"] and total >= 75:
        print(f"🤖 AUTO FIRING {sym} {typ} {total}")
        ok = auto_trade(sym, typ, sl, tp)
        if ok:
