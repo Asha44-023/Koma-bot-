@@ -108,7 +108,7 @@ def fs(ex, sym, tf, lim):
  try:
   o = ex.fetch_ohlcv(sym, tf, limit=lim)
   if not o or len(o) < 60:
-   print(f"❌ FETCH FAIL {sym} len={len(o) if o else 0}")
+   print(f"❌ FETCH FAIL {sym}")
    return None
   df = pd.DataFrame(o)
   df.columns = ['ts','open','high','low','close','vol']
@@ -222,14 +222,12 @@ def liq_sweep_c(df):
  try:
   if df['low'].iloc[-1] < df['low'].iloc[-10:-1].min():
    vol_up = df['vol'].iloc[-1] > df['vol'].iloc[-10:-1].mean()*1.5
-   if vol_up:
-    if df['close'].iloc[-1] > df['low'].iloc[-10:-1].min():
-     return "LIQ_SWEEP_LONG", 30
+   if vol_up and df['close'].iloc[-1] > df['low'].iloc[-10:-1].min():
+    return "LIQ_SWEEP_LONG", 30
   if df['high'].iloc[-1] > df['high'].iloc[-10:-1].max():
    vol_up = df['vol'].iloc[-1] > df['vol'].iloc[-10:-1].mean()*1.5
-   if vol_up:
-    if df['close'].iloc[-1] < df['high'].iloc[-10:-1].max():
-     return "LIQ_SWEEP_SHORT", 30
+   if vol_up and df['close'].iloc[-1] < df['high'].iloc[-10:-1].max():
+    return "LIQ_SWEEP_SHORT", 30
   return "NO_SWEEP", 0
  except:
   return "NO_SWEEP", 0
@@ -289,6 +287,8 @@ def junction_decision(df, pos):
   if pos == "SHORT":
    if rs < 42 and close < ema20:
     return "HOLD_BEAR", f"HOLD SHORT Box RSI {rs:.0f}"
+   if rs > 65:
+    return "EXIT_WARN_SHORT", f"JUNCTION SHORT Weak RSI {rs:.0f} Exit 50%"
   return None,None
  except:
   return None,None
@@ -301,10 +301,8 @@ def score_v8(df, ex):
  try:
   ob_name, ob_pts = ob_c(df)
   if ob_pts > 0:
-   if "BULL" in ob_name:
-    bull += ob_pts
-   else:
-    bear += ob_pts
+   if "BULL" in ob_name: bull += ob_pts
+   else: bear += ob_pts
    re.append(ob_name)
   eq_name, eq_pts = eq_c(df)
   if eq_pts > 0:
@@ -312,51 +310,38 @@ def score_v8(df, ex):
    re.append(eq_name)
   tur_name, tur_pts = tur_c(df)
   if tur_pts > 0:
-   if "LONG" in tur_name:
-    bull += tur_pts
-   else:
-    bear += tur_pts
+   if "LONG" in tur_name: bull += tur_pts
+   else: bear += tur_pts
    re.append(tur_name)
   mss_name, mss_pts = mss_c(df)
   if mss_pts > 0:
-   if "BULL" in mss_name:
-    bull += mss_pts
-   else:
-    bear += mss_pts
+   if "BULL" in mss_name: bull += mss_pts
+   else: bear += mss_pts
    re.append(mss_name)
   pd_name, pd_pts = pd_c(df)
   re.append(pd_name)
-  if "DISCOUNT" in pd_name:
-   bull += pd_pts
+  if "DISCOUNT" in pd_name: bull += pd_pts
   fvg_name, fvg_pts = fvg_c(df)
   if fvg_pts > 0:
-   if "BULL" in fvg_name:
-    bull += fvg_pts
-   else:
-    bear += fvg_pts
+   if "BULL" in fvg_name: bull += fvg_pts
+   else: bear += fvg_pts
    re.append(fvg_name)
   liq_name, liq_pts = liq_sweep_c(df)
   if liq_pts > 0:
-   if "LONG" in liq_name:
-    bull += liq_pts
-   else:
-    bear += liq_pts
+   if "LONG" in liq_name: bull += liq_pts
+   else: bear += liq_pts
    re.append(liq_name)
   whale_name, whale_pts = whale_manip_c(df)
-  if whale_pts < 0:
-   fake.append(whale_name)
-  else:
-   re.append(whale_name)
+  if whale_pts < 0: fake.append(whale_name)
+  else: re.append(whale_name)
   kz_name, kz_pts = kz_c()
   re.append(kz_name)
   bull += kz_pts
   bear += kz_pts
   bt = btc_t(ex)
   re.append(bt)
-  if bt == "BTC_BULL":
-   bull += 10
-  if bt == "BTC_BEAR":
-   bear += 10
+  if bt == "BTC_BULL": bull += 10
+  if bt == "BTC_BEAR": bear += 10
   rs = rsi(df['close']).iloc[-1]
   if rs < 30:
    bull += 15
@@ -383,7 +368,7 @@ def main():
    va = df['vol'].rolling(20).mean().iloc[-1]
    v5 = df['vol'].iloc[-5:].mean()
    if v5 < va*1.3:
-    print(f"⏭️ {sym} BLOCKED - VOL low {v5:.2f} < {va*1.3:.2f} (1.3x avg)")
+    print(f"⏭️ {sym} BLOCKED - VOL low {v5:.2f} < {va*1.3:.2f}")
     continue
    bull,bear,re,fake = score_v8(df, ex)
    total = 50+max(bull,bear)
@@ -391,15 +376,11 @@ def main():
    if total < MIN_SCORE:
     print(f"⏭️ {sym} BLOCKED - Score {total} < {MIN_SCORE}")
     continue
-   if bull > bear:
-    typ = "LONG"
-    action = "BUY"
-   elif bear > bull:
-    typ = "SHORT"
-    action = "SELL"
-   else:
-    print(f"⏭️ {sym} BLOCKED - No clear direction bull={bull} bear={bear}")
+   typ = "LONG" if bull > bear else "SHORT" if bear > bull else None
+   if not typ:
+    print(f"⏭️ {sym} BLOCKED - No direction")
     continue
+   action = "BUY" if typ == "LONG" else "SELL"
    try:
     price_now = df['close'].iloc[-1]
     low_24 = df['low'].tail(96).min()
@@ -411,61 +392,47 @@ def main():
     vol_now = df['vol'].iloc[-1]
     vol_avg = df['vol'].tail(20).mean()
     btc_trend = btc_t(ex)
-    if btc_trend == "BTC_BULL":
-        btc_trend_simple = "UP"
-    elif btc_trend == "BTC_BEAR":
-        btc_trend_simple = "DOWN"
-    else:
-        btc_trend_simple = "NEUTRAL"
+    btc_trend_simple = "UP" if btc_trend=="BTC_BULL" else "DOWN" if btc_trend=="BTC_BEAR" else "NEUTRAL"
     filter_result = check_all_filters(price_now, low_24, high_24, low_4, high_4, rsi_now, premium_now, vol_now, vol_avg, btc_trend_simple, typ)
-    if isinstance(filter_result, tuple):
-        blocked, reason = filter_result
-    else:
-        blocked = filter_result
-        reason = "Blocked by premium/btc filter"
+    blocked, reason = filter_result if isinstance(filter_result, tuple) else (filter_result, "Blocked")
     if blocked:
-        print(f"🛡️ FILTER BLOCK {sym} {typ}: {reason} Price {price_now:.5f} RSI {rsi_now:.0f}")
-        continue
+     print(f"🛡️ FILTER BLOCK {sym} {typ}: {reason}")
+     continue
    except Exception as e:
     print(f"Filter err {e} for {sym}")
     continue
    if is_duplicate(sym, 30):
-       print(f"⏭️ DUPLICATE BLOCK {sym} - sent <30min ago")
-       continue
+    print(f"⏭️ DUPLICATE BLOCK {sym}")
+    continue
    if not filt(sym, typ):
-    d = gc(sym)
-    print(f"⏭️ {sym} BLOCKED - 24h change {d:.1f}% extreme")
+    print(f"⏭️ {sym} BLOCKED - 24h extreme {gc(sym):.1f}%")
     continue
    key = f"{sym}_{typ}"
-   if key in ca:
-    diff = now - ca[key]
-    if diff < timedelta(hours=2):
-     print(f"⏭️ {sym} {typ} BLOCKED - Cooldown {diff}")
-     continue
+   if key in ca and (now - ca[key]) < timedelta(hours=2):
+    print(f"⏭️ {sym} {typ} Cooldown")
+    continue
    price = df['close'].iloc[-1]
    sl = price*0.97 if typ == "LONG" else price*1.03
    tp = price*1.06 if typ == "LONG" else price*0.94
    if len(fake) > 0:
-    print(f"⏭️ {sym} BLOCKED - Fake whale {fake}")
+    print(f"⏭️ {sym} BLOCKED - Fake {fake}")
     continue
    strength = "STRONG" if total < 80 else "MAX"
    reasons = ', '.join(re[:6])
    msg = f"{action} {sym} {typ} {strength} ({total}/100)\nPrice: {price:.5f}\nSL: {sl:.5f} TP: {tp:.5f}\nReasons: {reasons}\n{exn}"
    tg(msg)
    print(f"✅ PASSED & SENT {sym} {typ} {total}/100")
-
    if sym in ["KOMA/USDT:USDT", "GRASS/USDT:USDT"] and total >= 75:
-       print(f"🤖 AUTO FIRING {sym} {typ} {total}")
-       try:
-           ok = auto_trade(sym, typ, sl, tp, total)
-           if ok:
-               tg(f"🤖 *AUTO EXECUTED*\n{sym} {typ} {total}/100\nEntry ${price:.5f} SL ${sl:.5f} TP ${tp:.5f}")
-               print(f"💰 AUTO SUCCESS {sym}")
-           else:
-               print(f"❌ AUTO FAILED {sym} - check MEXC balance/leverage")
-       except Exception as e:
-           print(f"❌ Auto trade err {e}")
-
+    print(f"🤖 AUTO FIRING {sym} {typ} {total}")
+    try:
+     ok = auto_trade(sym, typ, sl, tp, total)
+     if ok:
+      tg(f"🤖 *AUTO EXECUTED* {sym} {typ} {total}/100 Entry ${price:.5f}")
+      print(f"💰 AUTO SUCCESS {sym}")
+     else:
+      print(f"❌ AUTO FAILED {sym}")
+    except Exception as e:
+     print(f"❌ Auto trade err {e}")
    ca[key] = now
    sc(ca)
    if key not in tr:
@@ -475,7 +442,7 @@ def main():
    print(f"❌ ERR {sym} {e}")
    time.sleep(1)
 
- # Check existing trades for HOLD/TP
+ # ===== FLIP BRAIN + HOLD/TP =====
  for key,data in list(tr.items()):
   try:
    sym = key.replace(f"_{data['type']}","")
@@ -485,30 +452,70 @@ def main():
       sym = s
       break
    df = fs(ex, sym, "15m", 200)
-   if df is None:
-    continue
+   if df is None: continue
    typ = data.get("type","LONG")
    entry = data.get("entry",0)
    now_p = df['close'].iloc[-1]
-   if typ == "LONG":
-    pnl = (now_p-entry)/entry*100
-   else:
-    pnl = (entry-now_p)/entry*100
+   pnl = (now_p-entry)/entry*100 if typ=="LONG" else (entry-now_p)/entry*100
+   bull,bear,_,_ = score_v8(df, ex)
+   new_total = 50+max(bull,bear)
+   new_typ = "LONG" if bull > bear else "SHORT" if bear > bull else typ
+   flip_signal = (new_typ!= typ and new_total >= 75)
    v_name,_,v_dir = vol_profit_c(df, pnl)
-   jv_key = f"VOL_{key}_{v_name}"
-   if v_dir!= "NONE":
-    if jv_key not in ca or (now - ca[jv_key]) > timedelta(hours=1):
-     if v_dir == "HOLD_LONG":
-      tg(f"HOLD {sym} LONG Vol UP PnL {pnl:.2f}% Keep HOLD Price {now_p:.5f}")
-     if v_dir == "TP_LONG":
-      tg(f"TAKE PROFIT {sym} LONG Vol DOWN PnL {pnl:.2f}% Secure 50% Price {now_p:.5f}")
-     if v_dir == "HOLD_SHORT":
-      tg(f"HOLD {sym} SHORT Vol UP PnL {pnl:.2f}% Keep HOLD")
-     if v_dir == "TP_SHORT":
-      tg(f"TAKE PROFIT {sym} SHORT Vol DOWN PnL {pnl:.2f}%")
-     ca[jv_key] = now
-     sc(ca)
    dec, j_msg = junction_decision(df, typ)
+
+   # HOLD/TP Telegram
+   jv_key = f"VOL_{key}_{v_name}"
+   if v_dir!= "NONE" and (jv_key not in ca or (now - ca[jv_key]) > timedelta(hours=1)):
+    if v_dir == "HOLD_LONG": tg(f"HOLD {sym} LONG Vol UP PnL {pnl:.2f}% Keep HOLD Price {now_p:.5f}")
+    if v_dir == "TP_LONG": tg(f"TAKE PROFIT {sym} LONG Vol DOWN PnL {pnl:.2f}% Secure 50% Price {now_p:.5f}")
+    if v_dir == "HOLD_SHORT": tg(f"HOLD {sym} SHORT Vol UP PnL {pnl:.2f}% Keep HOLD")
+    if v_dir == "TP_SHORT": tg(f"TAKE PROFIT {sym} SHORT Vol DOWN PnL {pnl:.2f}%")
+    ca[jv_key] = now
+    sc(ca)
+
+   # --- FLIP CHECK ---
+   should_flip = False
+   flip_reason = ""
+   if pnl > 0.8 and flip_signal:
+    if (typ=="LONG" and v_dir in ["HOLD_SHORT","TP_SHORT","VOLSELLINCREASE","VOLSELLDECREASE"]) or (typ=="SHORT" and v_dir in ["HOLD_LONG","TP_LONG","VOLBUYINCREASE","VOLBUYDECREASE"]):
+     should_flip = True
+     flip_reason = f"VOL {v_dir} + Opposite {new_typ} {new_total}"
+    elif dec and "EXIT_WARN" in dec:
+     should_flip = True
+     flip_reason = f"JUNCTION {j_msg} + Opposite {new_typ} {new_total}"
+    elif new_total >= 80:
+     should_flip = True
+     flip_reason = f"STRONG OPPOSITE {new_typ} {new_total}/100"
+
+   if should_flip:
+    print(f"🔄 FLIP TRIGGER {sym} {typ}->{new_typ} PnL {pnl:.2f}% Reason: {flip_reason}")
+    try:
+     from autopilot import close_position
+     closed = close_position(sym)
+     if closed:
+      tg(f"🔄 *AUTO FLIPPED*\nClosed {sym} {typ} PnL {pnl:.2f}%\nReason: {flip_reason}\nFlipping to {new_typ}")
+      price = df['close'].iloc[-1]
+      sl = price*0.97 if new_typ == "LONG" else price*1.03
+      tp = price*1.06 if new_typ == "LONG" else price*0.94
+      ok = auto_trade(sym, new_typ, sl, tp, new_total)
+      if ok:
+       tg(f"🤖 *FLIP EXECUTED* {sym} {new_typ} {new_total}/100 Entry ${price:.5f}")
+       new_key = f"{sym}_{new_typ}"
+       tr[new_key] = {"entry": price, "type": new_typ, "time": now.isoformat()}
+       if key in tr: del tr[key]
+       st(tr)
+       ca[new_key] = now
+       sc(ca)
+       print(f"✅ FLIP SUCCESS {sym} to {new_typ}")
+      else:
+       print(f"❌ FLIP OPEN FAILED {sym}")
+     else:
+      print(f"❌ FLIP CLOSE FAILED {sym}")
+    except Exception as e:
+     print(f"❌ FLIP ERR {e} - did you update autopilot.py?")
+    continue
+
    if dec:
     j_key = f"JUNC_{key}"
     if j_key not in ca or (now - ca[j_key]) > timedelta(hours=1):
