@@ -27,7 +27,18 @@ def ge():
             "apiKey": os.getenv("MEXC_API_KEY", ""),
             "secret": os.getenv("MEXC_SECRET_KEY", ""),
             "options": {"defaultType": "swap"},
-        }
+      def gc(s):
+    """Fetches 24h ticker data from MEXC REST API for a given symbol."""
+    try:
+        # Properly clean and format the symbol string for the API call
+        cleaned = s.split("/")[0] + "USDT"
+        url = f"https://mexc.com{cleaned}"
+        r = requests.get(url, timeout=10).json()
+        if isinstance(r, list) and len(r) > 0:
+            return float(r[0].get("priceChangePercent", 0))
+        return float(r.get("priceChangePercent", 0))
+    except Exception:
+        return 0.0  }
     )
 
 
