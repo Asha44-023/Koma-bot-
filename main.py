@@ -4,7 +4,7 @@ import requests
 import os, json, time
 from datetime import datetime, timedelta
 from filters import check_all_filters
-from autopilot import auto_trade # <-- ADDED FOR AUTO
+from autopilot import auto_trade
 
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -124,10 +124,8 @@ def btc_t(ex):
   df = fs(ex, "BTC/USDT:USDT", "4h", 50)
   if df is None:
    return "BTC_NEUTRAL"
-  e50 = df['close'].ewm(span=50).mean()
-  e50 = e50.iloc[-1]
-  e200 = df['close'].ewm(span=200).mean()
-  e200 = e200.iloc[-1]
+  e50 = df['close'].ewm(span=50).mean().iloc[-1]
+  e200 = df['close'].ewm(span=200).mean().iloc[-1]
   cp = df['close'].iloc[-1]
   if cp > e50 > e200:
    return "BTC_BULL"
@@ -380,10 +378,8 @@ def main():
    df = fs(ex, sym, "15m", 200)
    if df is None:
     continue
-   va = df['vol'].rolling(20).mean()
-   va = va.iloc[-1]
-   v5 = df['vol'].iloc[-5:]
-   v5 = v5.mean()
+   va = df['vol'].rolling(20).mean().iloc[-1]
+   v5 = df['vol'].iloc[-5:].mean()
    if v5 < va*1.3:
     continue
    bull,bear,re,fake = score_v8(df, ex)
@@ -415,12 +411,19 @@ def main():
         btc_trend_simple = "DOWN"
     else:
         btc_trend_simple = "NEUTRAL"
-    blocked, reason = check_all_filters(price_now, low_24, high_24, low_4, high_4, rsi_now, premium_now, vol_now, vol_avg, btc_trend_simple, typ)
+    # FIXED: handle both bool and tuple returns
+    filter_result = check_all_filters(price_now, low_24, high_24, low_4, high_4, rsi_now, premium_now, vol_now, vol_avg, btc_trend_simple, typ)
+    if isinstance(filter_result, tuple):
+        blocked, reason = filter_result
+    else:
+        blocked = filter_result
+        reason = "Blocked"
     if blocked:
         print(f"FILTER BLOCK {sym} {typ}: {reason}")
         continue
    except Exception as e:
-    print(f"Filter err {e}")
+    print(f"Filter err {e} for {sym}")
+    continue
    if is_duplicate(sym, 30):
        print(f"DUPLICATE BLOCK {sym} - sent <30min ago, skip")
        continue
@@ -443,13 +446,15 @@ def main():
    msg = f"{action} {sym} {typ} {strength} ({total}/100)\nPrice: {price:.5f}\nSL: {sl:.5f} TP: {tp:.5f}\nReasons: {reasons}\n{exn}"
    tg(msg)
 
-   # ===== AUTO PILOT INJECTION - ONLY KOMA + GRASS 80+ =====
+   # ===== AUTO PILOT - FIXED 5 ARGS =====
    if sym in ["KOMA/USDT:USDT", "GRASS/USDT:USDT"] and total >= 75:
        print(f"🤖 AUTO FIRING {sym} {typ} {total}")
-       ok = auto_trade(sym, typ, sl, tp)
-       if ok:
-           tg(f"🤖 *AUTO EXECUTED*\n{sym} {typ} {total}/100\nEntry ${price:.5f} SL ${sl:.5f} TP ${tp:.5f}")
-   # ===== END AUTO PILOT =====
+       try:
+           ok = auto_trade(sym, typ, sl, tp, total)
+           if ok:
+               tg(f"🤖 *AUTO EXECUTED*\n{sym} {typ} {total}/100\nEntry ${price:.5f} SL ${sl:.5f} TP ${tp:.5f}")
+       except Exception as e:
+           print(f"Auto trade err {e}")
 
    ca[key] = now
    sc(ca)
