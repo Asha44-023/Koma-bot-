@@ -11,7 +11,6 @@ CF = "last_alerts.json"
 TF = "trades.json"
 MIN_SCORE = 75
 
-# === ANTI-DUPLICATE 30MIN - ADDED ===
 last_sent_time = {}
 def is_duplicate(coin, minutes=30):
     now_ts = time.time()
@@ -20,7 +19,6 @@ def is_duplicate(coin, minutes=30):
             return True
     last_sent_time[coin] = now_ts
     return False
-# === END ANTI-DUPLICATE ===
 
 SYMBOLS = [
  "VELVET/USDT:USDT",
@@ -255,7 +253,7 @@ def whale_manip_c(df):
   return "NO_WHALE", 0
 
 def vol_profit_c(df, pnl):
- if pnl <= 0:
+ if pnl < 0.8:
   return "NO_VOL",0,"NONE"
  vp = df['vol'].iloc[-2]
  vn = df['vol'].iloc[-1]
@@ -399,8 +397,6 @@ def main():
     action = "SELL"
    else:
     continue
-
-   # ===== NEW FILTER MIDDLE SIDE - PASTED HERE =====
    try:
     price_now = df['close'].iloc[-1]
     low_24 = df['low'].tail(96).min()
@@ -418,21 +414,15 @@ def main():
         btc_trend_simple = "DOWN"
     else:
         btc_trend_simple = "NEUTRAL"
-
     blocked, reason = check_all_filters(price_now, low_24, high_24, low_4, high_4, rsi_now, premium_now, vol_now, vol_avg, btc_trend_simple, typ)
     if blocked:
         print(f"FILTER BLOCK {sym} {typ}: {reason}")
         continue
    except Exception as e:
     print(f"Filter err {e}")
-   # ===== END NEW FILTER =====
-
-   # ===== ANTI-DUPLICATE 30MIN - ADDED HERE =====
    if is_duplicate(sym, 30):
        print(f"DUPLICATE BLOCK {sym} - sent <30min ago, skip")
        continue
-   # ===== END ANTI-DUPLICATE =====
-
    if not filt(sym, typ):
     continue
    key = f"{sym}_{typ}"
