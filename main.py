@@ -12,12 +12,12 @@ TARGET = 10000.0
 LEVERAGE = 10
 TP_PCT = 2.0
 SL_PCT = 1.2
-AUTOPILOT = True # BOTH signals + autopilot ON
+AUTOPILOT = True
 
 def ge():
-    ex=ccxt.mexc({'apiKey':os.getenv("MEXC_API_KEY"),'secret':os.getenv("MEXC_API_SECRET") or os.getenv("MEXC_SECRET"),'enableRateLimit':True})
-    ex2=ccxt.mexc({'enableRateLimit':True})
-    return ex, ex2
+    secret = os.getenv("MEXC_API_SECRET") or os.getenv("MEXC_SECRET") or os.getenv("API_SECRET")
+    ex=ccxt.mexc({'apiKey':os.getenv("MEXC_API_KEY"),'secret':secret,'enableRateLimit':True})
+    return ex, ccxt.mexc({'enableRateLimit':True})
 
 def tg(m):
     try: requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage",data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=15)
@@ -43,11 +43,10 @@ def market_direction(df):
     sell_vol=sum(vols.iloc[i] for i in range(-10,0) if closes.iloc[i]<opens.iloc[i]) or 1
     mom=(closes.iloc[-1]-closes.iloc[-5])/closes.iloc[-5]*100
     ema20=df['close'].ewm(20).mean().iloc[-1]
-    vol_ratio=buy_vol/sell_vol if buy_vol>sell_vol else sell_vol/buy_vol
-    if bullish>=7 and buy_vol>sell_vol*1.3 and mom>0.8 and closes.iloc[-1]>ema20:
-        return "MARKET_BUYING", True, bullish, vol_ratio, mom
-    if bullish<=3 and sell_vol>buy_vol*1.3 and mom<-0.8 and closes.iloc[-1]<ema20:
-        return "MARKET_DUMPING", False, bullish, vol_ratio, mom
+    if mom>1.5 and buy_vol>sell_vol and closes.iloc[-1]>ema20: return "MARKET_PUMPING", True, bullish, 0, mom
+    if bullish>=6 and buy_vol>sell_vol*1.2 and mom>0.5 and closes.iloc[-1]>ema20: return "MARKET_BUYING", True, bullish, 0, mom
+    if mom<-1.5 and sell_vol>buy_vol and closes.iloc[-1]<ema20: return "MARKET_DUMPING_HARD", False, bullish, 0, mom
+    if bullish<=4 and sell_vol>buy_vol*1.2 and mom<-0.5 and closes.iloc[-1]<ema20: return "MARKET_DUMPING", False, bullish, 0, mom
     return "NEUTRAL", None, bullish, 0, mom
 
 def w_m_pattern(df):
@@ -73,14 +72,33 @@ def breakout(df):
 def score_v8(df):
     bull=bear=0; re=[]; fake=[]
     try:
-        if df['low'].tail(10).min() < df['low'].iloc[-20:-10].min(): bull+=10; re.append("BULL_OB")
-        if df['high'].tail(10).max() > df['high'].iloc[-20:-10].max(): bear+=10; re.append("BEAR_OB")
-        if df['low'].iloc[-1] < df['low'].iloc[-20:-1].min() and df['close'].iloc[-1] > df['low'].iloc[-20:-1].min(): bull+=15; re.append("TURTLE_LONG")
-        if df['high'].iloc[-1] > df['high'].iloc[-20:-1].max() and df['close'].iloc[-1] < df['high'].iloc[-20:-1].max(): bear+=15; re.append("TURTLE_SHORT")
-        if df['low'].iloc[-1] > df['high'].iloc[-3]: bull+=10; re.append("BULL_FVG")
-        if df['high'].iloc[-1] < df['low'].iloc[-3]: bear+=10; re.append("BEAR_FVG")
-        if df['low'].iloc[-1] < df['low'].iloc[-10:-1].min() and df['vol'].iloc[-1] > df['vol'].iloc[-10:-1].mean()*1.5 and df['close'].iloc[-1] > df['low'].iloc[-10:-1].min(): bull+=30; re.append("LIQ_SWEEP_LONG")
-        if df['high'].iloc[-1] > df['high'].iloc[-10:-1].max() and df['vol'].iloc[-1] > df['vol'].iloc[-10:-1].mean()*1.5 and df['close'].iloc[-1] < df['high'].iloc[-10:-1].max(): bear+=30; re.append("LIQ_SWEEP_SHORT")
+        closes=df['close']; highs=df['high']; lows=df['low']; vols=df['vol']
+        vol_avg=vols.iloc[-20:-1].mean()
+        # WHALE ENGINE
+        if lows.iloc[-1] < lows.iloc[-20:-1].min() and closes.iloc[-1] > lows.iloc[-20:-1].min() and vols.iloc[-1] > vol_avg*1.8: bull+=35; re.append("LIQ_GRAB_LONG")
+        if highs.iloc[-1] > highs.iloc[-20:-1].max() and closes.iloc[-1] < highs.iloc[-20:-1].max() and vols.iloc[-1] > vol_avg*1.8: bear+=35; re.append("LIQ_GRAB_SHORT")
+        c1,c2,c3=closes.iloc[-3],closes.iloc[-2],closes.iloc[-1]
+        v1,v2,v3=vols.iloc[-3],vols.iloc[-2],vols.iloc[-1]
+        if v2>v1*2.5 and v2>v3*2 and c2<c1 and c2<c3: bull+=30; fake.append("WHALE_FAKE_DOWN"); re.append("WHALE_TRAP_LONG")
+        if v2>v1*2.5 and v2>v3*2 and c2>c1 and c2>c3: bear+=30; fake.append("WHALE_FAKE_UP"); re.append("WHALE_TRAP_SHORT")
+        if vols.iloc[-1] > vol_avg*3 and abs(closes.iloc[-1]-closes.iloc[-2])/closes.iloc[-2]*100 < 0.3:
+            fake.append("SPOOFING"); bull+=20 if closes.iloc[-1]<closes.iloc[-2] else 0; bear+=20 if closes.iloc[-1]>closes.iloc[-2] else 0
+            re.append("SPOOF_BULL_REV" if closes.iloc[-1]<closes.iloc[-2] else "SPOOF_BEAR_REV")
+        pr=highs.iloc[-10:].max()-lows.iloc[-10:].min()
+        if pr/closes.iloc[-1]*100 < 1.5 and vols.iloc[-5:].mean() > vol_avg*1.5:
+            if closes.iloc[-1] > closes.iloc[-10]: bull+=25; re.append("WHALE_ACCUM_LONG")
+            else: bear+=25; re.append("WHALE_DIST_SHORT")
+        body=abs(closes.iloc[-1]-df['open'].iloc[-1])
+        if body>0:
+            up=highs.iloc[-1]-max(closes.iloc[-1],df['open'].iloc[-1]); lo=min(closes.iloc[-1],df['open'].iloc[-1])-lows.iloc[-1]
+            if lo>body*2.5 and vols.iloc[-1]>vol_avg*1.5: bull+=20; re.append("STOP_HUNT_LONG")
+            if up>body*2.5 and vols.iloc[-1]>vol_avg*1.5: bear+=20; re.append("STOP_HUNT_SHORT")
+        if lows.tail(10).min() < lows.iloc[-20:-10].min(): bull+=10; re.append("BULL_OB")
+        if highs.tail(10).max() > highs.iloc[-20:-10].max(): bear+=10; re.append("BEAR_OB")
+        if lows.iloc[-1] < lows.iloc[-20:-1].min() and closes.iloc[-1] > lows.iloc[-20:-1].min(): bull+=15; re.append("TURTLE_LONG")
+        if highs.iloc[-1] > highs.iloc[-20:-1].max() and closes.iloc[-1] < highs.iloc[-20:-1].max(): bear+=15; re.append("TURTLE_SHORT")
+        if lows.iloc[-1] > highs.iloc[-3]: bull+=10; re.append("BULL_FVG")
+        if highs.iloc[-1] < lows.iloc[-3]: bear+=10; re.append("BEAR_FVG")
         w,m=w_m_pattern(df)
         if w: bull+=25; re.append("W_PATTERN")
         if m: bear+=25; re.append("M_PATTERN")
@@ -90,26 +108,22 @@ def score_v8(df):
         rs=rsi(df['close']).iloc[-1]
         if rs<30: bull+=15; re.append(f"RSI_{rs:.0f}_OS")
         if rs>70: bear+=15; re.append(f"RSI_{rs:.0f}_OB")
-        c1=df['close'].iloc[-3]; c2=df['close'].iloc[-2]; c3=df['close'].iloc[-1]
-        v1=df['vol'].iloc[-3]; v2=df['vol'].iloc[-2]; v3=df['vol'].iloc[-1]
-        if v2>v1*2 and v2>v3*2:
-            if c2<c1 and c2<c3: fake.append("WHALE_FAKE_DOWN")
-            if c2>c1 and c2>c3: fake.append("WHALE_FAKE_UP")
     except: pass
     return bull,bear,re,fake
 
 def get_bal(ex):
     try:
-        bal=ex.fetch_balance()
-        usdt=bal['USDT']['free'] if 'USDT' in bal else START_BAL
-        return float(usdt) if usdt>0.5 else START_BAL
+        b=ex.fetch_balance(); return float(b['USDT']['free']) if 'USDT' in b and b['USDT']['free']>0.5 else START_BAL
     except: return START_BAL
+
+def calc_c(price, margin):
+    raw=(margin*LEVERAGE)/price
+    return int(raw) if raw>10 else round(raw,1) if raw>=1 else 1
 
 def main():
     ex_trade, ex_data = ge()
-    bal=get_bal(ex_trade)
-    need=TARGET/bal
-    print(f"BOTH SIGNALS + AUTOPILOT BAL ${bal:.2f} -> ${TARGET} {datetime.utcnow()}")
+    bal=get_bal(ex_trade); need=TARGET/bal
+    print(f"FINAL WHALE + KOMA PUMP BAL ${bal:.2f} -> ${TARGET} {datetime.utcnow()}")
     try:
         with open(CF,"r") as f: ca={k:datetime.fromisoformat(v) for k,v in json.load(f).items()}
     except: ca={}
@@ -121,34 +135,33 @@ def main():
         df=fs(ex_data,sym,"15m",200)
         if df is None: continue
         bull,bear,re,fake=score_v8(df)
-        status, is_buying, bull_cnt, vol_ratio, mom = market_direction(df)
-        re.append(status)
-        total=50+max(bull,bear)
-        if total<70: continue
-        typ="LONG" if bull>bear else "SHORT" if bear>bull else None
+        status, is_buying, bull_cnt, vr, mom = market_direction(df)
+        re.append(status); total=50+max(bull,bear); typ="LONG" if bull>bear else "SHORT" if bear>bull else None
         if not typ: continue
-        if typ=="SHORT" and is_buying==True: continue
-        if typ=="LONG" and is_buying==False: continue
+        if status=="MARKET_PUMPING" and mom>1.5: typ="LONG"; total=max(total,85); re.append("KOMA_PUMP_OVERRIDE")
+        if status=="MARKET_DUMPING_HARD" and mom<-1.5: typ="SHORT"; total=max(total,85); re.append("DUMP_OVERRIDE")
+        if total<70: continue
+        if typ=="SHORT" and is_buying==True and total<90 and "KOMA_PUMP_OVERRIDE" not in re and "WHALE_TRAP_LONG" not in re and "LIQ_GRAB_LONG" not in re: continue
+        if typ=="LONG" and is_buying==False and total<90 and "WHALE_TRAP_SHORT" not in re and "LIQ_GRAB_SHORT" not in re: continue
         key=f"{sym}_{typ}"
-        if key in ca and (datetime.utcnow()-ca[key])<timedelta(minutes=60): continue
-        price=df['close'].iloc[-1]
-        fmt=".6f" if price<0.10 else ".4f"
-        # === SIGNAL ===
-        tg(f"📢 SIGNAL: {'BUY' if typ=='LONG' else 'SELL'} {sym} {typ} ({total})\nPrice {price:{fmt}} {status}\nReasons {', '.join(re[:5])} {' '.join(fake)}\nBal ${bal:.2f} -> ${TARGET} Need {need:.0f}x LEV {LEVERAGE}x")
+        if key in ca and (datetime.utcnow()-ca[key])<timedelta(minutes=45): continue
+        price=df['close'].iloc[-1]; fmt=".6f" if price<0.10 else ".4f"
+        tg(f"📢 SIGNAL: {'BUY' if typ=='LONG' else 'SELL'} {sym} {typ} ({total})\nPrice {price:{fmt}} {status} mom {mom:.1f}%\nReasons {', '.join(re[:5])} Fake:{' '.join(fake)}\nBal ${bal:.2f} -> ${TARGET} Need {need:.0f}x LEV {LEVERAGE}x")
         if AUTOPILOT:
             try:
-                amt=bal*0.95
+                amt=bal*0.95;
                 try: ex_trade.set_leverage(LEVERAGE, sym)
                 except: pass
-                ex_trade.create_order(sym,'market',"buy" if typ=="LONG" else "sell",None,None,{'quoteOrderQty':amt})
-                tg(f"🤖 AUTOPILOT EXECUTED: {sym} {typ} {LEVERAGE}x ${amt:.2f} ✅")
+                c=calc_c(price, amt)
+                ex_trade.create_order(sym,'market',"buy" if typ=="LONG" else "sell", c)
+                tg(f"🤖 AUTOPILOT EXECUTED: {sym} {typ} {LEVERAGE}x {c} contracts ✅\nEntry {price:{fmt}} Bal ${bal:.2f}")
             except Exception as e: tg(f"⚠️ AUTOPILOT FAILED {sym} {e}")
         ca[key]=datetime.utcnow()
         with open(CF,"w") as f: json.dump({k:v.isoformat() for k,v in ca.items()},f)
-        if key not in tr:
-            tr[key]={"entry":price,"type":typ,"bal":bal}
-            with open(TF,"w") as f: json.dump(tr,f)
+        tr[key]={"entry":price,"type":typ,"bal":bal}
+        with open(TF,"w") as f: json.dump(tr,f)
 
+    # HOLD / TP / FLIP
     for key,data in list(tr.items()):
         sym=next((s for s in SYMBOLS if s.split("/")[0] in key), None)
         if not sym: continue
@@ -156,68 +169,34 @@ def main():
         if df is None: continue
         now_p=df['close'].iloc[-1]
         pnl=(now_p-data["entry"])/data["entry"]*100 if data["type"]=="LONG" else (data["entry"]-now_p)/data["entry"]*100
-        acct_pnl=pnl*LEVERAGE
-        new_bal=bal*(1+acct_pnl/100)
-        status, is_buying, bull_cnt, vol_ratio, mom = market_direction(df)
-        vol_now=df['vol'].iloc[-1]; vol_prev=df['vol'].iloc[-2]; vol_avg=df['vol'].iloc[-20:-1].mean()
-        vol_chg=(vol_now-vol_prev)/vol_prev*100 if vol_prev>0 else 0
+        acct_pnl=pnl*LEVERAGE; new_bal=bal*(1+acct_pnl/100)
+        status, is_buying, bull_cnt, vr, mom = market_direction(df)
+        vol_now=df['vol'].iloc[-1]; vol_avg=df['vol'].iloc[-20:-1].mean()
         vol_vs_avg=vol_now/vol_avg if vol_avg>0 else 1
-        amt=bal*0.95
-
-        signal_msg=None
-        should_flip=False
-
         if acct_pnl>=TP_PCT*LEVERAGE:
-            signal_msg=f"📢 SIGNAL: TAKE PROFIT {sym} {data['type']}\nPrice {pnl:.1f}% Acct +{acct_pnl:.1f}% ${bal:.2f}->{new_bal:.2f}\n{status} Vol {vol_chg:.0f}%"
-            should_flip=True
-        elif acct_pnl<=-SL_PCT*LEVERAGE:
-            signal_msg=f"📢 SIGNAL: EXIT MARKET SL {sym} Acct {acct_pnl:.1f}%"
-            tg(signal_msg)
-            if AUTOPILOT:
-                try:
-                    ex_trade.create_order(sym,'market',"sell" if data["type"]=="LONG" else "buy",None,None,{'quoteOrderQty':amt})
-                    tg(f"🤖 AUTOPILOT CLOSED SL {sym} ✅")
-                    tr.pop(key,None)
+            tg(f"📢 TAKE PROFIT {sym} {data['type']} +{acct_pnl:.1f}% ${bal:.2f}->{new_bal:.2f}")
+            try:
+                ex_trade.create_order(sym,'market',"sell" if data["type"]=="LONG" else "buy",None,None,{'reduceOnly':True})
+                tr.pop(key,None)
+                with open(TF,"w") as f: json.dump(tr,f)
+                # flip
+                flip="buy" if data["type"]=="SHORT" else "sell"; nt="LONG" if data["type"]=="SHORT" else "SHORT"
+                try: ex_trade.set_leverage(LEVERAGE, sym)
                 except: pass
-            continue
-        elif data["type"]=="LONG":
-            if is_buying==True and vol_chg>20 and vol_vs_avg>1.3 and pnl>0:
-                signal_msg=f"📢 SIGNAL: HOLD {sym} LONG\n{status} {bull_cnt}/10 Vol UP {vol_chg:.0f}% x{vol_vs_avg:.1f} Acct +{acct_pnl:.1f}% ${new_bal:.2f} => STAY"
-            elif is_buying==False and vol_chg<-25 and pnl>0.8:
-                signal_msg=f"📢 SIGNAL: TAKE PROFIT 50% {sym} LONG\n{status} Vol DOWN {vol_chg:.0f}% Acct +{acct_pnl:.1f}% => BOOK 50%"
-            elif is_buying==False and vol_vs_avg>2.2:
-                signal_msg=f"📢 SIGNAL: EXIT + FLIP {sym} LONG -> SHORT\n{status} DUMPING Vol SPIKE x{vol_vs_avg:.1f} Acct {acct_pnl:.1f}%"
-                should_flip=True
-        else:
-            if is_buying==False and vol_chg>20 and vol_vs_avg>1.3 and pnl>0:
-                signal_msg=f"📢 SIGNAL: HOLD {sym} SHORT\n{status} {bull_cnt}/10 Vol UP {vol_chg:.0f}% x{vol_vs_avg:.1f} Acct +{acct_pnl:.1f}% => STAY"
-            elif is_buying==True and vol_chg<-25 and pnl>0.8:
-                signal_msg=f"📢 SIGNAL: TAKE PROFIT 50% {sym} SHORT\n{status} Vol DOWN {vol_chg:.0f}% Acct +{acct_pnl:.1f}% => BOOK 50%"
-            elif is_buying==True and vol_vs_avg>2.2:
-                signal_msg=f"📢 SIGNAL: EXIT + FLIP {sym} SHORT -> LONG\n{status} PUMPING Vol SPIKE x{vol_vs_avg:.1f} Acct {acct_pnl:.1f}%"
-                should_flip=True
-
-        if signal_msg:
-            tg(signal_msg)
-            if AUTOPILOT and should_flip:
-                tg(f"🤖 AUTOPILOT: Closing {sym} {data['type']} and flipping at junction...")
-                try:
-                    ex_trade.create_order(sym,'market',"sell" if data["type"]=="LONG" else "buy",None,None,{'quoteOrderQty':amt})
-                    flip_side="buy" if data["type"]=="SHORT" else "sell"
-                    new_type="LONG" if data["type"]=="SHORT" else "SHORT"
-                    try: ex_trade.set_leverage(LEVERAGE, sym)
-                    except: pass
-                    ex_trade.create_order(sym,'market',flip_side,None,None,{'quoteOrderQty':amt})
-                    tg(f"🤖 AUTOPILOT EXECUTED FLIP {sym} {data['type']}->{new_type} {LEVERAGE}x New Bal ~${new_bal:.2f} ✅")
-                    tr.pop(key,None)
-                    new_key=f"{sym}_{new_type}"
-                    tr[new_key]={"entry":now_p,"type":new_type,"bal":new_bal}
-                    with open(TF,"w") as f: json.dump(tr,f)
-                    ca[new_key]=datetime.utcnow()
-                    with open(CF,"w") as f: json.dump({k:v.isoformat() for k,v in ca.items()},f)
-                except Exception as e: tg(f"⚠️ FLIP FAILED {e}")
-            elif AUTOPILOT and "HOLD" in signal_msg:
-                tg(f"🤖 AUTOPILOT: Holding position, no action ✅ Bal ${new_bal:.2f}")
+                c=calc_c(now_p, bal*0.95)
+                ex_trade.create_order(sym,'market',flip,c)
+                tg(f"🤖 FLIP {sym} -> {nt} {c}c Bal ${new_bal:.2f} ✅")
+                tr[f"{sym}_{nt}"]={"entry":now_p,"type":nt,"bal":new_bal}
+                with open(TF,"w") as f: json.dump(tr,f)
+            except Exception as e: tg(f"⚠️ FLIP FAILED {e}")
+        elif acct_pnl<=-SL_PCT*LEVERAGE:
+            tg(f"📢 SL {sym} {acct_pnl:.1f}%")
+            try:
+                ex_trade.create_order(sym,'market',"sell" if data["type"]=="LONG" else "buy",None,None,{'reduceOnly':True})
+                tr.pop(key,None)
+                with open(TF,"w") as f: json.dump(tr,f)
+                tg(f"🤖 CLOSED SL {sym} ✅")
+            except: pass
 
 if __name__=="__main__":
     main()
