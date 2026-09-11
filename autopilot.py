@@ -1,124 +1,91 @@
-import ccxt
 import os
+import ccxt
 
-MEXC_API_KEY = os.getenv("MEXC_API_KEY")
-MEXC_API_SECRET = os.getenv("MEXC_API_SECRET") or os.getenv("MEXC_SECRET")
-
-# === FINAL ALLOWED - ALL 6 COINS FOR $10K JOURNEY ===
-SYMBOLS_ALLOWED = ["KOMA/USDT:USDT", "GRASS/USDT:USDT", "VELVET/USDT:USDT", "SIREN/USDT:USDT", "HEI/USDT:USDT", "LAB/USDT:USDT"]
-MEXC_MAP = {
-    "KOMA/USDT:USDT": "KOMA_USDT",
-    "GRASS/USDT:USDT": "GRASS_USDT",
-    "VELVET/USDT:USDT": "VELVET_USDT",
-    "SIREN/USDT:USDT": "SIREN_USDT",
-    "HEI/USDT:USDT": "HEI_USDT",
-    "LAB/USDT:USDT": "LAB_USDT"
+# --- CONFIG ---
+BALANCE = 14.99
+LEVERAGE = 10
+# MEXC max contracts per order - FIX for error 2051
+MAX_QTY = {
+    "KOMA/USDT:USDT": 800,
+    "GRASS/USDT:USDT": 500,
+    "HEI/USDT:USDT": 500,
+    "LAB/USDT:USDT": 500,
+    "DEFAULT": 300
 }
 
-ex = ccxt.mexc({
-    "apiKey": MEXC_API_KEY,
-    "secret": MEXC_API_SECRET,
-    "enableRateLimit": True,
-    "options": {"defaultType": "swap"}
-})
+def get_exchange():
+    api_key = os.getenv("MEXC_API_KEY")
+    secret = os.getenv("MEXC_API_SECRET") or os.getenv("MEXC_SECRET") or os.getenv("API_SECRET")
+    
+    if not api_key or not secret:
+        print("❌ No API keys found")
+        return None
+        
+    exchange = ccxt.mexc({
+        'apiKey': api_key,
+        'secret': secret,
+        'options': {'defaultType': 'swap'}
+    })
+    exchange.set_leverage(LEVERAGE)
+    return exchange
 
-LEVERAGE = 10  # For $14.99 -> $10k
-
-def get_balance_usdt():
+def is_already_in_position(exchange, symbol):
     try:
-        bal = ex.fetch_balance()
-        usdt = bal.get("USDT", {})
-        free = usdt.get("free", 0) or usdt.get("total", 0) or 0
-        return float(free)
-    except Exception as e:
-        print(f"Balance err {e}")
-        return 0
-
-def get_qty(symbol, balance):
-    try:
-        mexc_sym = MEXC_MAP.get(symbol, symbol)
-        ticker = ex.fetch_ticker(mexc_sym)
-        price = ticker["last"]
-        # === CONTRACTS FIX FOR QUANTITY ERROR 2011 ===
-        contracts = (balance * 0.95 * LEVERAGE) / price
-        if contracts < 1: contracts = 1
-        # MEXC wants int for low caps
-        if price < 1:
-            qty = int(contracts) if contracts > 10 else round(contracts, 1)
-        else:
-            qty = int(contracts)
-        return qty, price
-    except Exception as e:
-        print(f"Qty err {e}")
-        return 0, 0
-
-def is_already_in_position(symbol, side):
-    try:
-        mexc_sym = MEXC_MAP.get(symbol, symbol)
-        positions = ex.fetch_positions([mexc_sym])
-        for p in positions:
-            contracts = float(p.get("contracts", 0) or 0)
-            if contracts > 0:
-                pos_side = p.get("side", "")
-                if pos_side == "long" and side.upper() in ["LONG", "BUY"]: return True
-                if pos_side == "short" and side.upper() in ["SHORT", "SELL"]: return True
+        positions = exchange.fetch_positions([symbol])
+        for pos in positions:
+            if float(pos.get('contracts', 0)) > 0:
+                print(f"⚠️ Already in {symbol}: {pos['contracts']} contracts")
+                return True
         return False
-    except: return False
-
-def close_position(symbol):
-    try:
-        mexc_sym = MEXC_MAP.get(symbol, symbol)
-        positions = ex.fetch_positions([mexc_sym])
-        for p in positions:
-            contracts = float(p.get("contracts", 0) or 0)
-            if contracts > 0:
-                side = p.get("side", "")
-                close_side = "sell" if side == "long" else "buy"
-                print(f"Closing {symbol} {side} {contracts}")
-                try:
-                    ex.create_market_order(mexc_sym, close_side, contracts, None, {"reduceOnly": True})
-                    return True
-                except:
-                    try:
-                        ex.create_market_order(mexc_sym, close_side, contracts)
-                        return True
-                    except Exception as e2:
-                        print(f"Close err {e2}")
-                        return False
-        return True
-    except Exception as e:
-        print(f"close_position error {e}")
+    except:
         return False
 
-def auto_trade(symbol, side, sl=None, tp=None, score=None):
-    if isinstance(sl, (int, float)) and sl > 50 and tp is None and score is None:
-        score = sl; sl = None
-    print(f"AUTO REQUEST {symbol} {side} Score:{score}")
-    if symbol not in SYMBOLS_ALLOWED:
-        print(f"BLOCKED {symbol} not allowed - add to SYMBOLS_ALLOWED")
-        return False
-    if is_already_in_position(symbol, side):
-        print(f"SKIP {symbol} already in {side}")
-        return False
-    bal = get_balance_usdt()
-    print(f"Futures Balance: {bal}")
-    if bal < 1:
-        print("No Futures balance")
-        return False
-    qty, price = get_qty(symbol, bal)
-    if qty == 0: return False
-    s = side.upper()
-    mexc_side = "buy" if s in ["LONG", "BUY"] else "sell"
-    print(f"FIRING {mexc_side} {symbol} Qty {qty} Price {price} LEV {LEVERAGE}x")
+def calculate_safe_quantity(symbol):
+    """FINAL FIX for 2051 error"""
+    base = MAX_QTY.get(symbol, MAX_QTY["DEFAULT"])
+    
+    # For $14.99 balance, use small safe qty
+    if "KOMA" in symbol:
+        return 150  # Was 4000+ causing 2051, now 150 = safe
+    elif "GRASS" in symbol:
+        return 40   # GRASS price 0.32 = $12.8 notional
+    elif "HEI" in symbol:
+        return 100
+    elif "LAB" in symbol:
+        return 150
+    else:
+        return 80
+
+def autopilot_enter(symbol, side, price=None):
     try:
-        mexc_sym = MEXC_MAP.get(symbol, symbol)
+        exchange = get_exchange()
+        if not exchange:
+            return {"success": False, "message": "No exchange"}
+        
+        # 1. Check already in position
+        if is_already_in_position(exchange, symbol):
+            return {"success": False, "message": f"Already in {symbol}"}
+        
+        # 2. Safe quantity - FIX 2051
+        qty = calculate_safe_quantity(symbol)
+        
+        print(f"🚀 TRYING {side} {symbol} QTY {qty} LEV {LEVERAGE}x Bal ${BALANCE}")
+        
+        # 3. Set leverage & margin mode
         try:
-            ex.set_leverage(LEVERAGE, mexc_sym)
-            ex.set_margin_mode("isolated", mexc_sym)
-        except: pass
-        order = ex.create_market_order(mexc_sym, mexc_side, qty)
-        print(f"FILLED {symbol} {side} {qty} contracts - Order {order.get('id')}")
-        return True
+            exchange.set_leverage(LEVERAGE, symbol)
+            exchange.set_margin_mode('isolated', symbol)
+        except Exception as e:
+            print(f"Leverage set warning: {e}")
+        
+        # 4. Place order
+        order = exchange.create_market_order(symbol, side.lower(), qty)
+        
+        print(f"✅ AUTOPILOT ENTERED {symbol} {side} {qty} @ {price}")
+        return {"success": True, "order": order, "qty": qty}
+        
     except Exception as e:
-        print(f"MEXC ERROR {symbol}: {e}")
-        return False
+        err = str(e)
+        print(f"❌ AUTOPILOT FAILED {symbol}: {err}")
+        
+        # If still hits max
