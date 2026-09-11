@@ -8,7 +8,7 @@ BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 CF = "last_alerts.json"
 TF = "trades.json"
-MIN_SCORE = 75
+MIN_SCORE = 30
 
 SYMBOLS = [
  "VELVET/USDT:USDT",
