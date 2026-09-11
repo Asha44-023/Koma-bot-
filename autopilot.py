@@ -16,12 +16,8 @@ ex = ccxt.mexc({
 def get_balance_usdt():
     try:
         bal = ex.fetch_balance()
-        # MEXC futures balance sometimes in total
         usdt = bal.get("USDT", {})
         free = usdt.get("free", 0) or usdt.get("total", 0) or 0
-        if free == 0:
-            # Try fetch from other field
-            free = bal.get("free", {}).get("USDT", 0) or 0
         return float(free)
     except Exception as e:
         print(f"Balance err {e}")
@@ -32,18 +28,60 @@ def get_qty(symbol, balance):
         price = ex.fetch_ticker(symbol)["last"]
         qty = (balance * 0.95) / price
         return float(ex.amount_to_precision(symbol, qty)), price
-    except Exception as e:
-        print(f"Qty err {e}")
+    except:
         return 0,0
 
 def close_position(symbol):
-    """Close full position for symbol on MEXC Futures"""
     try:
         mexc_sym = MEXC_MAP.get(symbol, symbol)
-        # Fetch open positions
         positions = ex.fetch_positions([mexc_sym])
-        found = False
         for p in positions:
-            # p = dict with symbol, contracts, side
-            if mexc_sym in p['symbol'] or symbol.split("/")[0] in p['symbol']:
-                contracts = float(p.get('contracts', 0) or p.get('contractSize
+            contracts = float(p.get("contracts", 0) or 0)
+            if contracts > 0:
+                side = p.get("side", "")
+                close_side = "sell" if side == "long" else "buy"
+                print(f"🔄 Closing {symbol} {side} {contracts} with {close_side}")
+                try:
+                    ex.create_market_order(mexc_sym, close_side, contracts, None, {"reduceOnly": True})
+                    print(f"✅ CLOSED {symbol}")
+                    return True
+                except:
+                    try:
+                        ex.create_market_order(mexc_sym, close_side, contracts)
+                        print(f"✅ CLOSED {symbol} fallback")
+                        return True
+                    except Exception as e2:
+                        print(f"❌ Close err {e2}")
+                        return False
+        print(f"⚠️ No position for {symbol}")
+        return True
+    except Exception as e:
+        print(f"❌ close_position error {e}")
+        return False
+
+def close_partial(symbol, percent=50):
+    try:
+        mexc_sym = MEXC_MAP.get(symbol, symbol)
+        positions = ex.fetch_positions([mexc_sym])
+        for p in positions:
+            contracts = float(p.get("contracts", 0) or 0)
+            if contracts > 0:
+                side = p.get("side", "")
+                close_qty = contracts * (percent/100)
+                close_qty = float(ex.amount_to_precision(symbol, close_qty))
+                close_side = "sell" if side == "long" else "buy"
+                print(f"✂️ Closing {percent}% {symbol} {close_qty}")
+                ex.create_market_order(mexc_sym, close_side, close_qty, None, {"reduceOnly": True})
+                print(f"✅ PARTIAL CLOSED {percent}%")
+                return True
+        return False
+    except Exception as e:
+        print(f"❌ partial close err {e}")
+        return False
+
+def auto_trade(symbol, side, sl=None, tp=None, score=None):
+    if isinstance(sl, (int,float)) and sl > 50 and tp is None and score is None:
+        score = sl
+        sl = None
+    print(f"🤖 AUTO REQUEST {symbol} {side} Score:{score}")
+    if symbol not in
