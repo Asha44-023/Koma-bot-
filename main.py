@@ -11,6 +11,17 @@ CF = "last_alerts.json"
 TF = "trades.json"
 MIN_SCORE = 75
 
+# === ANTI-DUPLICATE 30MIN - ADDED ===
+last_sent_time = {}
+def is_duplicate(coin, minutes=30):
+    now_ts = time.time()
+    if coin in last_sent_time:
+        if now_ts - last_sent_time[coin] < minutes * 60:
+            return True
+    last_sent_time[coin] = now_ts
+    return False
+# === END ANTI-DUPLICATE ===
+
 SYMBOLS = [
  "VELVET/USDT:USDT",
  "KOMA/USDT:USDT",
@@ -397,7 +408,6 @@ def main():
     low_4 = df['low'].tail(16).min()
     high_4 = df['high'].tail(16).max()
     rsi_now = rsi(df['close']).iloc[-1]
-    # premium placeholder 0, you can add real premium later
     premium_now = 0
     vol_now = df['vol'].iloc[-1]
     vol_avg = df['vol'].tail(20).mean()
@@ -416,6 +426,12 @@ def main():
    except Exception as e:
     print(f"Filter err {e}")
    # ===== END NEW FILTER =====
+
+   # ===== ANTI-DUPLICATE 30MIN - ADDED HERE =====
+   if is_duplicate(sym, 30):
+       print(f"DUPLICATE BLOCK {sym} - sent <30min ago, skip")
+       continue
+   # ===== END ANTI-DUPLICATE =====
 
    if not filt(sym, typ):
     continue
