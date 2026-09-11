@@ -1,8 +1,9 @@
 import ccxt
 import pandas as pd
 import requests
+import os, json, time
+from datetime import datetime, timedelta
 
-# --- CONFIGURATION & ENV ---
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 CF = "last_alerts.json"
@@ -10,470 +11,457 @@ TF = "trades.json"
 MIN_SCORE = 75
 
 SYMBOLS = [
-    "VELVET/USDT:USDT",
-    "KOMA/USDT:USDT",
-    "GRASS/USDT:USDT",
-    "SIREN/USDT:USDT",
-    "HEI/USDT:USDT",
-    "LAB/USDT:USDT",
+ "VELVET/USDT:USDT",
+ "KOMA/USDT:USDT",
+ "GRASS/USDT:USDT",
+ "SIREN/USDT:USDT",
+ "HEI/USDT:USDT",
+ "LAB/USDT:USDT"
 ]
 
-
-# --- UTILITY & API FUNCTIONS ---
 def ge():
-    """Initializes and returns the MEXC exchange instance."""
-    return ccxt.mexc(
-        {
-            "apiKey": os.getenv("MEXC_API_KEY", ""),
-            "secret": os.getenv("MEXC_SECRET_KEY", ""),
-            "options": {"defaultType": "swap"},
-      def gc(s):
-    """Fetches 24h ticker data from MEXC REST API for a given symbol."""
-    try:
-        # Properly clean and format the symbol string for the API call
-        cleaned = s.split("/")[0] + "USDT"
-        url = f"https://mexc.com{cleaned}"
-        r = requests.get(url, timeout=10).json()
-        if isinstance(r, list) and len(r) > 0:
-            return float(r[0].get("priceChangePercent", 0))
-        return float(r.get("priceChangePercent", 0))
-    except Exception:
-        return 0.0  }
-    )
-
+ ex = ccxt.mexc({'enableRateLimit': True})
+ return ex, "MEXC-FUT"
 
 def gc(s):
-    """Fetches 24h ticker data from MEXC REST API for a given symbol."""
-    try:
-        cleaned = s.split("/")[0] + "USDT"
-        url = f"https://api.mexc.com/api/v3/ticker/24hr?symbol={cleaned}"
-        r = requests.get(url, timeout=10).json()
-        if isinstance(r, list) and len(r) > 0:
-            return float(r[0].get("priceChangePercent", 0))
-        return float(r.get("priceChangePercent", 0))
-    except Exception:
-        return 0.0
-
-
-def tg(m):
-    """Sends a markdown-formatted message to the configured Telegram channel."""
-    if not BOT or not CHAT:
-        print(f"[Telegram Mock]: {m}")
-        return
-    url = f"https://telegram.org{BOT}/sendMessage"
-    try:
-        requests.post(
-            url, json={"chat_id": CHAT, "text": m, "parse_mode": "Markdown"}, timeout=10
-        )
-    except Exception as e:
-        print(f"Telegram error: {e}")
-
-
-def lc():
-    """Loads the alert cooldown tracking registry."""
-    if os.path.exists(CF):
-        try:
-            with open(CF, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def sc(d):
-    """Saves the alert cooldown tracking registry."""
-    try:
-        with open(CF, "w") as f:
-            json.dump(d, f, indent=4)
-    except Exception as e:
-        print(f"Error saving tracking file: {e}")
-
-
-def lt():
-    """Loads open active trade tracking database."""
-    if os.path.exists(TF):
-        try:
-            with open(TF, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def st(d):
-    """Saves the active trade tracking database."""
-    try:
-        with open(TF, "w") as f:
-            json.dump(d, f, indent=4)
-    except Exception as e:
-        print(f"Error saving trades file: {e}")
-
-
-def fs(ex, sym, tf="15m", lim=200):
-    """Fetches OHLCV historical candlestick data dataframes via CCXT."""
-    try:
-        data = ex.fetch_ohlcv(sym, timeframe=tf, limit=lim)
-        df = pd.DataFrame(
-            data, columns=["timestamp", "open", "high", "low", "close", "volume"]
-        )
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        return df
-    except Exception as e:
-        print(f"Error fetching candles for {sym}: {e}")
-        return pd.DataFrame()
-
-
-# --- INDICATORS & TECHNICAL ANALYSIS ---
-def rsi(c, p=14):
-    """Calculates Relative Strength Index series from Close prices."""
-    delta = c.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=p, min_periods=p).mean()
-    avg_loss = loss.rolling(window=p, min_periods=p).mean()
-
-    for i in range(p, len(c)):
-        avg_gain.iloc[i] = (avg_gain.iloc[i - 1] * (p - 1) + gain.iloc[i]) / p
-        avg_loss.iloc[i] = (avg_loss.iloc[i - 1] * (p - 1) + loss.iloc[i]) / p
-
-    rs = avg_gain / (avg_loss + 1e-10)
-    return 100 - (100 / (1 + rs))
-
-
-def btc_t(ex):
-    """Checks the macro BTC trend filter via 4h 50/200 Exponential Moving Average alignment."""
-    try:
-        df = fs(ex, "BTC/USDT:USDT", tf="4h", lim=250)
-        if df.empty or len(df) < 200:
-            return "CHOP"
-        ema50 = df["close"].ewm(span=50, adjust=False).mean().iloc[-1]
-        ema200 = df["close"].ewm(span=200, adjust=False).mean().iloc[-1]
-        return "BULL" if ema50 > ema200 else "BEAR"
-    except Exception:
-        return "CHOP"
-
+ c = s.replace("/","").replace(":USDT","")
+ c = c.replace(":","")
+ if not c.endswith("USDT"):
+  c += "USDT"
+ try:
+  url = f"https://api.mexc.com/api/v3/ticker/24hr?symbol={c}"
+  r = requests.get(url, timeout=5).json()
+  return float(r.get('priceChangePercent',0))
+ except:
+  return 0.0
 
 def filt(sym, typ):
-    """Enforces cooldown timers between signals per symbol and action direction."""
-    reg = lc()
-    k = f"{sym}_{typ}"
-    now_ts = datetime.utcnow().timestamp()
-    if k in reg:
-        if now_ts - reg[k] < 7200:  # 2 Hours Cooldown Window
-            return False
-    reg[k] = now_ts
-    sc(reg)
-    return True
+ d = gc(sym)
+ if typ == "LONG" and d < -8:
+  return False
+ if typ == "SHORT" and d > 8:
+  return False
+ if abs(d) > 12:
+  return False
+ return True
 
+def tg(m):
+ try:
+  url = f"https://api.telegram.org/bot{BOT}/sendMessage"
+  requests.post(url, data={"chat_id": CHAT, "text": m, "parse_mode": "Markdown"}, timeout=15)
+ except:
+  pass
 
-# --- STRATEGY SCORING SYSTEM MODULES ---
-def ob_c(df):
-    """Scores Order Block footprints across structure matrix points."""
-    return 20 if df["volume"].iloc[-1] > df["volume"].rolling(20).mean().iloc[-1] else 0
+def lc():
+ try:
+  with open(CF,"r") as f:
+   data = json.load(f)
+   out = {}
+   for k,v in data.items():
+    out[k] = datetime.fromisoformat(v)
+   return out
+ except:
+  return {}
 
+def sc(d):
+ try:
+  with open(CF,"w") as f:
+   out = {}
+   for k,v in d.items():
+    out[k] = v.isoformat()
+   json.dump(out, f)
+ except:
+  pass
 
-def eq_c(df):
-    """Scores double equal extreme levels detection limits (EQH / EQL)."""
-    h1, h2 = df["high"].iloc[-2], df["high"].iloc[-3]
-    l1, l2 = df["low"].iloc[-2], df["low"].iloc[-3]
-    score = 0
-    if abs(h1 - h2) / h1 < 0.0005:
-        score += 25
-    if abs(l1 - l2) / l1 < 0.0005:
-        score += 25
-    return min(score, 25)
+def lt():
+ try:
+  with open(TF,"r") as f:
+   return json.load(f)
+ except:
+  return {}
 
+def st(d):
+ try:
+  with open(TF,"w") as f:
+   json.dump(d, f, default=str)
+ except:
+  pass
 
-def tur_c(df):
-    """Scores classic Turtle Soup stop-run counters."""
-    last_low = df["low"].iloc[-1]
-    last_high = df["high"].iloc[-1]
-    low_20 = df["low"].iloc[-21:-1].min()
-    high_20 = df["high"].iloc[-21:-1].max()
-    if last_low < low_20 and df["close"].iloc[-1] > low_20:
-        return 25
-    if last_high > high_20 and df["close"].iloc[-1] < high_20:
-        return 25
-    return 0
+def rsi(c, p=14):
+ d = c.diff()
+ g = d.where(d>0,0).rolling(p).mean()
+ l = -d.where(d<0,0).rolling(p).mean()
+ return 100-(100/(1+g/l))
 
+def fs(ex, sym, tf, lim):
+ try:
+  o = ex.fetch_ohlcv(sym, tf, limit=lim)
+  if not o:
+   return None
+  if len(o) < 60:
+   return None
+  df = pd.DataFrame(o)
+  df.columns = ['ts','open','high','low','close','vol']
+  for col in ['close','high','low','open','vol']:
+   df[col] = df[col].astype(float)
+  return df
+ except:
+  return None
 
-def mss_c(df):
-    """Scores Market Structure Shift confirmations via local swing breaks."""
-    close = df["close"].iloc[-1]
-    high_10 = df["high"].iloc[-11:-1].max()
-    low_10 = df["low"].iloc[-11:-1].min()
-    if close > high_10 or close < low_10:
-        return 20
-    return 0
-
-
-def pd_c(df):
-    """Scores execution zone within Premium vs Discount ranges."""
-    h_max = df["high"].rolling(20).max().iloc[-1]
-    l_min = df["low"].rolling(20).min().iloc[-1]
-    rng = h_max - l_min
-    if rng == 0:
-        return 0
-    pos = (df["close"].iloc[-1] - l_min) / rng
-    if pos < 0.3 or pos > 0.7:
-        return 10
-    return 0
-
-
-def liq_sweep_c(df):
-    """Evaluates high priority Liquidity Sweeps via ATR and candle wicks metrics."""
-    h, l, o, c = df["high"].iloc[-1], df["low"].iloc[-1], df["open"].iloc[-1], df["close"].iloc[-1]
-    tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean().iloc[-1] if len(df) >= 14 else (h - l)
-    if atr == 0:
-        return 0, "NONE"
-
-    u_wick = h - max(o, c)
-    l_wick = min(o, c) - l
-
-    if l_wick > 1.5 * atr and c > o:
-        return 30, "BULL"
-    if u_wick > 1.5 * atr and c < o:
-        return 30, "BEAR"
-    return 0, "NONE"
-
-
-def whale_manip_c(df):
-    """Identifies Whale Trap abnormalities or Real Buying Breakouts."""
-    v_now = df["volume"].iloc[-1]
-    v_avg = df["volume"].rolling(20).mean().iloc[-1]
-    chg = abs(df["close"].iloc[-1] - df["open"].iloc[-1]) / df["open"].iloc[-1]
-
-    if v_now > 3 * v_avg and chg < 0.002:
-        return 0, "FAKE"
-    if v_now > 2.5 * v_avg and df["close"].iloc[-1] > df["high"].iloc[-2]:
-        return 20, "REAL_BUY"
-    return 0, "NONE"
-
-
-def fvg_c(df):
-    """Scores Fair Value Gaps displacements imbalance footprints."""
-    if (df["low"].iloc[-1] > df["high"].iloc[-3]) or (df["high"].iloc[-1] < df["low"].iloc[-3]):
-        return 15
-    return 0
-
+def btc_t(ex):
+ try:
+  df = fs(ex, "BTC/USDT:USDT", "4h", 50)
+  if df is None:
+   return "BTC_NEUTRAL"
+  e50 = df['close'].ewm(span=50).mean()
+  e50 = e50.iloc[-1]
+  e200 = df['close'].ewm(span=200).mean()
+  e200 = e200.iloc[-1]
+  cp = df['close'].iloc[-1]
+  if cp > e50 > e200:
+   return "BTC_BULL"
+  if cp < e50 < e200:
+   return "BTC_BEAR"
+  return "BTC_NEUTRAL"
+ except:
+  return "BTC_NEUTRAL"
 
 def kz_c():
-    """Identifies session timeline Killzones and attributes dynamic scores/weights."""
-    hr = datetime.utcnow().hour
-    if 8 <= hr < 11:
-        return 5, "LONDON"
-    elif 13 <= hr < 16:
-        return 10, "NY"
-    elif 0 <= hr < 2:
-        return -5, "ASIAN"
-    return 0, "NONE"
+ try:
+  h = datetime.utcnow().hour
+  if 8 <= h <= 11:
+   return "LONDON_KZ", 5
+  if 13 <= h <= 16:
+   return "NY_KZ", 5
+  return "OFF_KZ", 0
+ except:
+  return "OFF_KZ", 0
 
+def ob_c(df):
+ try:
+  last = df.tail(10)
+  if last['low'].min() < df['low'].iloc[-20:-10].min():
+   return "BULL_OB", 10
+  if last['high'].max() > df['high'].iloc[-20:-10].max():
+   return "BEAR_OB", 10
+  return "NO_OB", 0
+ except:
+  return "NO_OB", 0
 
-def score_v8(df):
-    """Aggregates absolute matrix values into a directional scoring report."""
-    bull, bear = 0, 0
-    fakes = []
+def eq_c(df):
+ try:
+  lows = df['low'].tail(20)
+  highs = df['high'].tail(20)
+  if (lows.max()-lows.min())/lows.min()*100 < 0.5:
+   return "EQ_LOWS", 10
+  if (highs.max()-highs.min())/highs.min()*100 < 0.5:
+   return "EQ_HIGHS", 10
+  return "NO_EQ", 0
+ except:
+  return "NO_EQ", 0
 
-    ob = ob_c(df)
-    eq = eq_c(df)
-    tur = tur_c(df)
-    mss = mss_c(df)
-    pd_v = pd_c(df)
-    fvg = fvg_c(df)
+def tur_c(df):
+ try:
+  if df['low'].iloc[-1] < df['low'].iloc[-20:-1].min():
+   if df['close'].iloc[-1] > df['low'].iloc[-20:-1].min():
+    return "TURTLE_LONG", 15
+  if df['high'].iloc[-1] > df['high'].iloc[-20:-1].max():
+   if df['close'].iloc[-1] < df['high'].iloc[-20:-1].max():
+    return "TURTLE_SHORT", 15
+  return "NO_TURTLE", 0
+ except:
+  return "NO_TURTLE", 0
 
-    kz_w, kz_n = kz_c()
-    if kz_n == "ASIAN":
-        fakes.append("Asian Session Chop Box")
+def mss_c(df):
+ try:
+  if df['high'].iloc[-1] > df['high'].iloc[-2]:
+   if df['high'].iloc[-2] < df['high'].iloc[-3]:
+    return "MSS_BULL", 10
+  if df['low'].iloc[-1] < df['low'].iloc[-2]:
+   if df['low'].iloc[-2] > df['low'].iloc[-3]:
+    return "MSS_BEAR", 10
+  return "NO_MSS", 0
+ except:
+  return "NO_MSS", 0
 
-    ls_pts, ls_dir = liq_sweep_c(df)
-    wm_pts, wm_msg = whale_manip_c(df)
+def pd_c(df):
+ try:
+  high = df['high'].tail(50).max()
+  low = df['low'].tail(50).min()
+  mid = (high+low)/2
+  cp = df['close'].iloc[-1]
+  if cp < mid:
+   return "DISCOUNT", 10
+  else:
+   return "PREMIUM", 0
+ except:
+  return "NO_PD", 0
 
-    if wm_msg == "FAKE":
-        fakes.append("Whale Manipulation Trap Detected")
+def fvg_c(df):
+ try:
+  if df['low'].iloc[-1] > df['high'].iloc[-3]:
+   return "BULL_FVG", 10
+  if df['high'].iloc[-1] < df['low'].iloc[-3]:
+   return "BEAR_FVG", 10
+  return "NO_FVG", 0
+ except:
+  return "NO_FVG", 0
 
-    # Composite Allocation Routing
-    base_pool = ob + eq + tur + mss + pd_v + fvg
-    if kz_w > 0:
-        base_pool += kz_w
+def liq_sweep_c(df):
+ try:
+  if df['low'].iloc[-1] < df['low'].iloc[-10:-1].min():
+   vol_up = df['vol'].iloc[-1] > df['vol'].iloc[-10:-1].mean()*1.5
+   if vol_up:
+    if df['close'].iloc[-1] > df['low'].iloc[-10:-1].min():
+     return "LIQ_SWEEP_LONG", 30
+  if df['high'].iloc[-1] > df['high'].iloc[-10:-1].max():
+   vol_up = df['vol'].iloc[-1] > df['vol'].iloc[-10:-1].mean()*1.5
+   if vol_up:
+    if df['close'].iloc[-1] < df['high'].iloc[-10:-1].max():
+     return "LIQ_SWEEP_SHORT", 30
+  return "NO_SWEEP", 0
+ except:
+  return "NO_SWEEP", 0
 
-    c_close = df["close"].iloc[-1]
-    ma20 = df["close"].rolling(20).mean().iloc[-1]
-
-    if c_close >= ma20:
-        bull += base_pool + (ls_pts if ls_dir == "BULL" else 0) + (wm_pts if wm_msg == "REAL_BUY" else 0)
-    if c_close <= ma20:
-        bear += base_pool + (ls_pts if ls_dir == "BEAR" else 0)
-
-    return bull, bear, fakes
-
-
-# --- TRAILING HOLD LOGIC MATRIX ENGINE ---
-def is_consolidating(df):
-    """Evaluates channel range volatility compressions."""
-    last20 = df["close"].iloc[-20:]
-    rng = (last20.max() - last20.min()) / last20.min()
-    v5 = df["volume"].iloc[-5:].mean()
-    v_avg = df["volume"].rolling(20).mean().iloc[-1]
-    return rng < 0.028 and v5 < (v_avg * 0.75)
-
+def whale_manip_c(df):
+ try:
+  c1 = df['close'].iloc[-3]
+  c2 = df['close'].iloc[-2]
+  c3 = df['close'].iloc[-1]
+  v1 = df['vol'].iloc[-3]
+  v2 = df['vol'].iloc[-2]
+  v3 = df['vol'].iloc[-1]
+  if v2 > v1*2 and v2 > v3*2:
+   if c2 < c1 and c2 < c3:
+    return "WHALE_FAKE_DOWN", -20
+   if c2 > c1 and c2 > c3:
+    return "WHALE_FAKE_UP", -20
+  return "NO_WHALE", 0
+ except:
+  return "NO_WHALE", 0
 
 def vol_profit_c(df, pnl):
-    """Parses volume delta adjustments for holding/taking profits logic."""
-    v_now = df["volume"].iloc[-1]
-    v_prev = df["volume"].iloc[-2]
-    v_avg = df["volume"].rolling(20).mean().iloc[-1]
+ if pnl <= 0:
+  return "NO_VOL",0,"NONE"
+ vp = df['vol'].iloc[-2]
+ vn = df['vol'].iloc[-1]
+ va = df['vol'].iloc[-20:-1].mean()
+ bull = df['close'].iloc[-1] > df['open'].iloc[-1]
+ if vn > vp*1.30 and vn > va:
+  if bull:
+   return "VOLBUYINCREASE",15,"HOLD_LONG"
+  else:
+   return "VOLSELLINCREASE",15,"HOLD_SHORT"
+ if vn < vp*0.70:
+  if bull:
+   return "VOLBUYDECREASE",0,"TP_LONG"
+  else:
+   return "VOLSELLDECREASE",0,"TP_SHORT"
+ return "NO_VOL",0,"NONE"
 
-    if pnl > 0 and v_now > 1.30 * v_prev and v_now > 1.30 * v_avg:
-        return "VOLBUYINCREASE" if df["close"].iloc[-1] > df["open"].iloc[-1] else "VOLSELLINCREASE"
-    if v_now < 0.70 * v_avg:
-        return "VOLBUYDECREASE" if df["close"].iloc[-1] > df["open"].iloc[-1] else "VOLSELLDECREASE"
-    return "CONTINUE"
+def junction_decision(df, pos):
+ try:
+  last20 = df.tail(20)
+  high = last20['high'].max()
+  low = last20['low'].min()
+  rng = (high-low)/low*100
+  if rng > 2.8:
+   return None,None
+  rs = rsi(df['close']).iloc[-1]
+  close = df['close'].iloc[-1]
+  ema20 = df['close'].ewm(span=20).mean().iloc[-1]
+  if pos == "LONG":
+   if rs > 58 and close > ema20:
+    return "HOLD_BULL", f"HOLD LONG Box RSI {rs:.0f}"
+   if rs < 48:
+    return "EXIT_WARN", f"JUNCTION LONG Weak RSI {rs:.0f} Exit 50%"
+  if pos == "SHORT":
+   if rs < 42 and close < ema20:
+    return "HOLD_BEAR", f"HOLD SHORT Box RSI {rs:.0f}"
+  return None,None
+ except:
+  return None,None
 
+def score_v8(df, ex):
+ bull = 0
+ bear = 0
+ re = []
+ fake = []
+ try:
+  ob_name, ob_pts = ob_c(df)
+  if ob_pts > 0:
+   if "BULL" in ob_name:
+    bull += ob_pts
+   else:
+    bear += ob_pts
+   re.append(ob_name)
+  eq_name, eq_pts = eq_c(df)
+  if eq_pts > 0:
+   bull += eq_pts
+   re.append(eq_name)
+  tur_name, tur_pts = tur_c(df)
+  if tur_pts > 0:
+   if "LONG" in tur_name:
+    bull += tur_pts
+   else:
+    bear += tur_pts
+   re.append(tur_name)
+  mss_name, mss_pts = mss_c(df)
+  if mss_pts > 0:
+   if "BULL" in mss_name:
+    bull += mss_pts
+   else:
+    bear += mss_pts
+   re.append(mss_name)
+  pd_name, pd_pts = pd_c(df)
+  re.append(pd_name)
+  if "DISCOUNT" in pd_name:
+   bull += pd_pts
+  fvg_name, fvg_pts = fvg_c(df)
+  if fvg_pts > 0:
+   if "BULL" in fvg_name:
+    bull += fvg_pts
+   else:
+    bear += fvg_pts
+   re.append(fvg_name)
+  liq_name, liq_pts = liq_sweep_c(df)
+  if liq_pts > 0:
+   if "LONG" in liq_name:
+    bull += liq_pts
+   else:
+    bear += liq_pts
+   re.append(liq_name)
+  whale_name, whale_pts = whale_manip_c(df)
+  if whale_pts < 0:
+   fake.append(whale_name)
+  else:
+   re.append(whale_name)
+  kz_name, kz_pts = kz_c()
+  re.append(kz_name)
+  bull += kz_pts
+  bear += kz_pts
+  bt = btc_t(ex)
+  re.append(bt)
+  if bt == "BTC_BULL":
+   bull += 10
+  if bt == "BTC_BEAR":
+   bear += 10
+  rs = rsi(df['close']).iloc[-1]
+  if rs < 30:
+   bull += 15
+   re.append(f"RSI_{rs:.0f}_OS")
+  if rs > 70:
+   bear += 15
+   re.append(f"RSI_{rs:.0f}_OB")
+ except:
+  pass
+ return bull,bear,re,fake
 
-def junction_decision(df, position_type):
-    """Determines breakout boundary validation checkpoints inside boxes."""
-    if not is_consolidating(df):
-        return "CONTINUE"
-
-    c_close = df["close"].iloc[-1]
-    ema20 = df["close"].ewm(span=20, adjust=False).mean().iloc[-1]
-    r_val = rsi(df["close"]).iloc[-1]
-
-Use code with caution.
-if position_type == "LONG":
-if r_val > 58 and c_close > ema20:
-return "HOLD_BULL"
-if r_val < 48:
-return "EXIT_WARN"
-elif position_type == "SHORT":
-if r_val < 42 and c_close < ema20:
-return "HOLD_BEAR"
-return "CONTINUE"
---- EXECUTION HOOKS ENGINE ---
-def execute_signal_scan(ex):
-"""Scans and acts on trade entry parameters for all 6 coins."""
-print("Executing Signal Entry Scan Loop...")
-btc_status = btc_t(ex)
-for sym in SYMBOLS:
-df = fs(ex, sym, tf="15m", lim=200)
-if df.empty or len(df) < 40:
-continue
-# Volume Filter Calculation
-v5_avg = df["volume"].iloc[-5:].mean()
-v20_avg = df["volume"].rolling(20).mean().iloc[-1]
-if v5_avg <= (1.3 * v20_avg):
-continue
-bull, bear, fakes = score_v8(df)
-high_score = max(bull, bear)
-total_score = 50 + high_score
-if total_score < MIN_SCORE:
-continue
-typ = "LONG" if bull >= bear else "SHORT"
-# 24h Change Filter Guardrails
-chg_24h = gc(sym)
-if abs(chg_24h) > 12.0:
-fakes.append("Volatility Overflow Extreme Pump/Dump > 12%")
-if typ == "LONG" and chg_24h < -8.0:
-fakes.append("Long Blocked: Too Deep Downward Slope <-8%")
-if typ == "SHORT" and chg_24h > 8.0:
-fakes.append("Short Blocked: Too Highly Pumped Above >+8%")
-# Final Filter Validations
-if btc_status == "CHOP":
-fakes.append("BTC Correlation Disrupted")
-if typ == "LONG" and btc_status == "BEAR":
-fakes.append("Against Macro BTC Trend Direction")
-if typ == "SHORT" and btc_status == "BULL":
-fakes.append("Against Macro BTC Trend Direction")
-if is_consolidating(df):
-fakes.append("Locked inside tight consolidation box")
-if len(fakes) > 0:
-print(f"Skipping Entry {sym} due to Filters: {fakes}")
-continue
-if not filt(sym, typ):
-continue
-# Build Trade Matrix Parameters
-entry_price = float(df["close"].iloc[-1])
-sl = entry_price * 0.97 if typ == "LONG" else entry_price * 1.03
-tp = entry_price * 1.06 if typ == "LONG" else entry_price * 0.94
-strength = "MAX" if total_score >= 80 else "STRONG" if total_score >= 60 else "WEAK"
-if strength == "WEAK":
-continue
-# Transmit Alert Notification
-alert_msg = (
-f"🚀 KOMA NEW SIGNAL AVAILABLE\n\n"
-f"• Asset: {sym}\n"
-f"• Direction: {typ}\n"
-f"• Score Metrics: {total_score} ({strength})\n"
-f"• Execution Price: {entry_price}\n"
-f"• Stop Loss: {sl:.5f}\n"
-f"• Take Profit: {tp:.5f}\n"
-f"• 24h Delta: {chg_24h}%"
-)
-tg(alert_msg)
-# Database Pipeline Storage Tracking Update
-trades = lt()
-trades[sym] = {
-"type": typ,
-"entry_price": entry_price,
-"sl": sl,
-"tp": tp,
-"last_hold_alert": 0,
-}
-st(trades)
-def execute_hold_scan(ex):
-"""Evaluates open positions metrics to transmit trailing hold signals."""
-print("Executing Active Trades Tracking Engine...")
-trades = lt()
-if not trades:
-return
-now_ts = datetime.utcnow().timestamp()
-for sym in list(trades.keys()):
-df = fs(ex, sym, tf="15m", lim=200)
-if df.empty:
-continue
-t_data = trades[sym]
-c_price = float(df["close"].iloc[-1])
-# Evaluate Position PNL Context
-if t_data["type"] == "LONG":
-pnl = (c_price - t_data["entry_price"]) / t_data["entry_price"]
-is_invalidated = c_price <= t_data["sl"] or c_price >= t_data["tp"]
-else:
-pnl = (t_data["entry_price"] - c_price) / t_data["entry_price"]
-is_invalidated = c_price >= t_data["sl"] or c_price <= t_data["tp"]
-if is_invalidated:
-print(f"Trade target or stop invalidation met for {sym}. Cleaning tracking database records.")
-del trades[sym]
-st(trades)
-continue
-# Parse Volumetric Profit Mechanics (1-hour message rate throttle)
-if now_ts - t_data.get("last_hold_alert", 0) > 3600:
-vol_verdict = vol_profit_c(df, pnl)
-if vol_verdict in ["VOLBUYINCREASE", "VOLSELLINCREASE"]:
-tg(f"📈 HOLD ACTIVE LOGIC [{sym}]\nVolume momentum increasing. Maintain {t_data['type']} pattern positions structure safely.")
-t_data["last_hold_alert"] = now_ts
-elif vol_verdict in ["VOLBUYDECREASE", "VOLSELLDECREASE"]:
-tg(f"⚠️ TAKE PROFIT ADVISORY [{sym}]\nVolume velocity exhaustion warning detected. Consider locking returns fractions.")
-t_data["last_hold_alert"] = now_ts
-# Parse Junction Consolidation Channels Breakouts Checkpoints
-junc_verdict = junction_decision(df, t_data["type"])
-if junc_verdict in ["HOLD_BULL", "HOLD_BEAR"]:
-tg(f"💎 JUNCTION BOX HOLD [{sym}]\nConsolidation breakout bias aligned strong. HOLD POSITION verified.")
-elif junc_verdict == "EXIT_WARN":
-tg(f"🚨 JUNCTION EXIT WARNING [{sym}]\nStructural range momentum distribution breakdown alert! Protect capital allocations.")
-del trades[sym]
-st(trades)
 def main():
-"""Main Orchestrator Entrypoint Loop Interface."""
-print("KOMA BOT V9.1 Daemon Engine Starting Up Operational Cycles...")
-ex = ge()
-while True:
-try:
-execute_signal_scan(ex)
-execute_hold_scan(ex)
-except Exception as e:
-print(f"Runtime Operational Loop Instability Error Exception: {e}")
-print("Execution tracking wave window finished. Sleeping 60 seconds...")
-time.sleep(60)
-if name == "main":
-main()
+ ex, exn = ge()
+ ca = lc()
+ tr = lt()
+ now = datetime.utcnow()
+ for sym in SYMBOLS:
+  try:
+   df = fs(ex, sym, "15m", 200)
+   if df is None:
+    continue
+   va = df['vol'].rolling(20).mean()
+   va = va.iloc[-1]
+   v5 = df['vol'].iloc[-5:]
+   v5 = v5.mean()
+   if v5 < va*1.3:
+    continue
+   bull,bear,re,fake = score_v8(df, ex)
+   total = 50+max(bull,bear)
+   if total < MIN_SCORE:
+    continue
+   if bull > bear:
+    typ = "LONG"
+    action = "BUY"
+   elif bear > bull:
+    typ = "SHORT"
+    action = "SELL"
+   else:
+    continue
+   if not filt(sym, typ):
+    continue
+   key = f"{sym}_{typ}"
+   if key in ca:
+    diff = now - ca[key]
+    if diff < timedelta(hours=2):
+     continue
+   price = df['close'].iloc[-1]
+   sl = price*0.97 if typ == "LONG" else price*1.03
+   tp = price*1.06 if typ == "LONG" else price*0.94
+   if total < 60:
+    continue
+   if len(fake) > 0:
+    continue
+   strength = "STRONG" if total < 80 else "MAX"
+   reasons = ', '.join(re[:6])
+   msg = f"{action} {sym} {typ} {strength} ({total}/100)\nPrice: {price:.5f}\nSL: {sl:.5f} TP: {tp:.5f}\nReasons: {reasons}\n{exn}"
+   tg(msg)
+   ca[key] = now
+   sc(ca)
+   if key not in tr:
+    tr[key] = {"entry": price, "type": typ, "time": now.isoformat()}
+   st(tr)
+  except Exception as e:
+   print(f"ERR {sym} {e}")
+   time.sleep(1)
+ for key,data in list(tr.items()):
+  try:
+   sym = key.replace(f"_{data['type']}","")
+   if sym not in SYMBOLS:
+    for s in SYMBOLS:
+     if s.split("/")[0] in key:
+      sym = s
+      break
+   df = fs(ex, sym, "15m", 200)
+   if df is None:
+    continue
+   typ = data.get("type","LONG")
+   entry = data.get("entry",0)
+   now_p = df['close'].iloc[-1]
+   if typ == "LONG":
+    pnl = (now_p-entry)/entry*100
+   else:
+    pnl = (entry-now_p)/entry*100
+   v_name,_,v_dir = vol_profit_c(df, pnl)
+   jv_key = f"VOL_{key}_{v_name}"
+   if v_dir!= "NONE":
+    if jv_key not in ca:
+     need_send = True
+    else:
+     diff = now - ca[jv_key]
+     need_send = diff > timedelta(hours=1)
+    if need_send:
+     if v_dir == "HOLD_LONG":
+      tg(f"HOLD {sym} LONG Vol UP PnL {pnl:.2f}% Keep HOLD Price {now_p:.5f}")
+     if v_dir == "TP_LONG":
+      tg(f"TAKE PROFIT {sym} LONG Vol DOWN PnL {pnl:.2f}% Secure 50% Price {now_p:.5f}")
+     if v_dir == "HOLD_SHORT":
+      tg(f"HOLD {sym} SHORT Vol UP PnL {pnl:.2f}% Keep HOLD")
+     if v_dir == "TP_SHORT":
+      tg(f"TAKE PROFIT {sym} SHORT Vol DOWN PnL {pnl:.2f}%")
+     ca[jv_key] = now
+     sc(ca)
+   dec, j_msg = junction_decision(df, typ)
+   if dec:
+    j_key = f"JUNC_{key}"
+    if j_key in ca:
+     diff = now - ca[j_key]
+     if diff < timedelta(hours=1):
+      continue
+    full = f"{j_msg}\nCoin: {sym}\nEntry {entry:.5f} Now {now_p:.5f} PnL {pnl:.2f}%"
+    tg(full)
+    ca[j_key] = now
+    sc(ca)
+  except Exception as e:
+   print(f"JUNC ERR {e}")
+   continue
+
+if __name__ == "__main__":
+ main()
