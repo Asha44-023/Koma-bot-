@@ -8,7 +8,7 @@ CF="last_alerts.json"
 TF="trades.json"
 COOLDOWN_HOURS=2
 SYMBOLS=["VELVET/USDT:USDT","KOMA/USDT:USDT","GRASS/USDT:USDT","SIREN/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT"]
-
+#
 def gc(s):
     try:
         c=s.replace("/","").replace(":USDT","").replace(":","")
@@ -17,7 +17,7 @@ def gc(s):
         return float(requests.get(f"https://api.mexc.com/api/v3/ticker/24hr?symbol={c}",timeout=5).json().get('priceChangePercent',0))
     except:
         return 0.0
-
+#
 def filt(sym,typ):
     d=gc(sym)
     if typ=="LONG" and d<-8:
@@ -27,47 +27,47 @@ def filt(sym,typ):
     if abs(d)>12:
         return False
     return True
-
+#
 def tg(m):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage",data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=15)
     except:
         pass
-
+#
 def lc():
     try:
         with open(CF,"r") as f:
             return {k:datetime.fromisoformat(v) for k,v in json.load(f).items()}
     except:
         return {}
-
+#
 def sc(d):
     try:
         with open(CF,"w") as f:
             json.dump({k:v.isoformat() for k,v in d.items()},f)
     except:
         pass
-
+#
 def lt():
     try:
         with open(TF,"r") as f:
             return json.load(f)
     except:
         return {}
-
+#
 def st(d):
     try:
         with open(TF,"w") as f:
             json.dump(d,f,default=str)
     except:
         pass
-
+#
 def rsi(c,p=14):
     d=c.diff()
     g=d.where(d>0,0).rolling(p).mean()
     l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
-
+#
 def fs(ex,sym,tf,lim):
     try:
         o=ex.fetch_ohlcv(sym,tf,limit=lim)
@@ -79,11 +79,11 @@ def fs(ex,sym,tf,lim):
         return df
     except:
         return None
-
+#
 def ge():
     ex=ccxt.mexc({'enableRateLimit':True})
     return ex,"MEXC-FUT"
-
+#
 def btc_t(ex):
     try:
         df=fs(ex,"BTC/USDT:USDT","4h",50)
@@ -97,7 +97,9 @@ def btc_t(ex):
             return "BTC_BEAR"
         return "BTC_NEUTRAL"
     except:
-        return "BTC_NEUTRAL" def ob_c(df):
+        return "BTC_NEUTRAL"
+#
+def ob_c(df):
     try:
         for i in range(-10,-3):
             if df['close'].iloc[i]<df['open'].iloc[i] and df['close'].iloc[-1]>df['high'].iloc[i] and df['low'].iloc[i]<=df['low'].iloc[-5:].min()*1.01:
@@ -107,7 +109,7 @@ def btc_t(ex):
         return "NO_OB",0,"NONE"
     except:
         return "NO_OB",0,"NONE"
-
+#
 def eq_c(df):
     try:
         lo=df['low'].iloc[-20:-1]
@@ -118,9 +120,7 @@ def eq_c(df):
             return "EQ_HIGHS_BEAR",25,"BEAR"
         return "NO_EQ",0,"NONE"
     except:
-        return "NO_EQ",0,"NONE"
-
-def tur_c(df):
+        return "NO_EQ",0,"NONE" def tur_c(df):
     try:
         hh=df['high'].iloc[-20:-1].max()
         ll=df['low'].iloc[-20:-1].min()
@@ -131,7 +131,7 @@ def tur_c(df):
         return "NO_TURTLE",0,"NONE"
     except:
         return "NO_TURTLE",0,"NONE"
-
+#
 def mss_c(df):
     try:
         if df['close'].iloc[-1]>df['high'].iloc[-20:-1].max() and df['close'].iloc[-3]<df['low'].iloc[-10:-3].min():
@@ -141,7 +141,7 @@ def mss_c(df):
         return "NO_MSS",0,"NONE"
     except:
         return "NO_MSS",0,"NONE"
-
+#
 def pd_c(df):
     try:
         h=df['high'].iloc[-50:].max()
@@ -154,7 +154,7 @@ def pd_c(df):
         return "EQ_ZONE",0,"NONE"
     except:
         return "EQ_ZONE",0,"NONE"
-
+#
 def liq_sweep_c(df):
     try:
         low_wick=min(df['open'].iloc[-1],df['close'].iloc[-1])-df['low'].iloc[-1]
@@ -167,7 +167,7 @@ def liq_sweep_c(df):
         return "NO_SWEEP",0,"NONE"
     except:
         return "NO_SWEEP",0,"NONE"
-
+#
 def whale_manip_c(df):
     try:
         vol_avg=df['vol'].iloc[-20:-1].mean()
@@ -182,7 +182,7 @@ def whale_manip_c(df):
         return "NO_WHALE",0,"NONE"
     except:
         return "NO_WHALE",0,"NONE"
-
+#
 def fvg_c(df):
     try:
         if df['low'].iloc[-1]>df['high'].iloc[-3]:
@@ -192,7 +192,7 @@ def fvg_c(df):
         return "NO_FVG",0,"NONE"
     except:
         return "NO_FVG",0,"NONE"
-
+#
 def kz_c():
     try:
         h=datetime.utcnow().hour
@@ -205,7 +205,7 @@ def kz_c():
         return "NO_KZ",0
     except:
         return "NO_KZ",0
-
+#
 def vol_profit_c(df,pnl):
     try:
         if pnl<=0:
@@ -227,7 +227,7 @@ def vol_profit_c(df,pnl):
         return "NO_VOL",0,"NONE"
     except:
         return "NO_VOL",0,"NONE"
-
+#
 def is_consolidating(df):
     try:
         last20=df.tail(20)
@@ -239,7 +239,7 @@ def is_consolidating(df):
         return range_pct<2.8 and vol_now<vol_avg*0.75
     except:
         return False
-
+#
 def junction_decision(df,position_type):
     try:
         if not is_consolidating(df):
@@ -264,7 +264,7 @@ def junction_decision(df,position_type):
         return None,None
     except:
         return None,None
-
+#
 def score_v8(df,ex):
     bull=0
     bear=0
@@ -333,7 +333,7 @@ def score_v8(df,ex):
     except:
         pass
     return bull,bear,re,fake
-
+#
 def main():
     ex,exn=ge()
     ca=lc()
@@ -383,7 +383,6 @@ def main():
         except Exception as e:
             print(f"ERR {sym}: {e}")
             time.sleep(1)
-
     for key,data in list(tr.items()):
         try:
             sym=key.replace(f"_{data['type']}","")
@@ -424,6 +423,7 @@ def main():
         except Exception as e:
             print(f"JUNCTION ERR {key}: {e}")
             continue
-
+#
 if __name__=="__main__":
     main()
+#
