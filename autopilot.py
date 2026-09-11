@@ -33,6 +33,22 @@ def get_qty(symbol, balance):
         print(f"Qty err {e}")
         return 0, 0
 
+def is_already_in_position(symbol, side):
+    try:
+        mexc_sym = MEXC_MAP.get(symbol, symbol)
+        positions = ex.fetch_positions([mexc_sym])
+        for p in positions:
+            contracts = float(p.get("contracts", 0) or 0)
+            if contracts > 0:
+                pos_side = p.get("side", "")
+                if pos_side == "long" and side.upper() in ["LONG", "BUY"]:
+                    return True
+                if pos_side == "short" and side.upper() in ["SHORT", "SELL"]:
+                    return True
+        return False
+    except:
+        return False
+
 def close_position(symbol):
     try:
         mexc_sym = MEXC_MAP.get(symbol, symbol)
@@ -68,9 +84,9 @@ def close_partial(symbol, percent=50):
         for p in positions:
             contracts = float(p.get("contracts", 0) or 0)
             if contracts > 0:
-                side = p.get("side", "")
                 close_qty = contracts * (percent / 100)
                 close_qty = float(ex.amount_to_precision(symbol, close_qty))
+                side = p.get("side", "")
                 close_side = "sell" if side == "long" else "buy"
                 ex.create_market_order(mexc_sym, close_side, close_qty, None, {"reduceOnly": True})
                 print(f"PARTIAL CLOSED {percent}% {symbol}")
@@ -87,6 +103,9 @@ def auto_trade(symbol, side, sl=None, tp=None, score=None):
     print(f"AUTO REQUEST {symbol} {side} Score:{score}")
     if symbol not in SYMBOLS_ALLOWED:
         print(f"BLOCKED {symbol} not allowed")
+        return False
+    if is_already_in_position(symbol, side):
+        print(f"SKIP {symbol} already in {side} position - no double entry")
         return False
     bal = get_balance_usdt()
     print(f"Futures Balance: {bal}")
