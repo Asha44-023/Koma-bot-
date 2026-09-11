@@ -121,7 +121,7 @@ def fs(ex, sym, tf, lim):
 
 def btc_t(ex):
  try:
-  df = fs(ex, "BTC/USDT:USDT", "4h", 50)
+  df = fs(ex, "BTC/USDT", "4h", 50)
   if df is None:
    return "BTC_NEUTRAL"
   e50 = df['close'].ewm(span=50).mean().iloc[-1]
