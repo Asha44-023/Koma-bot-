@@ -15,7 +15,7 @@ SL_PCT = 1.2
 AUTOPILOT = True # BOTH signals + autopilot ON
 
 def ge():
-    ex=ccxt.mexc({'apiKey':os.getenv("MEXC_API_KEY"),'secret':os.getenv("MEXC_SECRET"),'enableRateLimit':True})
+    ex=ccxt.mexc({'apiKey':os.getenv("MEXC_API_KEY"),'secret':os.getenv("MEXC_API_SECRET") or os.getenv("MEXC_SECRET"),'enableRateLimit':True})
     ex2=ccxt.mexc({'enableRateLimit':True})
     return ex, ex2
 
