@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import os, json, time
 from datetime import datetime, timedelta
+from filters import check_all_filters
 
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -387,6 +388,35 @@ def main():
     action = "SELL"
    else:
     continue
+
+   # ===== NEW FILTER MIDDLE SIDE - PASTED HERE =====
+   try:
+    price_now = df['close'].iloc[-1]
+    low_24 = df['low'].tail(96).min()
+    high_24 = df['high'].tail(96).max()
+    low_4 = df['low'].tail(16).min()
+    high_4 = df['high'].tail(16).max()
+    rsi_now = rsi(df['close']).iloc[-1]
+    # premium placeholder 0, you can add real premium later
+    premium_now = 0
+    vol_now = df['vol'].iloc[-1]
+    vol_avg = df['vol'].tail(20).mean()
+    btc_trend = btc_t(ex)
+    if btc_trend == "BTC_BULL":
+        btc_trend_simple = "UP"
+    elif btc_trend == "BTC_BEAR":
+        btc_trend_simple = "DOWN"
+    else:
+        btc_trend_simple = "NEUTRAL"
+
+    blocked, reason = check_all_filters(price_now, low_24, high_24, low_4, high_4, rsi_now, premium_now, vol_now, vol_avg, btc_trend_simple, typ)
+    if blocked:
+        print(f"FILTER BLOCK {sym} {typ}: {reason}")
+        continue
+   except Exception as e:
+    print(f"Filter err {e}")
+   # ===== END NEW FILTER =====
+
    if not filt(sym, typ):
     continue
    key = f"{sym}_{typ}"
