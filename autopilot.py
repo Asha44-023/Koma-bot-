@@ -16,7 +16,13 @@ ex = ccxt.mexc({
 def get_balance_usdt():
     try:
         bal = ex.fetch_balance()
-        return float(bal.get("USDT", {}).get("free", 0))
+        # MEXC futures balance sometimes in total
+        usdt = bal.get("USDT", {})
+        free = usdt.get("free", 0) or usdt.get("total", 0) or 0
+        if free == 0:
+            # Try fetch from other field
+            free = bal.get("free", {}).get("USDT", 0) or 0
+        return float(free)
     except Exception as e:
         print(f"Balance err {e}")
         return 0
@@ -26,56 +32,18 @@ def get_qty(symbol, balance):
         price = ex.fetch_ticker(symbol)["last"]
         qty = (balance * 0.95) / price
         return float(ex.amount_to_precision(symbol, qty)), price
-    except:
+    except Exception as e:
+        print(f"Qty err {e}")
         return 0,0
 
-# FIXED - NOW ACCEPTS 5 ARGS FROM YOUR NEW MAIN.PY
-def auto_trade(symbol, side, sl=None, tp=None, score=None):
-    # side = LONG/SHORT from main.py, convert to buy/sell
-    if isinstance(sl, (int,float)) and sl > 50 and tp is None and score is None:
-        # Called as old style: symbol, side, None, score
-        score = sl
-        sl = None
-    
-    print(f"🤖 AUTO REQUEST {symbol} {side} SL:{sl} TP:{tp} Score:{score}")
-    
-    if symbol not in SYMBOLS_ALLOWED:
-        print(f"⛔ BLOCKED {symbol} not in allowed")
-        return False
-    
-    bal = get_balance_usdt()
-    print(f"💰 Futures Balance: ${bal}")
-    if bal < 1:
-        print("⛔ No balance in Futures! Transfer Spot -> Futures in MEXC app!")
-        return False
-    
-    qty, price = get_qty(symbol, bal)
-    if qty == 0:
-        print("⛔ Qty 0 - balance too low")
-        return False
-        
-    # Convert LONG/SHORT or buy/sell to MEXC side
-    if isinstance(side, str):
-        s = side.upper()
-        if s == "LONG" or s == "BUY":
-            mexc_side = "buy"
-        elif s == "SHORT" or s == "SELL":
-            mexc_side = "sell"
-        else:
-            mexc_side = side.lower()
-    else:
-        mexc_side = "buy"
-    
-    print(f"🚀 FIRING {mexc_side} {symbol} Qty {qty} @ {price}")
+def close_position(symbol):
+    """Close full position for symbol on MEXC Futures"""
     try:
         mexc_sym = MEXC_MAP.get(symbol, symbol)
-        order = ex.create_market_order(mexc_sym, mexc_side, qty)
-        print(f"✅ FILLED on MEXC! Order ID {order.get('id')} Qty {qty}")
-        return True
-    except Exception as e:
-        print(f"❌ MEXC ERROR: {e}")
-        return False
-
-if __name__ == "__main__":
-    print("TEST")
-    auto_trade("KOMA/USDT:USDT", "LONG", 0.01, 0.02, 100)
+        # Fetch open positions
+        positions = ex.fetch_positions([mexc_sym])
+        found = False
+        for p in positions:
+            # p = dict with symbol, contracts, side
+            if mexc_sym in p['symbol'] or symbol.split("/")[0] in p['symbol']:
+                contracts = float(p.get('contracts', 0) or p.get('contractSize
