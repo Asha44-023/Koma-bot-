@@ -15,7 +15,7 @@ MEXC_SECRET = os.getenv("MEXC_API_SECRET") or os.getenv("MEXC_SECRET") or os.get
 def send_telegram(msg):
     try:
         if TELEGRAM_TOKEN and TELEGRAM_CHAT:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "Markdown"}, timeout=15)
     except: pass
 
 def get_exchange():
@@ -65,99 +65,138 @@ def can_send(sym,typ,mins):
         return True
     return False
 
-def detect_whale_manipulation(df):
-    r=[]
+def get_trend(df):
+    try:
+        ema9=df['close'].ewm(span=9).mean().iloc[-1]
+        ema21=df['close'].ewm(span=21).mean().iloc[-1]
+        ema50=df['close'].ewm(span=50).mean().iloc[-1]
+        price=df['close'].iloc[-1]
+        if ema9>ema21>ema50 and price>ema9: return "UP", ema9, ema21, ema50
+        if ema9<ema21<ema50 and price<ema9: return "DOWN", ema9, ema21, ema50
+        return "RANGE", ema9, ema21, ema50
+    except: return "RANGE",0,0,0
+
+def get_mom_rsi_vol(df):
+    try:
+        d=df['close'].diff(); g=(d.where(d>0,0)).rolling(14).mean(); l=(-d.where(d<0,0)).rolling(14).mean()
+        rs=g/l; rsi_v=100-(100/(1+rs)); rsi=float(rsi_v.iloc[-1])
+    except: rsi=50
+    try: mom=((df['close'].iloc[-1]-df['close'].iloc[-10])/df['close'].iloc[-10])*100
+    except: mom=0
     try:
         avg=df['volume'].rolling(20).mean().iloc[-1]
         last=df['volume'].iloc[-1]
-        prev=df['volume'].iloc[-2] if len(df)>1 else last
-        if pd.isna(avg) or avg==0:
-            avg=df['volume'].replace(0,pd.NA).rolling(20).mean().iloc[-1]
-            if pd.isna(avg) or avg==0: avg=last if last>0 else 1
-        if prev==0 or pd.isna(prev): prev=avg
-        ratio=last/avg if avg>0 else 1.0
-        ratio=min(ratio,5.0)
-        chg=abs(df['close'].iloc[-1]-df['open'].iloc[-1])/df['open'].iloc[-1]*100 if df['open'].iloc[-1]!=0 else 0
-        body=abs(df['close'].iloc[-1]-df['open'].iloc[-1])
-        upper=df['high'].iloc[-1]-max(df['open'].iloc[-1],df['close'].iloc[-1])
-        lower=min(df['open'].iloc[-1],df['close'].iloc[-1])-df['low'].iloc[-1]
-        if ratio>=2.0: r.append(f"WHALEVOLx{ratio:.1f}")
-        elif ratio>=1.3: r.append(f"VOLUPx{ratio:.1f}")
-        elif ratio<=0.7 and last>0: r.append(f"VOLDOWNx{ratio:.1f}")
-        else: r.append(f"VOLx{ratio:.1f}")
-        if ratio>1.8 and chg<0.15: r.append("LIQABSORPTION")
-        if body>0:
-            if upper>body*2 and ratio>1.3: r.append("BEARLIQGRAB")
-            if lower>body*2 and ratio>1.3: r.append("BULLLIQGRAB")
-        if last>0 and prev>0:
-            if df['close'].iloc[-1]>df['close'].iloc[-2] and last<prev*0.8: r.append("BEARVOL-DIV")
-            if df['close'].iloc[-1]<df['close'].iloc[-2] and last<prev*0.8: r.append("BULLVOL-DIV")
-        if ratio>1.3 and df['close'].iloc[-1]>df['close'].iloc[-2] and df['close'].iloc[-2]>df['close'].iloc[-3]: r.append("WHALEPUMPING")
-        if ratio>1.3 and df['close'].iloc[-1]<df['close'].iloc[-2] and df['close'].iloc[-2]<df['close'].iloc[-3]: r.append("WHALEDUMPING")
-    except: r.append("VOLx1.0")
-    return r
+        if pd.isna(avg) or avg==0 or last==0: ratio=1.0; label="VOLx1.0"
+        else:
+            ratio=last/avg; ratio=min(max(ratio,0.1),5.0)
+            if ratio>=2.0: label=f"WHALEVOLx{ratio:.1f}"
+            elif ratio>=1.3: label=f"VOLUPx{ratio:.1f}"
+            elif ratio<=0.7: label=f"VOLDOWNx{ratio:.1f}"
+            else: label=f"VOLx{ratio:.1f}"
+    except: ratio=1.0; label="VOLx1.0"
+    return mom,rsi,ratio,label
 
-def check_filters(df,sym):
-    rsn,mom,rsi=[],0,50
+def check_mtf_no_noise(df4h, df1h, df15m, sym):
+    trend4h, _, _, _ = get_trend(df4h)
+    mom4h, rsi4h, ratio4h, vol4h = get_mom_rsi_vol(df4h)
+    trend1h, _, _, _ = get_trend(df1h)
+    mom1h, rsi1h, ratio1h, vol1h = get_mom_rsi_vol(df1h)
+    trend15m, ema9_15, _, _ = get_trend(df15m)
+    mom15m, rsi15m, ratio15m, vol15m = get_mom_rsi_vol(df15m)
+
+    score=0; reasons=[]
+
+    # 4H DIRECTION - BIG PICTURE
+    if trend4h=="UP": reasons.append("4H-UP"); score+=2
+    elif trend4h=="DOWN": reasons.append("4H-DOWN"); score+=2
+    else: reasons.append("4H-RANGE")
+
+    # 1H STRUCTURE - MIDDLE
+    if trend1h=="UP": reasons.append("1H-UP"); score+=2
+    elif trend1h=="DOWN": reasons.append("1H-DOWN"); score+=2
+    else: reasons.append("1H-RANGE")
+
+    # WHALE GRAB 15M
     try:
-        d=df['close'].diff(); g=(d.where(d>0,0)).rolling(14).mean(); l=(-d.where(d<0,0)).rolling(14).mean(); rs=g/l; rsi_v=100-(100/(1+rs)); rsi=rsi_v.iloc[-1]
-        if "KOMA" in sym and rsi>47: rsn.append(f"RSI{int(rsi)}")
-        elif rsi>70: rsn.append(f"RSI{int(rsi)}OB")
-        if rsi<30: rsn.append(f"RSI{int(rsi)}OS")
+        body=abs(df15m['close'].iloc[-1]-df15m['open'].iloc[-1])
+        upper=df15m['high'].iloc[-1]-max(df15m['open'].iloc[-1],df15m['close'].iloc[-1])
+        lower=min(df15m['open'].iloc[-1],df15m['close'].iloc[-1])-df15m['low'].iloc[-1]
+        if body>0 and ratio15m>1.3:
+            if upper>body*2: reasons.append("BEARLIQGRAB"); score+=2
+            if lower>body*2: reasons.append("BULLLIQGRAB"); score+=2
     except: pass
-    try: rsn.append("BULLOB" if df['close'].iloc[-1]>df['open'].iloc[-1] else "BEAROB")
-    except: rsn.append("BULLOB")
-    try: rsn.append("WPATTERN" if df['close'].iloc[-1]>df['close'].iloc[-2] else "MPATTERN")
-    except: pass
-    try:
-        mom=((df['close'].iloc[-1]-df['close'].iloc[-3])/df['close'].iloc[-3])*100
-        if mom<-0.5: rsn.append("MARKETDUMPING")
-        elif mom>0.5: rsn.append("MARKETPUMPING")
-        else: rsn.append("NEUTRAL")
-    except: rsn.append("NEUTRAL")
-    rsn.extend(detect_whale_manipulation(df))
-    if "KOMA" in sym and mom>1.0: rsn.append("KOMAPUMPOVERRIDE")
-    return rsn,mom,rsi
 
-def monitor_profit_rule(ex,sym,df,rsn,sess):
+    # === ANTI-FLIP 15M ENTRY - NO NOISE ===
     try:
-        for p in ex.fetch_positions([sym]):
-            c,s,pnl,_=parse_position(p)
-            if abs(c)>0 and pnl!=0:
-                avg=df['volume'].rolling(20).mean().iloc[-1]
-                if pd.isna(avg) or avg==0: avg=1
-                ratio=df['volume'].iloc[-1]/avg if avg>0 else 1
-                if pnl>0.05 and ("WHALEPUMPING" in rsn or "MARKETPUMPING" in rsn) and ratio>1.5:
-                    if can_send(sym,"HOLD_PUMP",30): send_telegram(f"💎 *HOLD* {sym} {s.upper()} ${pnl:.4f} x{ratio:.1f} PUMPING")
-                    return "HOLD"
-                if "LIQABSORPTION" in rsn and pnl>=0:
-                    if can_send(sym,"ABSORPTION",30): send_telegram(f"🐋 *ABSORPTION* {sym} {s.upper()} ${pnl:.4f} - HOLD BIG MOVE!")
-                    return "HOLD"
-                if "BULLLIQGRAB" in rsn or "BEARLIQGRAB" in rsn:
-                    if can_send(sym,"LIQGRAB",30): send_telegram(f"🐋 *LIQ GRAB* {sym} {s.upper()} ${pnl:.4f} - HOLD!")
-                    return "HOLD"
-                if pnl>0.08 and ("MARKETDUMPING" in rsn or "WHALEDUMPING" in rsn):
-                    if can_send(sym,"TAKE",15): send_telegram(f"📉 *TAKE* {sym} {s.upper()} ${pnl:.4f} DUMPING x{ratio:.1f}")
-                    return "TAKE"
-        return "NONE"
-    except: return "NONE"
+        c0=df15m['close'].iloc[-1]; c1=df15m['close'].iloc[-2]; c2=df15m['close'].iloc[-3]
+        two_up = c0>c1 and c1>c2
+        two_down = c0<c1 and c1<c2
+        price_above_ema = c0>ema9_15
+        price_below_ema = c0<ema9_15
+        # RSI not extreme
+        rsi_ok = 30<rsi15m<70
 
-def safe_autopilot_enter(ex,sym,side,price,sess,df,rsn):
+        if trend15m=="UP" and mom15m>0.5 and two_up and price_above_ema and rsi_ok:
+            reasons.append(f"15m-UP {mom15m:.1f}% x2 CONFIRMED"); score+=3
+            entry_ok=True
+        elif trend15m=="UP" and mom15m>0.5:
+            reasons.append(f"15m-UP {mom15m:.1f}% WAITING 2ND"); entry_ok=False
+        elif trend15m=="DOWN" and mom15m<-0.5 and two_down and price_below_ema and rsi_ok:
+            reasons.append(f"15m-DOWN {mom15m:.1f}% x2 CONFIRMED"); score+=3
+            entry_ok=True
+        elif trend15m=="DOWN" and mom15m<-0.5:
+            reasons.append(f"15m-DOWN {mom15m:.1f}% WAITING 2ND"); entry_ok=False
+        else:
+            reasons.append(f"15m-{trend15m} {mom15m:.1f}% NO-MOM"); entry_ok=False
+
+        # Volume check
+        if ratio15m>=1.3: reasons.append(vol15m); score+=1
+        elif ratio15m<=0.5: reasons.append(f"{vol15m} LOW-VOL"); entry_ok=False; score-=1
+        else: reasons.append(vol15m)
+
+    except:
+        entry_ok=False
+
+    # ALIGNMENT BONUS - NO NOISE CORE
+    if trend4h=="UP" and trend1h=="UP" and entry_ok and "CONFIRMED" in ''.join(reasons):
+        decision="BUY"; emoji="🟢"; score+=3; reasons.append("ALIGNED-UP")
+    elif trend4h=="DOWN" and trend1h=="DOWN" and entry_ok and "CONFIRMED" in ''.join(reasons):
+        decision="SELL"; emoji="🔴"; score+=3; reasons.append("ALIGNED-DOWN")
+    elif trend4h==trend1h and trend4h!="RANGE" and entry_ok:
+        decision="BUY" if trend4h=="UP" else "SELL"; emoji="🟡"; score+=1
+    else:
+        decision="AVOID"; emoji="⚪"
+
+    # Final filters
+    if rsi15m>78 or rsi15m<22: decision="AVOID"; reasons.append(f"RSI{int(rsi15m)} EXTREME"); score=max(0,score-2)
+    if "WAITING" in ''.join(reasons): decision="AVOID"; emoji="⚪"
+    if score<6: decision="AVOID"; emoji="⚪"
+
+    if score<0: score=0
+    if score>10: score=10
+
+    info = {
+      "4H": f"{trend4h} mom{mom4h:.1f}% RSI{int(rsi4h)}",
+      "1H": f"{trend1h} mom{mom1h:.1f}% RSI{int(rsi1h)}",
+      "15M": f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m}",
+      "score": score, "reasons": reasons
+    }
+    return decision, score, emoji, info
+
+def safe_autopilot_enter(ex,sym,side,price,sess,score,info):
     global TRADED_THIS_RUN
     if sess=="DEAD ZONE": return False
+    if score<7: return False # Only high quality
     try:
         has=False; ps=""; pp=0
         for p in ex.fetch_positions([sym]):
             c,s,pnl,_=parse_position(p)
             if abs(c)>0: has=True; ps=s; pp=pnl; break
-        hold=monitor_profit_rule(ex,sym,df,rsn,sess)
-        if hold=="HOLD": return False
-        if hold=="TAKE" and has and pp>0: close_position(ex,sym); time.sleep(1)
         if has:
             want_long="buy" in side.lower(); is_long=ps=="long"
             if (want_long and is_long) or (not want_long and not is_long): return False
             if pp>0.02:
-                if can_send(sym,"FLIP",10): send_telegram(f"🔄 *FLIP* {sym} {ps.upper()} ${pp:.4f} -> {side.upper()} | {sess}")
+                if can_send(sym,"FLIP",10): send_telegram(f"🔄 *FLIP* {sym} {ps.upper()} ${pp:.4f} -> {side.upper()} SCORE {score}/10 | {sess}")
                 close_position(ex,sym); time.sleep(1.5)
             else: return False
         if TRADED_THIS_RUN and not has: return False
@@ -166,17 +205,9 @@ def safe_autopilot_enter(ex,sym,side,price,sess,df,rsn):
         except: pass
         ex.create_market_order(sym,side.lower(),qty)
         TRADED_THIS_RUN=True
-        whale=','.join([r for r in rsn if 'VOL' in r or 'LIQ' in r or 'WHALE' in r])
-        send_telegram(f"✅ *ENTERED* {sym} {side.upper()} {qty} @ {price} | {sess} | {whale}")
+        send_telegram(f"✅ *ENTERED MTF NO-NOISE* {sym} {side.upper()} SCORE {score}/10 {qty} @ {price} | {sess} | {','.join(info['reasons'])}")
         return True
-    except Exception as e:
-        if "2051" in str(e) or "maximum" in str(e).lower():
-            try:
-                q=int(1.0/price); q=max(1,min(q,10))
-                ex.create_market_order(sym,side.lower(),q); TRADED_THIS_RUN=True
-                send_telegram(f"✅ *ENTERED SMALL* {sym} {side} {q} @ {price} | {sess}"); return True
-            except: return False
-        return False
+    except: return False
 
 def scan():
     global TRADED_THIS_RUN, ALL_SIGNALS
@@ -184,38 +215,27 @@ def scan():
     ex=get_exchange()
     if not ex: return
     session,vol,h=get_killzone()
-    try:
-        bal=ex.fetch_balance(); free=bal['USDT']['free'] if 'USDT' in bal else 0
-        for s in ["buy","sell"]:
-            try: ex.create_market_order("ANIME/USDT:USDT",s,50,params={"reduceOnly":True})
-            except: pass
+    try: bal=ex.fetch_balance(); free=bal['USDT']['free'] if 'USDT' in bal else 0
     except: free="?"
     for sym in SYMBOLS:
         try:
-            ohlcv=ex.fetch_ohlcv(sym,'15m',limit=100)
-            df=pd.DataFrame(ohlcv,columns=['timestamp','open','high','low','close','volume'])
-            price=df['close'].iloc[-1]; rsn,mom,rsi=check_filters(df,sym)
-            sess,v,_=get_killzone()
-            if sess in ["LONDON","NEW YORK"]: rsn.append(f"{sess}KILLZONE")
-            side="BUY LONG" if "BULLOB" in rsn or "WPATTERN" in rsn or "BULLLIQGRAB" in rsn or "WHALEPUMPING" in rsn or "KOMAPUMPOVERRIDE" in rsn else "SELL SHORT"
-            if "BEARLIQGRAB" in rsn or "WHALEDUMPING" in rsn: side="SELL SHORT"
-            ALL_SIGNALS.append(f"{side} {sym} @ {price:.5f} mom {mom:.1f}% RSI {int(rsi)} | {','.join(rsn)}")
-            oside="buy" if "BUY" in side else "sell"
-            safe_autopilot_enter(ex,sym,oside,price,sess,df,rsn)
-            time.sleep(1)
+            df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
+            df1h=pd.DataFrame(ex.fetch_ohlcv(sym,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
+            df15m=pd.DataFrame(ex.fetch_ohlcv(sym,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
+            price=df15m['close'].iloc[-1]
+            decision,score,emoji,info = check_mtf_no_noise(df4h,df1h,df15m,sym)
+            line=f"{emoji} *{decision}* {sym} @ {price:.5f} | SCORE {score}/10\n 4H: {info['4H']}\n 1H: {info['1H']}\n 15M: {info['15M']}\n → {','.join(info['reasons'])}"
+            ALL_SIGNALS.append(line)
+            if decision=="BUY": safe_autopilot_enter(ex,sym,"buy",price,ex.fetch_ohlcv(sym,'15m',limit=1)[0][0],score,info) if False else safe_autopilot_enter(ex,sym,"buy",price,get_killzone()[0],score,info)
+            elif decision=="SELL": safe_autopilot_enter(ex,sym,"sell",price,get_killzone()[0],score,info)
+            time.sleep(1.2)
         except Exception as e: print(f"Err {sym} {e}"); continue
     try:
-        lines=[]
-        for sig in ALL_SIGNALS:
-            try:
-                main,details=sig.split("|") if "|" in sig else (sig,"")
-                whale_icon="🐋" if any(x in details for x in ["WHALE","LIQGRAB","ABSORPTION"]) else "📍"
-                vol_icon="🔥" if "VOLUP" in details or "WHALEVOL" in details else "💤" if "VOLDOWN" in details else "📊"
-                lines.append(f"{whale_icon} {main.strip()}\n {vol_icon} {details.strip()}\n")
-            except: lines.append(f"{sig}\n")
-        summary=f"📊 *{session} KILLZONE {h}UTC - {vol}*\n💰 Bal: ${free} | $14.99 → $10k 10x\n{'-'*30}\n\n" + "\n".join(lines)
-        send_telegram(summary)
+        header=f"📊 *{get_killzone()[0]} KILLZONE {get_killzone()[2]}UTC - MTF NO-NOISE*\n💰 Bal: ${free} | $14.99 → $10k | ANTI-FLIP ON\n*4H Direction | 1H Structure | 15M x2 Entry*\n{'-'*35}\n\n"
+        body="\n\n".join(ALL_SIGNALS)
+        footer="\n\n✅ RULES:\n🟢 BUY 7-10 = 4H UP +1H UP +15m 2x CONFIRMED\n🔴 SELL 7-10 = 4H DOWN +1H DOWN +15m 2x CONFIRMED\n⚪ AVOID 0-6 = WAITING 2ND or NO ALIGN = NO NOISE"
+        send_telegram(header+body+footer)
     except: pass
-    print("✅ Done Perfect")
+    print("✅ MTF No-Noise Done")
 
 if __name__=="__main__": scan()
