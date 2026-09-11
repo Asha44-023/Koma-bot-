@@ -4,6 +4,7 @@ import requests
 import os, json, time
 from datetime import datetime, timedelta
 from filters import check_all_filters
+from autopilot import auto_trade # <-- ADDED FOR AUTO
 
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -441,6 +442,15 @@ def main():
    reasons = ', '.join(re[:6])
    msg = f"{action} {sym} {typ} {strength} ({total}/100)\nPrice: {price:.5f}\nSL: {sl:.5f} TP: {tp:.5f}\nReasons: {reasons}\n{exn}"
    tg(msg)
+
+   # ===== AUTO PILOT INJECTION - ONLY KOMA + GRASS 80+ =====
+   if sym in ["KOMA/USDT:USDT", "GRASS/USDT:USDT"] and total >= 80:
+       print(f"🤖 AUTO FIRING {sym} {typ} {total}")
+       ok = auto_trade(sym, typ, sl, tp)
+       if ok:
+           tg(f"🤖 *AUTO EXECUTED*\n{sym} {typ} {total}/100\nEntry ${price:.5f} SL ${sl:.5f} TP ${tp:.5f}")
+   # ===== END AUTO PILOT =====
+
    ca[key] = now
    sc(ca)
    if key not in tr:
