@@ -129,6 +129,8 @@ def btc_t(ex):
 def kz_c():
  try:
   h = datetime.utcnow().hour
+  if 0 <= h <= 3:
+   return "ASIAN_KZ", 3
   if 8 <= h <= 11:
    return "LONDON_KZ", 5
   if 13 <= h <= 16:
