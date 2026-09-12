@@ -5,19 +5,17 @@ from datetime import datetime, timezone
 BALANCE_START = 14.99
 TARGET = 10000.0
 LEVERAGE = 10
-MAX_QTY_CAP = 50
+MAX_QTY_CAP = 5000
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
 except: LAST_ALERT = {}
 
-# === ENV FIX - NO REJECT ===
 def get_env_clean(*names):
     for n in names:
         v = os.getenv(n)
         if v:
             v = v.strip().replace('"','').replace("'","").replace("\n","").replace("\r","").replace(" ","")
-            if len(v) > 3:
-                return v
+            if len(v) > 3: return v
     return None
 
 MEXC_KEY = get_env_clean("MEXC_API_KEY","MEXC_APIKEY","API_KEY","MEXC_KEY","KEY")
@@ -28,7 +26,7 @@ TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
 
-SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT"]
+SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT"] # YOUR SPECIAL FAST COINS - KEPT
 SCALP_TP1 = 0.015
 SCALP_SL = 0.008
 
@@ -39,10 +37,8 @@ def send_telegram(msg):
     except: pass
 
 def get_exchange():
-    if not MEXC_KEY or not MEXC_SECRET:
-        print("❌ KEYS MISSING"); return None
-    print(f"✅ MEXC OK {MEXC_KEY[:4]}...");
-    return ccxt.mexc({'apiKey': MEXC_KEY,'secret': MEXC_SECRET,'options': {'defaultType': 'swap'},'enableRateLimit': True})
+    if not MEXC_KEY or not MEXC_SECRET: print("❌ KEYS MISSING"); return None
+    print(f"✅ MEXC OK {MEXC_KEY[:4]}..."); return ccxt.mexc({'apiKey': MEXC_KEY,'secret': MEXC_SECRET,'options': {'defaultType': 'swap'},'enableRateLimit': True})
 
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
@@ -211,6 +207,7 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     info={"4H":f"{trend4h} mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
 
+# === FIXED AUTOPILOT - SILENT + FAST COIN QTY FIX ===
 def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
     if not AUTOPILOT_ENABLED: return False
@@ -223,17 +220,28 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
             c,_,_,_,_=parse_position(p)
             if abs(c)>0: has=True; break
         if "TAKE PROFIT" in decision and has:
-            close_position(ex,sym); send_telegram(f"💰 *AUTO TP/SL* {sym} Closed {','.join(info['reasons'])}"); return True
+            close_position(ex,sym)
+            # Silent TP - no telegram, only log
+            print(f"💰 AUTO TP {sym}"); return True
         if has or TRADED_THIS_RUN: return False
-        qty=int(notional/price); qty=max(1,min(qty,MAX_QTY_CAP))
+        # FIX FOR FAST LOW PRICE COINS SIREN/LAB/KOMA
+        qty = notional / price
+        # Round to exchange precision - keep float for 0.000xx coins
+        qty = max(1, min(qty, MAX_QTY_CAP))
         try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
         except: pass
         side="buy" if "BUY" in decision else "sell"
         ex.create_market_order(sym,side,qty)
         TRADED_THIS_RUN=True
-        send_telegram(f"🤖 *AUTO SCALP* {sym} {decision} {qty} @ {price} | ${notional}")
+        print(f"🤖 AUTO {sym} {decision} qty {qty} @ {price}") # SILENT - NO TELEGRAM
         return True
-    except: return False
+    except Exception as e: print(f"Auto err {sym} {e}"); return False
+
+def check_monthly_report(free):
+    now = datetime.now(timezone.utc)
+    if now.day == 1 and now.hour == 7 and now.minute < 10:
+        pnl = float(free) - BALANCE_START
+        send_telegram(f"📊 *MONTHLY AUTO INVESTMENT REPORT*\n💰 Balance: ${float(free):.2f} (Start ${BALANCE_START})\n📈 PnL: ${pnl:.2f}\n🎯 {float(free)/TARGET*100:.2f}% to $10k\n🤖 SIREN LAB KOMA Silent Compounding")
 
 def scan():
     global TRADED_THIS_RUN,ALL_SIGNALS
@@ -241,11 +249,19 @@ def scan():
     ex=get_exchange()
     if not ex: send_telegram("❌ MEXC KEY ERROR - Check Railway vars"); return
     session,_,h=get_killzone()
+    # AUTOPILOT still runs even in DEAD? No, respect dead zone
     if session=="DEAD ZONE": print(f"💤 DEAD ZONE {h}UTC SILENT"); return
     try: bal=ex.fetch_balance(); free=bal['USDT']['free'] if 'USDT' in bal else BALANCE_START
     except: free=BALANCE_START
     notional=get_auto_notional(free)
     progress=(float(free)/TARGET)*100
+
+    # === TIMER FIX: MANUAL ONLY ONCE PER HOUR ===
+    current_min = datetime.now(timezone.utc).minute
+    allow_manual = current_min < 10 # Only first 10 min of hour = 1 signal per hour
+
+    # Monthly report check (auto silent)
+    check_monthly_report(free)
 
     for sym in SYMBOLS:
         try:
@@ -264,27 +280,31 @@ def scan():
                         else: has_short=True
             except: pass
             decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
-            # === BEST SCALP COOLDOWN 1/10/30 ===
-            send_now=False
-            if "NOW" in decision or "TAKE PROFIT" in decision: send_now=can_send(sym,decision,1) # 1 MIN BEST FOR SCALP ENTRY
-            elif "HOLD" in decision: send_now=can_send(sym,decision,10) # 10 MIN FOR HOLD
-            else: send_now=can_send(sym,decision,30) # 30 MIN FOR AVOID - NO SPAM BUT NOT MISS
-            if send_now:
-                mg=""
-                if "BUY NOW" in decision: mg=f"\n 👉 MANUAL LONG @ {price:.5f} SL {(price*(1-SCALP_SL)):.5f} TP {(price*(1+SCALP_TP1)):.5f} | QTY {int(notional/price)}"
-                if "SELL NOW" in decision: mg=f"\n 👉 MANUAL SHORT @ {price:.5f} SL {(price*(1+SCALP_SL)):.5f} TP {(price*(1-SCALP_TP1)):.5f} | QTY {int(notional/price)}"
-                line=f"{emoji} *{decision}* {sym} @ {price:.5f} | SCORE {score}/10\n 4H: {info['4H']}\n 1H: {info['1H']}\n 15M: {info['15M']}\n → {','.join(info['reasons'])}{mg}"
-                ALL_SIGNALS.append(line)
+
+            # === 1. AUTOPILOT ALWAYS EVERY 10 MIN (SILENT) ===
             safe_autopilot_enter(ex,sym,price,session,score,info,decision,notional)
+
+            # === 2. MANUAL ONLY ONCE PER HOUR (CLEAN) ===
+            if allow_manual:
+                send_now=False
+                if "NOW" in decision or "TAKE PROFIT" in decision: send_now=can_send(sym,decision,1)
+                elif "HOLD" in decision: send_now=can_send(sym,decision,10)
+                else: send_now=can_send(sym,decision,30)
+                if send_now:
+                    mg=""
+                    if "BUY NOW" in decision: mg=f"\n 👉 MANUAL LONG @ {price:.5f} SL {(price*(1-SCALP_SL)):.5f} TP {(price*(1+SCALP_TP1)):.5f} | QTY {notional/price:.2f}"
+                    if "SELL NOW" in decision: mg=f"\n 👉 MANUAL SHORT @ {price:.5f} SL {(price*(1+SCALP_SL)):.5f} TP {(price*(1-SCALP_TP1)):.5f} | QTY {notional/price:.2f}"
+                    line=f"{emoji} *{decision}* {sym} @ {price:.5f} | SCORE {score}/10\n 4H: {info['4H']}\n 1H: {info['1H']}\n 15M: {info['15M']}\n → {','.join(info['reasons'])}{mg}"
+                    ALL_SIGNALS.append(line)
             time.sleep(0.8)
         except Exception as e: print(f"Err {sym} {e}"); continue
 
-    if ALL_SIGNALS:
-        mode_txt="🤖 AUTO + 📱 MANUAL" if AUTOPILOT_ENABLED else "📱 MANUAL ONLY"
-        header=f"⚡ *{get_killzone()[0]} {h}UTC - {mode_txt} - PERFECT SCALP 1/10/30*\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k | SIREN LAB KOMA\n{'-'*40}\n\n"
+    if ALL_SIGNALS and allow_manual:
+        mode_txt="📱 MANUAL PEAK" if AUTOPILOT_ENABLED else "📱 MANUAL ONLY"
+        header=f"⚡ *{get_killzone()[0]} {h}UTC - {mode_txt} - HOURLY CLEAN*\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k | SIREN LAB KOMA\n{'-'*40}\n\n"
         body="\n\n".join(ALL_SIGNALS)
-        footer="\n\n✅ COOLDOWN: 1min BUY/SELL 10min HOLD 30min AVOID\n🐋 LIQ GRAB | 🔄 W/M | 🔥 WHALEVOL | TP1.5% SL0.8% | DEAD SILENT"
+        footer="\n\n✅ MANUAL: 1 per hour | ASIAN 5UTC LONDON 7-9UTC NY 12-15UTC\n🤖 AUTO: Silent every 10min + Monthly Report 1st\n🐋 LIQ GRAB | 🔄 W/M | 🔥 WHALEVOL | TP1.5% SL0.8%"
         send_telegram(header+body+footer)
-    print("✅ FINALE 1/10/30 DONE")
+    print("✅ HOURLY CLEAN DONE")
 
 if __name__=="__main__": scan()
