@@ -1,8 +1,8 @@
-name: MANUAL 15MIN PEAK
+name: MANUAL KOMA 15MIN SIGNAL
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '0,15,30,45 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,3 +20,5 @@ jobs:
           MEXC_API_SECRET: ${{ secrets.MEXC_API_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AUTOPILOT_ENABLED: "false"
+          ENGINE: "MANUAL"
