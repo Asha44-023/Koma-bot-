@@ -8,7 +8,6 @@ TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
 except: LAST_ALERT = {}
 
-# --- KOMA FLIP BEAST ---
 try:
     from koma_flip_beast import scalp_plan as koma_beast_plan
     KOMA_BEAST = True
@@ -16,7 +15,6 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-# === NEW: KOMA SLEEP SCALP 10% ===
 KOMA_PUMP_TRIGGER = 10.0
 KOMA_DUMP_TRIGGER = -10.0
 KOMA_SLEEP_TP = 8.0
@@ -36,8 +34,9 @@ TELEGRAM_TOKEN = get_env_clean("TELEGRAM_BOT_TOKEN","BOT_TOKEN","TELEGRAM_TOKEN"
 TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
+ENGINE = os.getenv("ENGINE","AUTO").upper()
 
-SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT","GRASS/USDT:USDT"]
+SYMBOLS = ["KOMA/USDT:USDT"] # SAME KOMA FOR BOTH ENGINES
 SCALP_TP1 = 0.035
 SCALP_SL = 0.022
 
@@ -49,46 +48,35 @@ def _log(pnl):
 
 def _monthly_report():
     try:
-        if datetime.utcnow().day!= 1: return
         if not os.path.exists(TRADES_FILE): return
+        if datetime.utcnow().day!= 1: return
         lines = open(TRADES_FILE).readlines()[-200:]
         total = len(lines)
         profit = sum(float(l.split(",")[1]) for l in lines if "," in l)
-        send_telegram(f"📊 *MONTHLY {datetime.utcnow().strftime('%B %Y')}*\nTrades: {total}\nPNL: {profit:.2f}%\nTarget: $60K")
+        send_telegram(f"📊 *MONTHLY {datetime.utcnow().strftime('%B %Y')}*\nEngine: {ENGINE}\nTrades: {total}\nPNL: {profit:.2f}%\nTarget: $60K")
     except: pass
 
 def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now, vol_avg, btc_trend, signal_type, reasons=None):
     if reasons is None: reasons = []
     reasons_str = " ".join(reasons).upper()
-    whale_override = any(x in reasons_str for x in [
-        "LIQ_GRAB", "WHALE_TRAP", "KOMA_PUMP_OVERRIDE", "BREAKOUT_LONG", "BREAKOUT_SHORT",
-        "STOP_HUNT", "ACCUM", "W_PATTERN", "M_PATTERN", "WHALEVOL", "DOUBLE BOTTOM", "DOUBLE TOP", "VOLUP"
-    ])
+    whale_override = any(x in reasons_str for x in ["LIQ_GRAB","WHALE_TRAP","KOMA_PUMP_OVERRIDE","BREAKOUT","STOP_HUNT","ACCUM","W_PATTERN","M_PATTERN","WHALEVOL","DOUBLE"])
     range_4h_pct = (high_4h - low_4h) / price if price > 0 else 0
     range_24h_pct = high_24h - low_24h
     location_24h = ((price - low_24h) / range_24h_pct * 100) if range_24h_pct > 0 else 50
-
     if range_4h_pct < 0.015:
-        if not whale_override:
-            return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT"
+        if not whale_override: return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT"
         else:
-            if vol_now < vol_avg * 1.1:
-                return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
+            if vol_now < vol_avg * 1.1: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
             return False, f"CONFIRMED BREAKOUT Vol {vol_now/vol_avg:.1f}x"
-
     if not whale_override:
         if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
         if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
         if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
-
-    if not whale_override and vol_now < vol_avg * 0.7:
-        return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
-
+    if not whale_override and vol_now < vol_avg * 0.7: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
         if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
-
     return False, f"CONFIRMED {signal_type} loc {location_24h:.0f}% RSI {rsi_1h:.0f} Vol {vol_now/vol_avg:.1f}x"
 
 def send_telegram(msg):
@@ -105,8 +93,7 @@ def get_exchange():
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
     except: bal=BALANCE_START
-    # === COMPOUND FOR $10 ACCOUNT ===
-    notional = round(bal * 0.4, 2) # Use 40% for $10 account
+    notional = round(bal * 0.4, 2)
     if notional < 3.0: notional = 3.0
     if notional > bal * 0.9: notional = round(bal * 0.9,2)
     return notional
@@ -208,7 +195,6 @@ def detect_w_m_pattern(df):
     except: return None,""
 
 def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_price):
-    #... (YOUR ORIGINAL LOGIC - KEPT 100%)
     trend4h,_,_,_ = get_trend(df4h)
     mom4h,rsi4h,_,_ = get_mom_rsi_vol(df4h)
     trend1h,_,_,_ = get_trend(df1h)
@@ -219,43 +205,31 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     price=df5m['close'].iloc[-1]
     whale_type,whale_msg = detect_whale_manipulation(df5m)
     wm_type,wm_msg = detect_w_m_pattern(df5m)
-    whale15,whale15_msg = detect_whale_manipulation(df15m)
-    wm15,wm15_msg = detect_w_m_pattern(df15m)
 
-    # === NEW KOMA 10% OVERRIDE ===
     is_koma = "KOMA" in sym
     change_1h = ((df5m['close'].iloc[-1] - df1h['close'].iloc[-2]) / df1h['close'].iloc[-2] * 100) if len(df1h)>=2 else 0
 
     if is_koma and not has_long and not has_short:
         if change_1h >= KOMA_PUMP_TRIGGER:
-            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_1h:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_1h:.2f}% SELL THE DUMP"],"price":price}
+            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_1h:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_1h:.2f}% SELL"],"price":price}
         if change_1h <= KOMA_DUMP_TRIGGER:
-            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_1h:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_1h:.2f}% BUY THE BOUNCE"],"price":price}
+            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_1h:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_1h:.2f}% BUY"],"price":price}
 
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
-        # KOMA sleep TP 8% for faster exit
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
         sl = (KOMA_SLEEP_SL/100) if is_koma else SCALP_SL
-        if change>=tp:
-            _log(change*100)
-            return "TAKE PROFIT CLOSE LONG",9,"💰",{"4H":f"{trend4h} DIR mom{mom4h:.1f}%","1H":f"{trend1h} STRUCT mom{mom1h:.1f}%","15M":f"{trend15m} ENTRY {vol15m} {vol5m} +{change*100:.2f}% TP HIT","score":9,"reasons":[f"TP {change*100:.2f}% CLOSE NOW {whale_msg}"],"price":price}
-        if change<=-sl:
-            _log(change*100)
-            return "CUT LOSS CLOSE LONG",9,"✂️",{"4H":f"{trend4h} DIR","1H":f"{trend1h} STRUCT","15M":f"{trend15m} {change*100:.2f}% SL","score":9,"reasons":[f"SL {change*100:.2f}% CLOSE"],"price":price}
-        return "HOLD LONG",8,"🟢",{"4H":f"{trend4h} DIR","1H":f"{trend1h} STRUCT","15M":f"{trend15m} {vol5m} {change*100:.2f}% {whale_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg}"],"price":price}
+        if change>=tp: _log(change*100); return "TAKE PROFIT CLOSE LONG",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"TP {change*100:.2f}%","score":9,"reasons":[f"TP {change*100:.2f}%"],"price":price}
+        if change<=-sl: _log(change*100); return "CUT LOSS CLOSE LONG",9,"✂️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"SL {change*100:.2f}%","score":9,"reasons":[f"SL {change*100:.2f}%"],"price":price}
+        return "HOLD LONG",8,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}%","score":8,"reasons":[f"HOLD {change*100:.2f}%"],"price":price}
 
     if has_short and entry_price>0:
         change=(entry_price-price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
         sl = (KOMA_SLEEP_SL/100) if is_koma else SCALP_SL
-        if change>=tp:
-            _log(change*100)
-            return "TAKE PROFIT CLOSE SHORT",9,"💰",{"4H":f"{trend4h} DIR","1H":f"{trend1h} STRUCT","15M":f"{trend15m} +{change*100:.2f}% TP HIT","score":9,"reasons":[f"TP {change*100:.2f}% CLOSE NOW {whale_msg}"],"price":price}
-        if change<=-sl:
-            _log(change*100)
-            return "CUT LOSS CLOSE SHORT",9,"✂️",{"4H":f"{trend4h} DIR","1H":f"{trend1h} STRUCT","15M":f"{trend15m} {change*100:.2f}% SL","score":9,"reasons":[f"SL {change*100:.2f}% CLOSE"],"price":price}
-        return "HOLD SHORT",8,"🔴",{"4H":f"{trend4h} DIR","1H":f"{trend1h} STRUCT","15M":f"{trend15m} {vol5m} {change*100:.2f}% {whale_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg}"],"price":price}
+        if change>=tp: _log(change*100); return "TAKE PROFIT CLOSE SHORT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"TP {change*100:.2f}%","score":9,"reasons":[f"TP {change*100:.2f}%"],"price":price}
+        if change<=-sl: _log(change*100); return "CUT LOSS CLOSE SHORT",9,"✂️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"SL {change*100:.2f}%","score":9,"reasons":[f"SL {change*100:.2f}%"],"price":price}
+        return "HOLD SHORT",8,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}%","score":8,"reasons":[f"HOLD {change*100:.2f}%"],"price":price}
 
     c0=df5m['close'].iloc[-1]; c1=df5m['close'].iloc[-2]; c2=df5m['close'].iloc[-3]
     two_up=c0>c1 and c1>c2; two_down=c0<c1 and c1<c2
@@ -267,30 +241,22 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if ratio5m>=2.5: score+=2; reasons.append(f"🔥 {vol5m}")
     elif ratio5m>=1.5: score+=1; reasons.append(vol5m)
 
-    is_whale = whale_type is not None or wm_type is not None or ratio5m>=2.5
-    is_bull_structure = trend1h=="UP" or mom1h>0.5
-    is_bear_structure = trend1h=="DOWN" or mom1h<-0.5
-    is_bull_direction = trend4h=="UP" or mom4h>0.3
-    is_bear_direction = trend4h=="DOWN" or mom4h<-0.3
-
     if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up) and mom5m>0.3 and ratio5m>=1.1 and 20<rsi5m<80:
-        decision="BUY NOW"; emoji="🟢"; score+=3
-        reasons.append(f"4H DIR {trend4h} + 1H STRUCT {trend1h} + 5-15M ENTRY")
+        decision="BUY NOW"; emoji="🟢"; score+=3; reasons.append(f"4H DIR {trend4h} + 1H STRUCT {trend1h} + 5-15M ENTRY")
     elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down) and mom5m<-0.2 and ratio5m>=1.1 and 20<rsi5m<80:
-        decision="SELL NOW"; emoji="🔴"; score+=3
-        reasons.append(f"4H DIR {trend4h} + 1H STRUCT {trend1h} + 5-15M ENTRY")
+        decision="SELL NOW"; emoji="🔴"; score+=3; reasons.append(f"4H DIR {trend4h} + 1H STRUCT {trend1h} + 5-15M ENTRY")
     else:
-        decision="WAIT"; emoji="⚪"; score=0
-        reasons=[f"WAIT 5-15M ENTRY {mom5m:.1f}% {vol5m}"]
+        decision="WAIT"; emoji="⚪"; score=0; reasons=[f"WAIT ENTRY {mom5m:.1f}% {vol5m}"]
 
     if score>10: score=10
-    if score<0: score=0
     info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} STRUCT mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M ENTRY {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
 
 def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
-    if not AUTOPILOT_ENABLED: return False
+    if not AUTOPILOT_ENABLED:
+        print(f"SIGNAL ONLY {sym} {decision} - no trade")
+        return False
     if "WAIT" in decision: return False
     if "NOW" in decision and score<4: return False
     try:
@@ -298,17 +264,13 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
         for p in ex.fetch_positions([sym]):
             c,s,_,_,_=parse_position(p)
             if abs(c)>0: existing_side = s; break
-        try:
-            bal=ex.fetch_balance()
-            free_bal=bal['USDT']['free'] if 'USDT' in bal else notional
+        try: bal=ex.fetch_balance(); free_bal=bal['USDT']['free'] if 'USDT' in bal else notional
         except: free_bal=notional
         if existing_side:
             if ("BUY" in decision and existing_side=="long") or ("SELL" in decision and existing_side=="short"): return False
             if ("BUY" in decision and existing_side=="short") or ("SELL" in decision and existing_side=="long"):
                 close_position(ex,sym); time.sleep(1.5)
-                try:
-                    bal2=ex.fetch_balance(); free2=bal2['USDT']['free'] if 'USDT' in bal2 else free_bal
-                    new_notional=get_auto_notional(free2)
+                try: bal2=ex.fetch_balance(); free2=bal2['USDT']['free'] if 'USDT' in bal2 else free_bal; new_notional=get_auto_notional(free2)
                 except: free2=free_bal; new_notional=notional
                 qty = new_notional / price
                 try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
@@ -324,7 +286,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
             except: pass
             side="buy" if "BUY" in decision else "sell"
             ex.create_market_order(sym,side,qty)
-            send_telegram(f"🤖 *AUTO {sym}* {decision} @ {price:.5f}\nSize ${notional:.2f} TP {SCALP_TP1*100}% SL {SCALP_SL*100}%\n{','.join(info['reasons'])}")
+            send_telegram(f"🤖 *AUTO {sym}* {decision} @ {price:.5f}\nSize ${notional:.2f} TP {KOMA_SLEEP_TP}% SL {KOMA_SLEEP_SL}%\n{','.join(info['reasons'])}")
             return True
     except Exception as e: print(f"Auto err {sym} {e}")
     return False
@@ -340,57 +302,67 @@ def scan():
     except: free=BALANCE_START
     notional=get_auto_notional(free)
 
-    if KOMA_BEAST and koma_beast_plan:
-        try:
-            res = koma_beast_plan(ex, free, send_telegram, lambda *a: True)
-            print(f"KOMA BEAST AUTO: {res}")
-        except Exception as e: print(f"KOMA beast err {e}")
+    print(f"ENGINE={ENGINE} AUTOPILOT={AUTOPILOT_ENABLED} Balance=${free:.2f}")
 
-    # MANUAL 15MIN PEAK HOURS ONLY + 0/15/30/45 - BUT KOMA 10% RUNS 24/7
-    minute = datetime.now(timezone.utc).minute
-    is_koma_time = True # KOMA runs every 5min 24/7
-    if minute not in [0,15,30,45] and not is_koma_time:
-        print(f"⏭️ Manual skip minute {minute}")
+    # === ENGINE AUTO: REAL TRADE ===
+    if ENGINE == "AUTO":
+        if KOMA_BEAST and koma_beast_plan:
+            try:
+                res = koma_beast_plan(ex, free, send_telegram, lambda *a: True)
+                print(f"KOMA BEAST AUTO TRADE: {res}")
+            except Exception as e: print(f"KOMA beast err {e}")
         return
 
-    try:
-        btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
-        btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
-        btc_ema21=btc_df['c'].ewm(span=21).mean().iloc[-1]
-        btc_trend="BULLISH" if btc_ema9>btc_ema21 else "BEARISH"
-    except: btc_trend="RANGE"
+    # === ENGINE MANUAL: SIGNAL ONLY ===
+    if ENGINE == "MANUAL":
+        minute = datetime.now(timezone.utc).minute
+        if minute not in [0,15,30,45]:
+            print(f"⏭️ Manual skip minute {minute}")
+            return
+        if session=="DEAD ZONE":
+            print(f"💤 DEAD ZONE {h}UTC - Manual signal skip")
+            return
 
-    for sym in SYMBOLS:
         try:
-            df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
-            df1h=pd.DataFrame(ex.fetch_ohlcv(sym,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
-            df15m=pd.DataFrame(ex.fetch_ohlcv(sym,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
-            df5m=pd.DataFrame(ex.fetch_ohlcv(sym,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
-            price=df5m['close'].iloc[-1]
-            has_long=False; has_short=False; entry=0
+            btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
+            btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
+            btc_ema21=btc_df['c'].ewm(span=21).mean().iloc[-1]
+            btc_trend="BULLISH" if btc_ema9>btc_ema21 else "BEARISH"
+        except: btc_trend="RANGE"
+
+        for sym in SYMBOLS:
             try:
-                for p in ex.fetch_positions([sym]):
-                    c,s,_,e,_=parse_position(p)
-                    if abs(c)>0: entry=e; has_long=(s=="long"); has_short=(s=="short")
-            except: pass
-            decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
-            if "WAIT" in decision: continue
-            low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
-            low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
-            _,rsi1h,_,_=get_mom_rsi_vol(df1h)
-            try: vol_now=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1]
-            except: vol_now=1; vol_avg=1
-            filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision else "SHORT", info['reasons'])
-            # KOMA override bypasses filters
-            if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason="KOMA 10% OVERRIDE"
-            if filtered: print(f"Filter {sym} {reason}"); continue
-            msg = f"{emoji} *{sym}* {decision} Score {score}/10\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\n{reason}\nSession {session} {h}UTC"
-            if can_send(sym, decision, 15):
-                send_telegram(msg)
-                ALL_SIGNALS.append(msg)
-            safe_autopilot_enter(ex,sym,price,session,score,info,decision,notional)
-        except Exception as e:
-            print(f"Err {sym} {e}")
+                df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
+                df1h=pd.DataFrame(ex.fetch_ohlcv(sym,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
+                df15m=pd.DataFrame(ex.fetch_ohlcv(sym,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
+                df5m=pd.DataFrame(ex.fetch_ohlcv(sym,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
+                price=df5m['close'].iloc[-1]
+                has_long=False; has_short=False; entry=0
+                try:
+                    for p in ex.fetch_positions([sym]):
+                        c,s,_,e,_=parse_position(p)
+                        if abs(c)>0: entry=e; has_long=(s=="long"); has_short=(s=="short")
+                except: pass
+                decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
+                if "WAIT" in decision:
+                    print(f"MANUAL WAIT {sym}")
+                    continue
+                low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
+                low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
+                _,rsi1h,_,_=get_mom_rsi_vol(df1h)
+                try: vol_now=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1]
+                except: vol_now=1; vol_avg=1
+                filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision else "SHORT", info['reasons'])
+                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason="KOMA 10% OVERRIDE SIGNAL"
+                if filtered: print(f"Filter {sym} {reason}"); continue
+                msg = f"{emoji} *MANUAL SIGNAL {sym}* {decision} Score {score}/10\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\n{reason}\nSession {session} {h}UTC\n(SIGNAL ONLY - AUTO trades separately)"
+                if can_send(sym, decision, 15):
+                    send_telegram(msg)
+                    ALL_SIGNALS.append(msg)
+                # NOTE: safe_autopilot_enter will NOT trade because AUTOPILOT_ENABLED=false for MANUAL
+                safe_autopilot_enter(ex,sym,price,session,score,info,decision,notional)
+            except Exception as e:
+                print(f"Err {sym} {e}")
 
 if __name__ == "__main__":
     scan()
