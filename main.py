@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 BALANCE_START = 14.99
 TARGET = 60000.0
-LEVERAGE = 10 # FIXED was 5 -> align with beast 10x
+LEVERAGE = 10
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
 except: LAST_ALERT = {}
@@ -16,10 +16,10 @@ except:
     koma_beast_plan = None
 
 # === ALIGNED WITH BEAST ===
-KOMA_PUMP_TRIGGER = 1.5 # FIXED was 5.0
+KOMA_PUMP_TRIGGER = 1.5
 KOMA_DUMP_TRIGGER = -1.5
-KOMA_SLEEP_TP = 8.0 # FIXED was 5.0
-KOMA_SLEEP_SL = 3.0 # FIXED was 4.0
+KOMA_SLEEP_TP = 3.0 # ALIGNED with beast TP 3% = +15% bal
+KOMA_SLEEP_SL = 2.5 # ALIGNED with beast SL 2.5% = -12.5% bal
 
 def get_env_clean(*names):
     for n in names:
@@ -35,7 +35,7 @@ TELEGRAM_TOKEN = get_env_clean("TELEGRAM_BOT_TOKEN","BOT_TOKEN","TELEGRAM_TOKEN"
 TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
-ENGINE = os.getenv("ENGINE","BOTH").upper() # FIXED FOR CONCURRENT: was AUTO
+ENGINE = os.getenv("ENGINE","BOTH").upper()
 
 SYMBOLS = ["KOMA/USDT:USDT"]
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
@@ -96,7 +96,7 @@ def get_exchange():
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
     except: bal=BALANCE_START
-    notional = round(bal * 0.8, 2)
+    notional = round(bal * 0.5, 2) # FIXED 50% FOR $10->$60K COMPOUNDING - ALIGNED WITH BEAST
     if notional < 3.0: notional = 3.0
     if notional > bal * 0.9: notional = round(bal * 0.9,2)
     return notional
@@ -351,7 +351,6 @@ def scan():
     notional=get_auto_notional(free)
     print(f"ENGINE={ENGINE} AUTOPILOT={AUTOPILOT_ENABLED} Balance=${free:.2f} / ${TARGET} Progress {(free/TARGET*100):.4f}%")
 
-    # === CONCURRENT FIX: BOTH ENGINES RUN TOGETHER ===
     if ENGINE in ["AUTO","BOTH","CONCURRENT",""]:
         if KOMA_BEAST and koma_beast_plan:
             try:
