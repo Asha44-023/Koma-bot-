@@ -1,23 +1,90 @@
-# === KOMA SCALPING 5MIN - CATCHES WICKS YOU SEE ===
-PUMP_TRIGGER = 2.5   # 2.5% in 5min = pump (for 5min chart)
-DUMP_TRIGGER = -2.5
+import time
+import ccxt
+import pandas as pd
+from datetime import datetime, timezone
+
+# === KOMA SCALPING 5MIN - MATCHES YOUR CHART ===
+PUMP_TRIGGER = 2.5   # 2.5% in 5min = pump
+DUMP_TRIGGER = -2.5  # -2.5% in 5min = dump
 TP_PCT = 3.0
 SL_PCT = 2.5
 TIME_STOP_HOURS = 1
-VOL_MULT = 0.8  # lower = more trades
+VOL_MULT = 0.8
 SYMBOL = "KOMA/USDT:USDT"
 
-# ... keep send_msg and get_position_entry_time same ...
+def send_msg(send_fn, msg):
+    try: send_fn(msg)
+    except: print(msg)
+
+def get_position_entry_time(position_info):
+    try:
+        info = position_info.get('info',{})
+        ts = info.get('createTime') or info.get('openTime') or info.get('updateTime')
+        if ts:
+            ts = int(ts)
+            if ts > 1e12: ts = ts/1000
+            return ts
+    except: pass
+    return None
 
 def scalp_plan(ex, free_bal, send_telegram, can_send_func):
     try:
         positions = ex.fetch_positions([SYMBOL])
         for p in positions:
-            # ... keep your same TP/SL/TIME STOP code ...
-            pass # your existing code here
+            try:
+                contracts = float(p.get('contracts',0) or 0)
+                info = p.get('info',{})
+                if contracts == 0:
+                    contracts = float(info.get('holdVol',0) or 0)
+                if abs(contracts) > 0:
+                    side = p.get('side') or info.get('positionSide') or 'long'
+                    side = side.lower()
+                    entry_price = float(info.get('openPrice') or info.get('avgPrice') or p.get('entryPrice') or 0)
+                    mark = float(info.get('markPrice') or info.get('lastPrice') or entry_price)
+                    if entry_price > 0:
+                        if 'long' in side:
+                            pnl_pct = (mark - entry_price)/entry_price*100
+                        else:
+                            pnl_pct = (entry_price - mark)/entry_price*100
+                    else:
+                        pnl_pct = 0
+
+                    open_ts = get_position_entry_time(p)
+                    if open_ts:
+                        hours_open = (time.time() - open_ts)/3600
+                        if hours_open >= TIME_STOP_HOURS:
+                            try:
+                                close_side = "sell" if "long" in side else "buy"
+                                ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                                send_msg(send_telegram, f"⏰ *SCALP TIME STOP {TIME_STOP_HOURS}H* {side.upper()} {hours_open:.1f}h PNL {pnl_pct:.2f}%")
+                                return f"TIME STOP CLOSED {hours_open:.1f}h PNL {pnl_pct:.2f}%"
+                            except Exception as e:
+                                send_msg(send_telegram, f"⚠️ Time stop fail {e}")
+
+                    if pnl_pct >= TP_PCT:
+                        try:
+                            close_side = "sell" if "long" in side else "buy"
+                            ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                            send_msg(send_telegram, f"💰 *SCALP TP {TP_PCT}%* {side.upper()} +{pnl_pct:.2f}%")
+                            return f"TP CLOSED +{pnl_pct:.2f}%"
+                        except Exception as e:
+                            send_msg(send_telegram, f"⚠️ TP fail {e}")
+                    
+                    if pnl_pct <= -SL_PCT:
+                        try:
+                            close_side = "sell" if "long" in side else "buy"
+                            ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                            send_msg(send_telegram, f"✂️ *SCALP SL {SL_PCT}%* {side.upper()} {pnl_pct:.2f}%")
+                            return f"SL CLOSED {pnl_pct:.2f}%"
+                        except Exception as e:
+                            send_msg(send_telegram, f"⚠️ SL fail {e}")
+                    
+                    return f"HOLD {side.upper()} PNL {pnl_pct:.2f}%"
+            except Exception as e:
+                print(f"pos err {e}")
 
         try:
-            ohlcv = ex.fetch_ohlcv(SYMBOL, '5m', limit=20)  # <-- 5 MIN
+            ohlcv = ex.fetch_ohlcv(SYMBOL, '5m', limit=20)
             df = pd.DataFrame(ohlcv, columns=['t','o','h','l','c','v'])
             if len(df) < 10:
                 return "NO DATA"
@@ -29,7 +96,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
             if pd.isna(vol_avg): vol_avg = vol_now
             vol_ratio = vol_now/vol_avg if vol_avg>0 else 1.0
             
-            # Only WAIT if BOTH low vol AND low change
             if vol_ratio < VOL_MULT and abs(change_5m) < PUMP_TRIGGER:
                 return f"WAIT 5m Vol {vol_ratio:.1f}x change {change_5m:.2f}%"
             
@@ -46,7 +112,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                     ex.set_margin_mode('isolated', SYMBOL)
                 except: pass
                 ex.create_market_order(SYMBOL, "sell", qty)
-                send_msg(send_telegram, f"🔴 *SCALP SHORT {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x")
+                send_msg(send_telegram, f"🔴 *SCALP SHORT {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x Price {price:.6f}")
                 return f"SHORT PUMP {change_5m:.2f}%"
             
             if change_5m <= DUMP_TRIGGER:
@@ -62,12 +128,13 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                     ex.set_margin_mode('isolated', SYMBOL)
                 except: pass
                 ex.create_market_order(SYMBOL, "buy", qty)
-                send_msg(send_telegram, f"🟢 *SCALP LONG {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x")
+                send_msg(send_telegram, f"🟢 *SCALP LONG {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x Price {price:.6f}")
                 return f"LONG DUMP {change_5m:.2f}%"
             
             return f"WAIT 5m change {change_5m:.2f}% Vol {vol_ratio:.1f}x need {PUMP_TRIGGER}%"
             
         except Exception as e:
             return f"ohlcv err {e}"
+            
     except Exception as e:
         return f"beast err {e}"
