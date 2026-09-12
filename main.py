@@ -26,9 +26,44 @@ TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
 
-SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT"] # YOUR SPECIAL FAST COINS - KEPT
+SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT"]
 SCALP_TP1 = 0.015
 SCALP_SL = 0.008
+
+# === NEW: YOUR FULL JUNCTION FILTER - NO MANIPULATION ===
+def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now, vol_avg, btc_trend, signal_type, reasons=None):
+    if reasons is None: reasons = []
+    reasons_str = " ".join(reasons).upper()
+    whale_override = any(x in reasons_str for x in ["LIQ_GRAB", "WHALE_TRAP", "BREAKOUT", "STOP_HUNT", "W_PATTERN", "WHALEVOL"])
+    range_4h_pct = (high_4h - low_4h) / price if price > 0 else 0
+    range_24h_pct = high_24h - low_24h
+    location_24h = ((price - low_24h) / range_24h_pct * 100) if range_24h_pct > 0 else 50
+
+    # 1. JUNCTION BOX - WAIT FOR CONFIRMATION
+    if range_4h_pct < 0.015:
+        if not whale_override:
+            return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT no {signal_type}"
+        else:
+            if vol_now < vol_avg * 1.1:
+                return True, f"JUNCTION + whale weak vol {vol_now/vol_avg:.1f}x WAIT"
+            return False, f"CONFIRMED {signal_type} BREAKOUT Vol {vol_now/vol_avg:.1f}x"
+
+    # 2. LOCATION
+    if not whale_override:
+        if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
+        if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
+    # 3. RSI
+    if not whale_override:
+        if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
+        if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
+    # 4. VOL
+    if not whale_override and vol_now < vol_avg * 0.7:
+        return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
+    # 5. BTC
+    if not whale_override:
+        if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
+        if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
+    return False, f"CONFIRMED {signal_type} loc {location_24h:.0f}% RSI {rsi_1h:.0f} Vol {vol_now/vol_avg:.1f}x"
 
 def send_telegram(msg):
     try:
@@ -207,7 +242,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     info={"4H":f"{trend4h} mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
 
-# === FIXED AUTOPILOT - SILENT + FAST COIN QTY FIX ===
 def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
     if not AUTOPILOT_ENABLED: return False
@@ -221,19 +255,16 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
             if abs(c)>0: has=True; break
         if "TAKE PROFIT" in decision and has:
             close_position(ex,sym)
-            # Silent TP - no telegram, only log
             print(f"💰 AUTO TP {sym}"); return True
         if has or TRADED_THIS_RUN: return False
-        # FIX FOR FAST LOW PRICE COINS SIREN/LAB/KOMA
         qty = notional / price
-        # Round to exchange precision - keep float for 0.000xx coins
         qty = max(1, min(qty, MAX_QTY_CAP))
         try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
         except: pass
         side="buy" if "BUY" in decision else "sell"
         ex.create_market_order(sym,side,qty)
         TRADED_THIS_RUN=True
-        print(f"🤖 AUTO {sym} {decision} qty {qty} @ {price}") # SILENT - NO TELEGRAM
+        print(f"🤖 AUTO {sym} {decision} qty {qty} @ {price}")
         return True
     except Exception as e: print(f"Auto err {sym} {e}"); return False
 
@@ -249,18 +280,22 @@ def scan():
     ex=get_exchange()
     if not ex: send_telegram("❌ MEXC KEY ERROR - Check Railway vars"); return
     session,_,h=get_killzone()
-    # AUTOPILOT still runs even in DEAD? No, respect dead zone
     if session=="DEAD ZONE": print(f"💤 DEAD ZONE {h}UTC SILENT"); return
     try: bal=ex.fetch_balance(); free=bal['USDT']['free'] if 'USDT' in bal else BALANCE_START
     except: free=BALANCE_START
     notional=get_auto_notional(free)
     progress=(float(free)/TARGET)*100
-
-    # === TIMER FIX: MANUAL ONLY ONCE PER HOUR ===
     current_min = datetime.now(timezone.utc).minute
-    allow_manual = current_min < 10 # Only first 10 min of hour = 1 signal per hour
+    allow_manual = current_min < 10
 
-    # Monthly report check (auto silent)
+    # BTC TREND FOR FILTER
+    try:
+        btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
+        btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
+        btc_ema21=btc_df['c'].ewm(span=21).mean().iloc[-1]
+        btc_trend="BULLISH" if btc_ema9>btc_ema21 else "BEARISH"
+    except: btc_trend="RANGE"
+
     check_monthly_report(free)
 
     for sym in SYMBOLS:
@@ -281,10 +316,33 @@ def scan():
             except: pass
             decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
 
-            # === 1. AUTOPILOT ALWAYS EVERY 10 MIN (SILENT) ===
+            # === MERGED FILTER - JUNCTION CONFIRMATION ===
+            low_24h=df1h['low'].tail(24).min()
+            high_24h=df1h['high'].tail(24).max()
+            low_4h=df4h['low'].tail(6).min() # 4h box
+            high_4h=df4h['high'].tail(6).max()
+            _,rsi1h,_,_=get_mom_rsi_vol(df1h)
+            _,_,vol_ratio_now,_=get_mom_rsi_vol(df5m)
+            vol_avg=df15m['volume'].tail(20).mean()
+            vol_now=df15m['volume'].iloc[-1]
+            sig_type="LONG" if "BUY" in decision else "SHORT" if "SELL" in decision else "NONE"
+
+            if sig_type!="NONE":
+                blocked, filter_msg = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, sig_type, info['reasons'])
+                if blocked:
+                    print(f"⛔ FILTERED {sym} {filter_msg} | {info['reasons']}")
+                    # Change to WAIT - no auto, no manual
+                    if "JUNCTION" in filter_msg:
+                        decision=f"WAIT {sig_type} - {filter_msg}"
+                        score=0
+                    else:
+                        continue
+                else:
+                    print(f"✅ {sym} {filter_msg}")
+                    info['reasons'].append(filter_msg)
+
             safe_autopilot_enter(ex,sym,price,session,score,info,decision,notional)
 
-            # === 2. MANUAL ONLY ONCE PER HOUR (CLEAN) ===
             if allow_manual:
                 send_now=False
                 if "NOW" in decision or "TAKE PROFIT" in decision: send_now=can_send(sym,decision,1)
@@ -301,10 +359,10 @@ def scan():
 
     if ALL_SIGNALS and allow_manual:
         mode_txt="📱 MANUAL PEAK" if AUTOPILOT_ENABLED else "📱 MANUAL ONLY"
-        header=f"⚡ *{get_killzone()[0]} {h}UTC - {mode_txt} - HOURLY CLEAN*\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k | SIREN LAB KOMA\n{'-'*40}\n\n"
+        header=f"⚡ *{get_killzone()[0]} {h}UTC - {mode_txt} - CONFIRMED ONLY*\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k | SIREN LAB KOMA\n{'-'*40}\n\n"
         body="\n\n".join(ALL_SIGNALS)
-        footer="\n\n✅ MANUAL: 1 per hour | ASIAN 5UTC LONDON 7-9UTC NY 12-15UTC\n🤖 AUTO: Silent every 10min + Monthly Report 1st\n🐋 LIQ GRAB | 🔄 W/M | 🔥 WHALEVOL | TP1.5% SL0.8%"
+        footer="\n\n✅ MANUAL: 1 per hour CONFIRMED | AUTO: Silent 10min\n🛡️ FILTER: Junction WAIT → Confirmation = No manipulation"
         send_telegram(header+body+footer)
-    print("✅ HOURLY CLEAN DONE")
+    print("✅ HOURLY CONFIRMED DONE")
 
 if __name__=="__main__": scan()
