@@ -3,14 +3,15 @@ import ccxt
 import pandas as pd
 from datetime import datetime, timezone
 
-# === KOMA SCALPING 5MIN - MATCHES YOUR CHART ===
-PUMP_TRIGGER = 2.5   # 2.5% in 5min = pump
-DUMP_TRIGGER = -2.5  # -2.5% in 5min = dump
-TP_PCT = 3.0
-SL_PCT = 2.5
+# === KOMA BEAST 5MIN - FOR $12.90 ===
+PUMP_TRIGGER = 1.5   # 1.5% = catch early at 0.01711
+DUMP_TRIGGER = -1.5  # -1.5% = catch early
+TP_PCT = 8.0         # 8% TP = $10.32 profit on $12.90 at 10x
+SL_PCT = 3.0         # 3% SL
 TIME_STOP_HOURS = 1
-VOL_MULT = 0.8
+VOL_MULT = 0.5       # 0.5x = catch even low vol at top
 SYMBOL = "KOMA/USDT:USDT"
+LEVERAGE = 10        # BEAST 10x for KOMA
 
 def send_msg(send_fn, msg):
     try: send_fn(msg)
@@ -56,7 +57,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                             try:
                                 close_side = "sell" if "long" in side else "buy"
                                 ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
-                                send_msg(send_telegram, f"⏰ *SCALP TIME STOP {TIME_STOP_HOURS}H* {side.upper()} {hours_open:.1f}h PNL {pnl_pct:.2f}%")
+                                send_msg(send_telegram, f"⏰ *BEAST TIME STOP {TIME_STOP_HOURS}H* {side.upper()} {hours_open:.1f}h PNL {pnl_pct:.2f}%")
                                 return f"TIME STOP CLOSED {hours_open:.1f}h PNL {pnl_pct:.2f}%"
                             except Exception as e:
                                 send_msg(send_telegram, f"⚠️ Time stop fail {e}")
@@ -65,7 +66,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                         try:
                             close_side = "sell" if "long" in side else "buy"
                             ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
-                            send_msg(send_telegram, f"💰 *SCALP TP {TP_PCT}%* {side.upper()} +{pnl_pct:.2f}%")
+                            send_msg(send_telegram, f"💰 *BEAST TP {TP_PCT}%* {side.upper()} +{pnl_pct:.2f}% | $12.90 -> profit ${float(free_bal)*LEVERAGE*TP_PCT/100:.2f}")
                             return f"TP CLOSED +{pnl_pct:.2f}%"
                         except Exception as e:
                             send_msg(send_telegram, f"⚠️ TP fail {e}")
@@ -74,12 +75,12 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                         try:
                             close_side = "sell" if "long" in side else "buy"
                             ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
-                            send_msg(send_telegram, f"✂️ *SCALP SL {SL_PCT}%* {side.upper()} {pnl_pct:.2f}%")
+                            send_msg(send_telegram, f"✂️ *BEAST SL {SL_PCT}%* {side.upper()} {pnl_pct:.2f}%")
                             return f"SL CLOSED {pnl_pct:.2f}%"
                         except Exception as e:
                             send_msg(send_telegram, f"⚠️ SL fail {e}")
                     
-                    return f"HOLD {side.upper()} PNL {pnl_pct:.2f}%"
+                    return f"HOLD {side.upper()} PNL {pnl_pct:.2f}% TP {TP_PCT}%"
             except Exception as e:
                 print(f"pos err {e}")
 
@@ -108,11 +109,11 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                 if notional > bal*0.9: notional = round(bal*0.9,2)
                 qty = notional / price
                 try:
-                    ex.set_leverage(5, SYMBOL)
+                    ex.set_leverage(LEVERAGE, SYMBOL)
                     ex.set_margin_mode('isolated', SYMBOL)
                 except: pass
                 ex.create_market_order(SYMBOL, "sell", qty)
-                send_msg(send_telegram, f"🔴 *SCALP SHORT {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x Price {price:.6f}")
+                send_msg(send_telegram, f"🔴 *BEAST SHORT {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x Price {price:.6f} | TP 8% -> {price*0.92:.6f}")
                 return f"SHORT PUMP {change_5m:.2f}%"
             
             if change_5m <= DUMP_TRIGGER:
@@ -124,11 +125,11 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                 if notional > bal*0.9: notional = round(bal*0.9,2)
                 qty = notional / price
                 try:
-                    ex.set_leverage(5, SYMBOL)
+                    ex.set_leverage(LEVERAGE, SYMBOL)
                     ex.set_margin_mode('isolated', SYMBOL)
                 except: pass
                 ex.create_market_order(SYMBOL, "buy", qty)
-                send_msg(send_telegram, f"🟢 *SCALP LONG {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x Price {price:.6f}")
+                send_msg(send_telegram, f"🟢 *BEAST LONG {change_5m:.2f}%* 5m Vol {vol_ratio:.1f}x Price {price:.6f} | TP 8% -> {price*1.08:.6f} = ${bal*LEVERAGE*0.08:.2f} profit")
                 return f"LONG DUMP {change_5m:.2f}%"
             
             return f"WAIT 5m change {change_5m:.2f}% Vol {vol_ratio:.1f}x need {PUMP_TRIGGER}%"
