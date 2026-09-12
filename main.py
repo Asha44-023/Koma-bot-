@@ -114,10 +114,10 @@ def close_position(ex,sym):
 
 def get_killzone():
     h=datetime.now(timezone.utc).hour
-    if 0<=h<6: return "ASIAN","Range",h
+    if 0<=h<7: return "ASIAN","Range",h
     if 7<=h<12: return "LONDON","Breakout",h
     if 12<=h<17: return "NEW YORK","Trend",h
-    if 17<=h<20: return "LONDON CLOSE","Reversal",h
+    if 17<=h<21: return "LONDON CLOSE","Reversal",h
     return "DEAD ZONE","Avoid",h
 
 def can_send(sym,typ,mins):
