@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 BALANCE_START = 14.99
 TARGET = 60000.0
-LEVERAGE = 5
+LEVERAGE = 10 # FIXED was 5 -> align with beast 10x
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
 except: LAST_ALERT = {}
@@ -15,10 +15,11 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-KOMA_PUMP_TRIGGER = 5.0 # ULTRA was 10
-KOMA_DUMP_TRIGGER = -5.0
-KOMA_SLEEP_TP = 5.0 # ULTRA was 8
-KOMA_SLEEP_SL = 4.0 # ULTRA was 5
+# === ALIGNED WITH BEAST ===
+KOMA_PUMP_TRIGGER = 1.5 # FIXED was 5.0
+KOMA_DUMP_TRIGGER = -1.5
+KOMA_SLEEP_TP = 8.0 # FIXED was 5.0
+KOMA_SLEEP_SL = 3.0 # FIXED was 4.0
 
 def get_env_clean(*names):
     for n in names:
@@ -39,8 +40,8 @@ ENGINE = os.getenv("ENGINE","AUTO").upper()
 SYMBOLS = ["KOMA/USDT:USDT"]
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
 
-SCALP_TP1 = 0.05 # ULTRA was 0.035
-SCALP_SL = 0.04 # ULTRA was 0.022
+SCALP_TP1 = 0.05
+SCALP_SL = 0.04
 TRADES_FILE = "/tmp/koma_trades.log"
 
 def _log(pnl):
@@ -68,14 +69,14 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
     if range_4h_pct < 0.015:
         if not whale_override: return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT"
         else:
-            if vol_now < vol_avg * 1.0: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT" # ULTRA was 1.1
+            if vol_now < vol_avg * 1.0: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
             return False, f"CONFIRMED BREAKOUT Vol {vol_now/vol_avg:.1f}x"
     if not whale_override:
         if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
         if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
         if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
-    if not whale_override and vol_now < vol_avg * 0.5: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT" # ULTRA was 0.7
+    if not whale_override and vol_now < vol_avg * 0.5: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
         if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
@@ -95,7 +96,7 @@ def get_exchange():
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
     except: bal=BALANCE_START
-    notional = round(bal * 0.8, 2) # ULTRA 80% - was 0.4
+    notional = round(bal * 0.8, 2)
     if notional < 3.0: notional = 3.0
     if notional > bal * 0.9: notional = round(bal * 0.9,2)
     return notional
@@ -137,11 +138,11 @@ def get_killzone():
 
 def get_session_cooldown(session, decision):
     if "TAKE PROFIT" in decision or "CLOSE NOW" in decision or "REVERSAL" in decision:
-        return 15 # ULTRA was 20
+        return 15
     if "HOLD" in decision:
-        return 60 # ULTRA was 90
+        return 60
     if "JUNCTION" in decision:
-        return 30 # ULTRA was 60
+        return 30
     if session == "ASIAN": return 30
     if session == "LONDON": return 20
     if session == "NEW YORK": return 20
@@ -273,9 +274,9 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if wm_type=="M_PATTERN": score+=3; reasons.append(f"🔄 {wm_msg}")
     if bos_type=="BOS_UP": score+=3; reasons.append(f"📈 {bos_msg}")
     if bos_type=="BOS_DOWN": score+=3; reasons.append(f"📉 {bos_msg}")
-    if ratio5m>=1.0: score+=2; reasons.append(f"🔥 {vol5m}") # ULTRA was 2.5
-    elif ratio5m>=0.8: score+=1; reasons.append(vol5m) # ULTRA was 1.5
-    if ratio15m>=1.0: score+=1; reasons.append(f"15M {vol15m}") # ULTRA was 1.3
+    if ratio5m>=1.0: score+=2; reasons.append(f"🔥 {vol5m}")
+    elif ratio5m>=0.8: score+=1; reasons.append(vol5m)
+    if ratio15m>=1.0: score+=1; reasons.append(f"15M {vol15m}")
 
     dir_ok_long = trend4h in ["UP","RANGE"]
     dir_ok_short = trend4h in ["DOWN","RANGE"]
@@ -305,7 +306,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
     if not AUTOPILOT_ENABLED: return False
     if "WAIT" in decision or "JUNCTION" in decision or "HOLD" in decision: return False
-    if "NOW" in decision and score<3: return False # ULTRA was 4
+    if "NOW" in decision and score<3: return False
     try:
         existing_side = None
         for p in ex.fetch_positions([sym]):
@@ -359,13 +360,13 @@ def scan():
         return
 
     if ENGINE == "MANUAL":
-        minute = datetime.now(timezone.utc).minute
-        if minute not in [0,15,30,45]:
-            print(f"⏭️ Manual skip minute {minute} - cooldown 15m")
-            return
-        if session=="DEAD ZONE":
-            print(f"💤 DEAD ZONE {h}UTC - Manual signal skip")
-            return
+        # FIXED: Run BEAST check for KOMA even in MANUAL
+        if KOMA_BEAST and koma_beast_plan:
+            try:
+                res = koma_beast_plan(ex, free, send_telegram, lambda *a: True)
+                print(f"KOMA BEAST MANUAL CHECK: {res}")
+            except Exception as e: print(f"beast manual err {e}")
+
         try:
             btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
             btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
@@ -388,14 +389,14 @@ def scan():
                 except: pass
                 decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
                 if "WAIT" in decision and score==0:
-                    print(f"MANUAL WAIT {sym}"); continue
+                    print(f"MANUAL WAIT {sym} {info['15M']}"); continue
                 low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
                 low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
                 _,rsi1h,_,_=get_mom_rsi_vol(df1h)
                 try: vol_now=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1]
                 except: vol_now=1; vol_avg=1
                 filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision or "HOLD LONG" in decision else "SHORT", info['reasons'])
-                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason="KOMA 5% OVERRIDE SIGNAL"
+                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason=f"KOMA {KOMA_PUMP_TRIGGER}% OVERRIDE SIGNAL"
                 if filtered and not any(x in decision for x in ["TAKE PROFIT","HOLD","CLOSE NOW","JUNCTION"]):
                     print(f"Filter {sym} {reason}"); continue
                 if "HOLD" in decision:
