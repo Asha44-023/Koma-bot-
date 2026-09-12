@@ -4,12 +4,12 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
-# === KOMA BEAST + ANTI-FAKEOUT - $12.90 ===
+# === KOMA SCALP BEAST $12.91 FINAL ===
 PUMP_TRIGGER = 1.5
 DUMP_TRIGGER = -1.5
 TP_PCT = 8.0
 SL_PCT = 3.0
-TIME_STOP_HOURS = 0.33  # 20 MIN
+TIME_STOP_HOURS = 0.33 # 20 MIN
 VOL_MULT = 0.5
 SYMBOL = "KOMA/USDT:USDT"
 LEVERAGE = 10
@@ -17,6 +17,12 @@ LEVERAGE = 10
 RSI_OVERSOLD = 35
 RSI_OVERBOUGHT = 65
 MAX_WICK_RATIO = 1.5
+TRAIL_TRIGGER = 3.0 # at +3% -> trailing on
+TRAIL_OFFSET = 0.8 # trail 0.8% behind
+VOL_SPIKE = 2.0 # real move needs 2x vol
+
+# global trail memory
+peak_pnl = {"long": 0, "short": 0}
 
 def send_msg(send_fn, msg):
     try: send_fn(msg)
@@ -48,9 +54,15 @@ def add_filters(df):
     df['lower_wick'] = df[['c','o']].min(axis=1) - df['l']
     df['wick_ratio'] = (df['upper_wick'] + df['lower_wick']) / df['body']
     df['close_pos'] = (df['c'] - df['l']) / (df['h'] - df['l']).replace(0,1)
+    df['vol_ma10'] = df['v'].rolling(10).mean()
+    df['vol_ma20'] = df['v'].rolling(20).mean()
+    df['ema9'] = df['c'].ewm(span=9).mean()
+    df['ema21'] = df['c'].ewm(span=21).mean()
+    df['vwap'] = (df['c'] * df['v']).cumsum() / df['v'].cumsum()
     return df
 
 def scalp_plan(ex, free_bal, send_telegram, can_send_func):
+    global peak_pnl
     try:
         positions = ex.fetch_positions([SYMBOL])
         for p in positions:
@@ -60,84 +72,99 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                 if contracts == 0:
                     contracts = float(info.get('holdVol',0) or 0)
                 if abs(contracts) > 0:
-                    side = p.get('side') or info.get('positionSide') or 'long'
-                    side = side.lower()
+                    side = (p.get('side') or info.get('positionSide') or 'long').lower()
                     entry_price = float(info.get('openPrice') or info.get('avgPrice') or p.get('entryPrice') or 0)
                     mark = float(info.get('markPrice') or info.get('lastPrice') or entry_price)
-                    if entry_price > 0:
-                        if 'long' in side:
-                            pnl_pct = (mark - entry_price)/entry_price*100
-                        else:
-                            pnl_pct = (entry_price - mark)/entry_price*100
-                    else:
-                        pnl_pct = 0
+                    pnl_pct = ((mark - entry_price)/entry_price*100) if 'long' in side else ((entry_price - mark)/entry_price*100) if entry_price>0 else 0
+
+                    # TRAILING LOGIC
+                    key = 'long' if 'long' in side else 'short'
+                    if pnl_pct > peak_pnl.get(key,0):
+                        peak_pnl[key] = pnl_pct
+                    if peak_pnl[key] >= TRAIL_TRIGGER:
+                        if pnl_pct <= peak_pnl[key] - TRAIL_OFFSET:
+                            close_side = "sell" if "long" in side else "buy"
+                            ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                            send_msg(send_telegram, f"🔥 *TRAIL TP* {side.upper()} peak {peak_pnl[key]:.2f}% -> close {pnl_pct:.2f}%")
+                            peak_pnl[key]=0
+                            return f"TRAIL TP {pnl_pct:.2f}%"
+
+                    # TIME STOP
                     open_ts = get_position_entry_time(p)
-                    if open_ts:
-                        hours_open = (time.time() - open_ts)/3600
-                        if hours_open >= TIME_STOP_HOURS:
-                            try:
-                                close_side = "sell" if "long" in side else "buy"
-                                ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
-                                send_msg(send_telegram, f"⏰ *BEAST 20MIN STOP* {side.upper()} {hours_open*60:.0f}min PNL {pnl_pct:.2f}%")
-                                return f"TIME STOP {hours_open*60:.0f}min PNL {pnl_pct:.2f}%"
-                            except Exception as e:
-                                send_msg(send_telegram, f"⚠️ Time stop fail {e}")
+                    if open_ts and (time.time()-open_ts)/3600 >= TIME_STOP_HOURS:
+                        close_side = "sell" if "long" in side else "buy"
+                        ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                        send_msg(send_telegram, f"⏰ *20MIN STOP* {side.upper()} {pnl_pct:.2f}%")
+                        peak_pnl[key]=0
+                        return f"TIME STOP {pnl_pct:.2f}%"
+
                     if pnl_pct >= TP_PCT:
-                        try:
-                            close_side = "sell" if "long" in side else "buy"
-                            ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
-                            send_msg(send_telegram, f"💰 *BEAST TP {TP_PCT}%* {side.upper()} +{pnl_pct:.2f}% | $12.90 -> ${float(free_bal)+float(free_bal)*LEVERAGE*TP_PCT/100/10:.2f}")
-                            return f"TP +{pnl_pct:.2f}%"
-                        except Exception as e:
-                            send_msg(send_telegram, f"⚠️ TP fail {e}")
+                        close_side = "sell" if "long" in side else "buy"
+                        ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                        send_msg(send_telegram, f"💰 *BEAST TP {TP_PCT}%* {side.upper()} +{pnl_pct:.2f}%")
+                        peak_pnl[key]=0
+                        return f"TP {pnl_pct:.2f}%"
                     if pnl_pct <= -SL_PCT:
-                        try:
-                            close_side = "sell" if "long" in side else "buy"
-                            ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
-                            send_msg(send_telegram, f"✂️ *BEAST SL {SL_PCT}%* {side.upper()} {pnl_pct:.2f}%")
-                            return f"SL {pnl_pct:.2f}%"
-                        except Exception as e:
-                            send_msg(send_telegram, f"⚠️ SL fail {e}")
-                    return f"HOLD {side.upper()} PNL {pnl_pct:.2f}%"
+                        close_side = "sell" if "long" in side else "buy"
+                        ex.create_market_order(SYMBOL, close_side, abs(contracts), params={"reduceOnly": True})
+                        send_msg(send_telegram, f"✂️ *SL {SL_PCT}%* {side.upper()} {pnl_pct:.2f}%")
+                        peak_pnl[key]=0
+                        return f"SL {pnl_pct:.2f}%"
+                    return f"HOLD {side.upper()} PNL {pnl_pct:.2f}% peak {peak_pnl.get(key,0):.2f}%"
             except Exception as e:
                 print(f"pos err {e}")
 
+        # NO POSITION -> SCALP ENTRY
         try:
-            ohlcv = ex.fetch_ohlcv(SYMBOL, '5m', limit=30)
-            df = pd.DataFrame(ohlcv, columns=['t','o','h','l','c','v'])
-            if len(df) < 25:
+            ohlcv5 = ex.fetch_ohlcv(SYMBOL, '5m', limit=30)
+            df5 = pd.DataFrame(ohlcv5, columns=['t','o','h','l','c','v'])
+            ohlcv1 = ex.fetch_ohlcv(SYMBOL, '1m', limit=30)
+            df1 = pd.DataFrame(ohlcv1, columns=['t','o','h','l','c','v'])
+            if len(df5)<25 or len(df1)<10:
                 return "NO DATA"
-            
-            df = add_filters(df)
-            last = df.iloc[-1]
-            prev = df.iloc[-2]
-            
-            change_5m = (last['c'] - prev['c']) / prev['c'] * 100
-            price = last['c']
-            vol_now = last['v']
-            vol_avg = df['v'].rolling(10).mean().iloc[-1]
-            vol_ratio = vol_now/vol_avg if vol_avg>0 else 1.0
-            
-            rsi = last['rsi']
-            bb_up = last['bb_upper']
-            bb_low = last['bb_lower']
-            wick_ratio = last['wick_ratio']
-            close_pos = last['close_pos']
-            
-            if vol_ratio < VOL_MULT and abs(change_5m) < PUMP_TRIGGER:
-                return f"WAIT Vol {vol_ratio:.1f}x change {change_5m:.2f}% RSI {rsi:.0f}"
 
+            df5 = add_filters(df5)
+            df1 = add_filters(df1)
+
+            last5 = df5.iloc[-1]
+            prev5 = df5.iloc[-2]
+            last1 = df1.iloc[-1]
+
+            change_5m = (last5['c'] - prev5['c']) / prev5['c'] * 100
+            change_1m = (df1.iloc[-1]['c'] - df1.iloc[-3]['c']) / df1.iloc[-3]['c'] * 100
+
+            price = last5['c']
+            vol_ratio = last5['v']/last5['vol_ma10'] if last5['vol_ma10']>0 else 1
+            rsi = last5['rsi']
+            vwap = last5['vwap']
+            vwap_dist = (price - vwap)/vwap*100
+            ema9_5 = last5['ema9']
+            ema21_5 = last5['ema21']
+            ema9_1 = last1['ema9']
+            ema21_1 = last1['ema21']
+
+            # VOL SPIKE + VOL INCREASE
+            vol_increasing = last5['v'] > prev5['v'] and last5['v'] > last5['vol_ma10']
+
+            if vol_ratio < VOL_MULT and abs(change_5m) < PUMP_TRIGGER:
+                return f"WAIT Vol {vol_ratio:.1f}x change {change_5m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}%"
+
+            # LONG SCALP: DUMP
             if change_5m <= DUMP_TRIGGER:
+                if not vol_increasing and vol_ratio < VOL_SPIKE:
+                    return f"FAKE DUMP Vol {vol_ratio:.1f}x < {VOL_SPIKE}x"
                 if rsi > RSI_OVERSOLD:
                     return f"FAKE DUMP RSI {rsi:.0f}>{RSI_OVERSOLD}"
-                if price > bb_low:
-                    return f"FAKE DUMP inside BB {price:.6f}>{bb_low:.6f}"
-                if wick_ratio > MAX_WICK_RATIO:
-                    return f"FAKE DUMP wick {wick_ratio:.1f}x"
-                if close_pos > 0.4:
-                    return f"FAKE DUMP close {close_pos:.2f} not low"
+                if vwap_dist > -1.0: # must be below VWAP -1%
+                    return f"FAKE DUMP VWAP {vwap_dist:.2f}% need <-1%"
+                if ema9_1 > ema21_1: # 1m still uptrend = don't long
+                    return f"FAKE DUMP EMA 1m uptrend"
+                if change_1m > -0.3: # 1m already bouncing
+                    return f"FAKE DUMP 1m bouncing {change_1m:.2f}%"
+                if last5['wick_ratio'] > MAX_WICK_RATIO:
+                    return f"FAKE DUMP wick {last5['wick_ratio']:.1f}x"
                 if not can_send_func(SYMBOL, f"DUMP{change_5m:.0f}", 10):
-                    return f"DUMP {change_5m:.2f}% cooldown"
+                    return f"DUMP cooldown"
                 bal = float(free_bal)
                 notional = round(min(max(bal*0.8, 3), bal*0.9), 2)
                 qty = notional / price
@@ -146,20 +173,26 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                     ex.set_margin_mode('isolated', SYMBOL)
                 except: pass
                 ex.create_market_order(SYMBOL, "buy", qty)
-                send_msg(send_telegram, f"🟢 *BEAST LONG REAL* {change_5m:.2f}% RSI {rsi:.0f} Vol {vol_ratio:.1f}x Price {price:.6f} TP {price*1.08:.6f}")
-                return f"LONG REAL {change_5m:.2f}% RSI {rsi:.0f}"
+                peak_pnl['long']=0
+                send_msg(send_telegram, f"🟢 *SCALP LONG* {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x EMA {ema9_1:.6f}<{ema21_1:.6f}")
+                return f"LONG {change_5m:.2f}% 1m {change_1m:.2f}%"
 
+            # SHORT SCALP: PUMP
             if change_5m >= PUMP_TRIGGER:
+                if not vol_increasing and vol_ratio < VOL_SPIKE:
+                    return f"FAKE PUMP Vol {vol_ratio:.1f}x < {VOL_SPIKE}x"
                 if rsi < RSI_OVERBOUGHT:
                     return f"FAKE PUMP RSI {rsi:.0f}<{RSI_OVERBOUGHT}"
-                if price < bb_up:
-                    return f"FAKE PUMP inside BB {price:.6f}<{bb_up:.6f}"
-                if wick_ratio > MAX_WICK_RATIO:
-                    return f"FAKE PUMP wick {wick_ratio:.1f}x"
-                if close_pos < 0.6:
-                    return f"FAKE PUMP close {close_pos:.2f} not high"
+                if vwap_dist < 1.0: # must be above VWAP +1%
+                    return f"FAKE PUMP VWAP {vwap_dist:.2f}% need >+1%"
+                if ema9_1 < ema21_1:
+                    return f"FAKE PUMP EMA 1m downtrend"
+                if change_1m < 0.3:
+                    return f"FAKE PUMP 1m fading {change_1m:.2f}%"
+                if last5['wick_ratio'] > MAX_WICK_RATIO:
+                    return f"FAKE PUMP wick {last5['wick_ratio']:.1f}x"
                 if not can_send_func(SYMBOL, f"PUMP{change_5m:.0f}", 10):
-                    return f"PUMP {change_5m:.2f}% cooldown"
+                    return f"PUMP cooldown"
                 bal = float(free_bal)
                 notional = round(min(max(bal*0.8, 3), bal*0.9), 2)
                 qty = notional / price
@@ -168,13 +201,13 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                     ex.set_margin_mode('isolated', SYMBOL)
                 except: pass
                 ex.create_market_order(SYMBOL, "sell", qty)
-                send_msg(send_telegram, f"🔴 *BEAST SHORT REAL* {change_5m:.2f}% RSI {rsi:.0f} Vol {vol_ratio:.1f}x Price {price:.6f} TP {price*0.92:.6f}")
-                return f"SHORT REAL {change_5m:.2f}% RSI {rsi:.0f}"
+                peak_pnl['short']=0
+                send_msg(send_telegram, f"🔴 *SCALP SHORT* {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x EMA {ema9_1:.6f}>{ema21_1:.6f}")
+                return f"SHORT {change_5m:.2f}% 1m {change_1m:.2f}%"
 
-            return f"WAIT change {change_5m:.2f}% RSI {rsi:.0f} Vol {vol_ratio:.1f}x need {PUMP_TRIGGER}%"
-            
+            return f"WAIT {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x need {PUMP_TRIGGER}%"
+
         except Exception as e:
             return f"ohlcv err {e}"
-            
     except Exception as e:
         return f"beast err {e}"
