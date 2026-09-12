@@ -2,12 +2,19 @@ import os, ccxt, pandas as pd, requests, time, json
 from datetime import datetime, timezone
 
 BALANCE_START = 14.99
-TARGET = 10000.0
-LEVERAGE = 7
-MAX_QTY_CAP = 5000
+TARGET = 60000.0
+LEVERAGE = 5
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
 except: LAST_ALERT = {}
+
+# --- KOMA FLIP BEAST ---
+try:
+    from koma_flip_beast import scalp_plan as koma_beast_plan
+    KOMA_BEAST = True
+except:
+    KOMA_BEAST = False
+    koma_beast_plan = None
 
 def get_env_clean(*names):
     for n in names:
@@ -25,34 +32,58 @@ auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
 
 SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT","GRASS/USDT:USDT"]
-SCALP_TP1 = 0.015
-SCALP_SL = 0.008
+SCALP_TP1 = 0.035
+SCALP_SL = 0.022
 
+TRADES_FILE = "/tmp/koma_trades.log"
+def _log(pnl):
+    try:
+        with open(TRADES_FILE,"a") as f: f.write(f"{datetime.utcnow().isoformat()},{pnl}\n")
+    except: pass
+
+def _monthly_report():
+    try:
+        if datetime.utcnow().day!= 1: return
+        if not os.path.exists(TRADES_FILE): return
+        lines = open(TRADES_FILE).readlines()[-200:]
+        total = len(lines)
+        profit = sum(float(l.split(",")[1]) for l in lines if "," in l)
+        send_telegram(f"📊 *MONTHLY {datetime.utcnow().strftime('%B %Y')}*\nTrades: {total}\nPNL: {profit:.2f}%\nTarget: $60K")
+    except: pass
+
+# --- FINAL MERGED FILTERS 1.5% / 85% / 82 ---
 def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now, vol_avg, btc_trend, signal_type, reasons=None):
     if reasons is None: reasons = []
     reasons_str = " ".join(reasons).upper()
-    whale_override = any(x in reasons_str for x in ["LIQ_GRAB", "WHALE_TRAP", "BREAKOUT", "STOP_HUNT", "W_PATTERN", "M_PATTERN", "WHALEVOL", "DOUBLE BOTTOM", "DOUBLE TOP", "W DOUBLE", "M DOUBLE"])
+    whale_override = any(x in reasons_str for x in [
+        "LIQ_GRAB", "WHALE_TRAP", "KOMA_PUMP_OVERRIDE", "BREAKOUT_LONG", "BREAKOUT_SHORT",
+        "STOP_HUNT", "ACCUM", "W_PATTERN", "M_PATTERN", "WHALEVOL", "DOUBLE BOTTOM", "DOUBLE TOP", "VOLUP"
+    ])
     range_4h_pct = (high_4h - low_4h) / price if price > 0 else 0
     range_24h_pct = high_24h - low_24h
     location_24h = ((price - low_24h) / range_24h_pct * 100) if range_24h_pct > 0 else 50
-    if range_4h_pct < 0.008:
+
+    if range_4h_pct < 0.015:
         if not whale_override:
-            return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT no {signal_type}"
+            return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT"
         else:
             if vol_now < vol_avg * 1.1:
-                return True, f"JUNCTION + whale weak vol {vol_now/vol_avg:.1f}x WAIT"
-            return False, f"CONFIRMED {signal_type} BREAKOUT Vol {vol_now/vol_avg:.1f}x"
+                return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
+            return False, f"CONFIRMED BREAKOUT Vol {vol_now/vol_avg:.1f}x"
+
     if not whale_override:
-        if signal_type == "LONG" and location_24h > 92: return True, f"At top {location_24h:.1f}% no LONG"
-        if signal_type == "SHORT" and location_24h < 8: return True, f"At bottom {location_24h:.1f}% no SHORT"
-    if not whale_override:
-        if signal_type == "LONG" and rsi_1h > 85: return True, f"RSI {rsi_1h:.1f} no LONG"
-        if signal_type == "SHORT" and rsi_1h < 15: return True, f"RSI {rsi_1h:.1f} no SHORT"
+        if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
+        if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
+        if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
+        if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
+
     if not whale_override and vol_now < vol_avg * 0.7:
         return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
+
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
         if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
+
     return False, f"CONFIRMED {signal_type} loc {location_24h:.0f}% RSI {rsi_1h:.0f} Vol {vol_now/vol_avg:.1f}x"
 
 def send_telegram(msg):
@@ -60,6 +91,7 @@ def send_telegram(msg):
         if TELEGRAM_TOKEN and TELEGRAM_CHAT:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "Markdown"}, timeout=15)
     except: pass
+    print(msg)
 
 def get_exchange():
     if not MEXC_KEY or not MEXC_SECRET: print("❌ KEYS MISSING"); return None
@@ -68,12 +100,10 @@ def get_exchange():
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
     except: bal=BALANCE_START
-    if bal<50: return 3.0
-    if bal<100: return 5.0
-    if bal<300: return 10.0
-    if bal<1000: return 20.0
-    if bal<3000: return 35.0
-    return 50.0
+    notional = round(bal * 0.23, 2)
+    if notional < 3.0: notional = 3.0
+    if notional > bal * 0.9: notional = bal * 0.9
+    return notional
 
 def parse_position(p):
     contracts=float(p.get('contracts',0) or 0)
@@ -184,16 +214,43 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     wm_type,wm_msg = detect_w_m_pattern(df5m)
     whale15,whale15_msg = detect_whale_manipulation(df15m)
     wm15,wm15_msg = detect_w_m_pattern(df15m)
+
+    # HOLD / CLOSE WITH VOLUME PUMP LOGIC
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
-        if change>=SCALP_TP1: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} +{change*100:.2f}%","score":9,"reasons":[f"TP {change*100:.2f}% {whale_msg}"],"price":price}
-        if change<=-SCALP_SL: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} SL {change*100:.2f}%","score":9,"reasons":[f"SL {change*100:.2f}%"],"price":price}
-        return "HOLD LONG",8,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol15m} {vol5m} {change*100:.2f}% {whale_msg} {wm_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg} {wm_msg}"],"price":price}
+        vol_pumping = ratio5m > 1.2 and mom5m > 0.3
+        vol_dying = ratio5m < 0.8
+
+        if change>=SCALP_TP1:
+            _log(change*100)
+            return "TAKE PROFIT CLOSE LONG",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} +{change*100:.2f}% TP HIT","score":9,"reasons":[f"TP {change*100:.2f}% CLOSE NOW {whale_msg}"],"price":price}
+        if change<=-SCALP_SL:
+            _log(change*100)
+            return "CUT LOSS CLOSE LONG",9,"✂️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {change*100:.2f}% SL","score":9,"reasons":[f"SL {change*100:.2f}% CLOSE"],"price":price}
+        if vol_pumping and change>0:
+            return "HOLD LONG - PUMP CONTINUES",9,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol5m} {change*100:.2f}% PUMPING","score":9,"reasons":[f"HOLD PROFIT {change*100:.2f}% VOL UP {vol5m} STILL PUMPING 🚀 {whale_msg}"],"price":price}
+        if vol_dying and change>0.005:
+            return "CLOSE LONG - VOLUME DYING",7,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} VOL DYING {vol5m} {change*100:.2f}%","score":7,"reasons":[f"TAKE PROFIT VOL DYING {change*100:.2f}% {vol5m}"],"price":price}
+        return "HOLD LONG",8,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol15m} {vol5m} {change*100:.2f}% {whale_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg} {wm_msg}"],"price":price}
+
     if has_short and entry_price>0:
         change=(entry_price-price)/entry_price
-        if change>=SCALP_TP1: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} +{change*100:.2f}%","score":9,"reasons":[f"TP {change*100:.2f}% {whale_msg}"],"price":price}
-        if change<=-SCALP_SL: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} SL {change*100:.2f}%","score":9,"reasons":[f"SL {change*100:.2f}%"],"price":price}
-        return "HOLD SHORT",8,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol15m} {vol5m} {change*100:.2f}% {whale_msg} {wm_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg} {wm_msg}"],"price":price}
+        vol_dumping = ratio5m > 1.2 and mom5m < -0.3
+        vol_dying = ratio5m < 0.8
+
+        if change>=SCALP_TP1:
+            _log(change*100)
+            return "TAKE PROFIT CLOSE SHORT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} +{change*100:.2f}% TP HIT","score":9,"reasons":[f"TP {change*100:.2f}% CLOSE NOW {whale_msg}"],"price":price}
+        if change<=-SCALP_SL:
+            _log(change*100)
+            return "CUT LOSS CLOSE SHORT",9,"✂️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {change*100:.2f}% SL","score":9,"reasons":[f"SL {change*100:.2f}% CLOSE"],"price":price}
+        if vol_dumping and change>0:
+            return "HOLD SHORT - DUMP CONTINUES",9,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol5m} {change*100:.2f}% DUMPING","score":9,"reasons":[f"HOLD PROFIT {change*100:.2f}% VOL UP {vol5m} STILL DUMPING 📉 {whale_msg}"],"price":price}
+        if vol_dying and change>0.005:
+            return "CLOSE SHORT - VOLUME DYING",7,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} VOL DYING {vol5m} {change*100:.2f}%","score":7,"reasons":[f"TAKE PROFIT VOL DYING {change*100:.2f}% {vol5m}"],"price":price}
+        return "HOLD SHORT",8,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol15m} {vol5m} {change*100:.2f}% {whale_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg} {wm_msg}"],"price":price}
+
+    # NEW ENTRY - NO AVOID, ONLY BUY/SELL/WAIT
     c0=df5m['close'].iloc[-1]; c1=df5m['close'].iloc[-2]; c2=df5m['close'].iloc[-3]
     two_up=c0>c1 and c1>c2; two_down=c0<c1 and c1<c2
     score=0; reasons=[]
@@ -205,24 +262,28 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if wm15: score+=1; reasons.append(f"15M {wm15_msg}")
     if ratio5m>=2.5: score+=2; reasons.append(f"🔥 {vol5m}")
     elif ratio5m>=1.5: score+=1; reasons.append(vol5m)
-    elif ratio5m<=0.6: score-=2; reasons.append(f"{vol5m} LOW NO ENTRY")
+    elif ratio5m<=0.6: score-=2
     if ratio15m>=1.5: score+=1; reasons.append(f"15M {vol15m}")
     if trend1h=="UP": score+=2
     if trend1h=="DOWN": score+=2
     if trend4h!="RANGE": score+=1
-    is_whale = whale_type is not None or wm_type is not None or ratio5m>=2.5 or ratio15m>=2.0
-    if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up) and mom5m>0.3 and ratio5m>=1.1 and 20<rsi5m<80 and (trend1h!="DOWN" or is_whale or ratio5m>=3.0):
-        if two_up: reasons.append(f"5M UP {mom5m:.1f}% x2")
+    is_whale = whale_type is not None or wm_type is not None or ratio5m>=2.5
+
+    if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up) and mom5m>0.3 and ratio5m>=1.1 and 20<rsi5m<80:
         decision="BUY NOW"; emoji="🟢"; score+=3
-    elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down) and mom5m<-0.2 and ratio5m>=1.1 and 20<rsi5m<80 and (trend1h!="UP" or is_whale or ratio5m>=3.0):
-        if two_down: reasons.append(f"5M DOWN {mom5m:.1f}% x2")
+        if two_up: reasons.append(f"5M UP {mom5m:.1f}% x2")
+    elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down) and mom5m<-0.2 and ratio5m>=1.1 and 20<rsi5m<80:
         decision="SELL NOW"; emoji="🔴"; score+=3
+        if two_down: reasons.append(f"5M DOWN {mom5m:.1f}% x2")
     else:
-        decision="AVOID BUY" if mom5m>=0 else "AVOID SELL"; emoji="⚪"; reasons.append(f"WAIT 5M {mom5m:.1f}% {vol5m} RSI{int(rsi5m)}")
+        decision="WAIT"; emoji="⚪"; score=0
+        reasons=[f"WAIT 5M {mom5m:.1f}% {vol5m} RSI{int(rsi5m)}"]
+
     if "NOW" in decision:
         reasons.append(f"4H:{trend4h} 1H:{trend1h} 15M:{trend15m}")
-        if score<4: decision=f"AVOID {decision.split()[0]}"; emoji="⚪"
-        if ratio15m<0.5 and not is_whale: decision=f"AVOID {decision.split()[0]}"; emoji="⚪"
+        if score<4: decision="WAIT"; emoji="⚪"; score=0
+        if ratio15m<0.5 and not is_whale: decision="WAIT"; emoji="⚪"; score=0
+
     if score>10: score=10
     if score<0: score=0
     info={"4H":f"{trend4h} mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
@@ -232,7 +293,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
     if not AUTOPILOT_ENABLED: return False
     if sess=="DEAD ZONE": return False
-    if "NOW" not in decision and "TAKE PROFIT" not in decision and "HOLD" not in decision: return False
+    if "WAIT" in decision: return False
     if "NOW" in decision and score<4: return False
     try:
         existing_side = None
@@ -251,21 +312,21 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
                     bal2=ex.fetch_balance(); free2=bal2['USDT']['free'] if 'USDT' in bal2 else free_bal
                     new_notional=get_auto_notional(free2)
                 except: free2=free_bal; new_notional=notional
-                qty = max(1, min(new_notional / price, MAX_QTY_CAP))
+                qty = new_notional / price
                 try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
                 except: pass
                 side="buy" if "BUY" in decision else "sell"
                 ex.create_market_order(sym,side,qty); TRADED_THIS_RUN=True
-                send_telegram(f"🔄 *FLIPPED {sym}* {existing_side.upper()} -> {decision}\n💰 ${free2:.2f} -> ${new_notional}\n📍 {price:.5f}")
+                send_telegram(f"🔄 *FLIPPED {sym}* {existing_side.upper()} -> {decision}\n💰 ${free2:.2f} Size ${new_notional}\n📍 {price:.5f}")
                 return True
-            if "TAKE PROFIT" in decision: close_position(ex,sym); return True
+            if "CLOSE" in decision or "TAKE PROFIT" in decision: close_position(ex,sym); return True
         if not existing_side and "NOW" in decision and score>=4:
-            qty = max(1, min(notional / price, MAX_QTY_CAP))
+            qty = notional / price
             try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
             except: pass
             side="buy" if "BUY" in decision else "sell"
             ex.create_market_order(sym,side,qty)
-            send_telegram(f"🤖 *AUTO {sym}* {decision} @ {price:.5f} Qty {qty:.1f}")
+            send_telegram(f"🤖 *AUTO {sym}* {decision} @ {price:.5f}\nSize ${notional:.2f} TP {SCALP_TP1*100}% SL {SCALP_SL*100}%\n{','.join(info['reasons'])}")
             return True
     except Exception as e: print(f"Auto err {sym} {e}")
     return False
@@ -276,19 +337,28 @@ def scan():
     ex=get_exchange()
     if not ex: return
     session,_,h=get_killzone()
+    _monthly_report()
     if session=="DEAD ZONE": print(f"💤 DEAD {h}UTC"); return
     try: bal=ex.fetch_balance(); free=bal['USDT']['free'] if 'USDT' in bal else BALANCE_START
     except: free=BALANCE_START
     notional=get_auto_notional(free)
     progress=(float(free)/TARGET)*100
-    allow_manual = True
+
+    if KOMA_BEAST and koma_beast_plan:
+        try:
+            res = koma_beast_plan(ex, free, send_telegram, lambda *a: True)
+            print(f"KOMA BEAST: {res}")
+        except Exception as e: print(f"KOMA beast err {e}")
+
     try:
         btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
         btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
         btc_ema21=btc_df['c'].ewm(span=21).mean().iloc[-1]
         btc_trend="BULLISH" if btc_ema9>btc_ema21 else "BEARISH"
     except: btc_trend="RANGE"
+
     for sym in SYMBOLS:
+        if "KOMA" in sym: continue
         try:
             df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
             df1h=pd.DataFrame(ex.fetch_ohlcv(sym,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
@@ -302,31 +372,33 @@ def scan():
                     if abs(c)>0: entry=e; has_long=(s=="long"); has_short=(s=="short")
             except: pass
             decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
+            if "WAIT" in decision: continue
             low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
             low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
             _,rsi1h,_,_=get_mom_rsi_vol(df1h)
             vol_avg=df15m['volume'].tail(20).mean(); vol_now=df15m['volume'].iloc[-1]
             sig_type="LONG" if "BUY" in decision else "SHORT" if "SELL" in decision else "NONE"
-            if sig_type!="NONE":
+            if sig_type!="NONE" and "HOLD" not in decision and "CLOSE" not in decision:
                 blocked, filter_msg = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, sig_type, info['reasons'])
-                if blocked:
-                    if "JUNCTION" in filter_msg: decision=f"WAIT {sig_type} - {filter_msg}"; score=0
-                    else: continue
+                if blocked: continue
                 else: info['reasons'].append(filter_msg)
             safe_autopilot_enter(ex,sym,price,session,score,info,decision,notional)
-            if allow_manual and can_send(sym,decision,1 if "NOW" in decision else 10):
+            if can_send(sym,decision,1 if "NOW" in decision else 5):
                 mg=""
                 if "BUY NOW" in decision: mg=f"\n 👉 LONG @ {price:.5f} SL {(price*(1-SCALP_SL)):.5f} TP {(price*(1+SCALP_TP1)):.5f}"
                 if "SELL NOW" in decision: mg=f"\n 👉 SHORT @ {price:.5f} SL {(price*(1+SCALP_SL)):.5f} TP {(price*(1+SCALP_TP1)):.5f}"
+                if "HOLD" in decision: mg=f"\n 📈 STILL PUMPING VOL UP"
+                if "CLOSE" in decision: mg=f"\n 💰 TAKE PROFIT NOW"
                 line=f"{emoji} *{decision}* {sym} @ {price:.5f} | SCORE {score}/10\n 4H: {info['4H']}\n 1H: {info['1H']}\n 15M: {info['15M']}\n → {','.join(info['reasons'])}{mg}"
                 ALL_SIGNALS.append(line)
         except Exception as e: print(f"Err {sym} {e}"); continue
+
     if ALL_SIGNALS:
-        header=f"⚡ {session} {h}UTC - 📱 MANUAL PEAK - CONFIRMED ONLY\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k\n----------------------------------------\n\n"
+        header=f"⚡ {session} {h}UTC\n💰 ${float(free):.2f} | Trade ${notional:.2f} | {progress:.4f}% to $60K\n----------------------------------------\n\n"
         msg=header + "\n\n".join(ALL_SIGNALS)
         print(msg); send_telegram(msg)
     else:
-        print(f"No signals {session} bal ${float(free):.2f}")
+        print(f"WAIT - No confirmed signals bal ${float(free):.2f}")
 
 if __name__ == "__main__":
     scan()
