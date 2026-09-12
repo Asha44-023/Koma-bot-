@@ -31,11 +31,11 @@ SCALP_SL = 0.008
 def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now, vol_avg, btc_trend, signal_type, reasons=None):
     if reasons is None: reasons = []
     reasons_str = " ".join(reasons).upper()
-    whale_override = any(x in reasons_str for x in ["LIQ_GRAB", "WHALE_TRAP", "BREAKOUT", "STOP_HUNT", "W_PATTERN", "WHALEVOL"])
+    whale_override = any(x in reasons_str for x in ["LIQ_GRAB", "WHALE_TRAP", "BREAKOUT", "STOP_HUNT", "W_PATTERN", "M_PATTERN", "WHALEVOL", "DOUBLE BOTTOM", "DOUBLE TOP", "W DOUBLE", "M DOUBLE"])
     range_4h_pct = (high_4h - low_4h) / price if price > 0 else 0
     range_24h_pct = high_24h - low_24h
     location_24h = ((price - low_24h) / range_24h_pct * 100) if range_24h_pct > 0 else 50
-    if range_4h_pct < 0.008: # FIXED WAS 0.015
+    if range_4h_pct < 0.008:
         if not whale_override:
             return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT no {signal_type}"
         else:
@@ -43,11 +43,11 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
                 return True, f"JUNCTION + whale weak vol {vol_now/vol_avg:.1f}x WAIT"
             return False, f"CONFIRMED {signal_type} BREAKOUT Vol {vol_now/vol_avg:.1f}x"
     if not whale_override:
-        if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
-        if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
+        if signal_type == "LONG" and location_24h > 92: return True, f"At top {location_24h:.1f}% no LONG"
+        if signal_type == "SHORT" and location_24h < 8: return True, f"At bottom {location_24h:.1f}% no SHORT"
     if not whale_override:
-        if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
-        if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
+        if signal_type == "LONG" and rsi_1h > 85: return True, f"RSI {rsi_1h:.1f} no LONG"
+        if signal_type == "SHORT" and rsi_1h < 15: return True, f"RSI {rsi_1h:.1f} no SHORT"
     if not whale_override and vol_now < vol_avg * 0.7:
         return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
     if not whale_override:
@@ -210,11 +210,11 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if trend1h=="UP": score+=2
     if trend1h=="DOWN": score+=2
     if trend4h!="RANGE": score+=1
-    is_whale = whale_type is not None or wm_type is not None
-    if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up) and mom5m>0.5 and ratio5m>=1.2 and 30<rsi5m<70 and (trend1h!="DOWN" or is_whale):
+    is_whale = whale_type is not None or wm_type is not None or ratio5m>=2.5 or ratio15m>=2.0
+    if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up) and mom5m>0.3 and ratio5m>=1.1 and 20<rsi5m<80 and (trend1h!="DOWN" or is_whale or ratio5m>=3.0):
         if two_up: reasons.append(f"5M UP {mom5m:.1f}% x2")
         decision="BUY NOW"; emoji="🟢"; score+=3
-    elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down or whale_type=="BULL_LIQ_GRAB") and mom5m<-0.3 and ratio5m>=1.2 and 30<rsi5m<70 and (trend1h!="UP" or is_whale):
+    elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down) and mom5m<-0.2 and ratio5m>=1.1 and 20<rsi5m<80 and (trend1h!="UP" or is_whale or ratio5m>=3.0):
         if two_down: reasons.append(f"5M DOWN {mom5m:.1f}% x2")
         decision="SELL NOW"; emoji="🔴"; score+=3
     else:
@@ -281,7 +281,7 @@ def scan():
     except: free=BALANCE_START
     notional=get_auto_notional(free)
     progress=(float(free)/TARGET)*100
-    allow_manual = True # FIXED
+    allow_manual = True
     try:
         btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
         btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
@@ -305,7 +305,6 @@ def scan():
             low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
             low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
             _,rsi1h,_,_=get_mom_rsi_vol(df1h)
-            _,_,vol_ratio_now,_=get_mom_rsi_vol(df5m)
             vol_avg=df15m['volume'].tail(20).mean(); vol_now=df15m['volume'].iloc[-1]
             sig_type="LONG" if "BUY" in decision else "SHORT" if "SELL" in decision else "NONE"
             if sig_type!="NONE":
@@ -326,6 +325,8 @@ def scan():
         header=f"⚡ {session} {h}UTC - 📱 MANUAL PEAK - CONFIRMED ONLY\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k\n----------------------------------------\n\n"
         msg=header + "\n\n".join(ALL_SIGNALS)
         print(msg); send_telegram(msg)
+    else:
+        print(f"No signals {session} bal ${float(free):.2f}")
 
 if __name__ == "__main__":
     scan()
