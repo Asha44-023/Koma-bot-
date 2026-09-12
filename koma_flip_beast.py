@@ -4,24 +4,23 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
-# === KOMA SCALP BEAST $12.91 FINAL ===
+# === KOMA SCALP BEAST $12.91 - KOMA 1.5% OVERRIDE REAL MONEY ===
 PUMP_TRIGGER = 1.5
 DUMP_TRIGGER = -1.5
 TP_PCT = 8.0
 SL_PCT = 3.0
 TIME_STOP_HOURS = 0.33 # 20 MIN
-VOL_MULT = 0.5
+VOL_MULT = 0.3  # UNLOCKED - was 0.5
 SYMBOL = "KOMA/USDT:USDT"
 LEVERAGE = 10
 
-RSI_OVERSOLD = 35
-RSI_OVERBOUGHT = 65
-MAX_WICK_RATIO = 1.5
-TRAIL_TRIGGER = 3.0 # at +3% -> trailing on
-TRAIL_OFFSET = 0.8 # trail 0.8% behind
-VOL_SPIKE = 2.0 # real move needs 2x vol
+RSI_OVERSOLD = 40  # looser
+RSI_OVERBOUGHT = 60 # looser, takes 60+
+MAX_WICK_RATIO = 2.5 # was 1.5
+TRAIL_TRIGGER = 3.0
+TRAIL_OFFSET = 0.8
+VOL_SPIKE = 0.3  # UNLOCKED - was 2.0 - THIS WAS BLOCKING YOU
 
-# global trail memory
 peak_pnl = {"long": 0, "short": 0}
 
 def send_msg(send_fn, msg):
@@ -77,7 +76,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                     mark = float(info.get('markPrice') or info.get('lastPrice') or entry_price)
                     pnl_pct = ((mark - entry_price)/entry_price*100) if 'long' in side else ((entry_price - mark)/entry_price*100) if entry_price>0 else 0
 
-                    # TRAILING LOGIC
                     key = 'long' if 'long' in side else 'short'
                     if pnl_pct > peak_pnl.get(key,0):
                         peak_pnl[key] = pnl_pct
@@ -89,7 +87,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                             peak_pnl[key]=0
                             return f"TRAIL TP {pnl_pct:.2f}%"
 
-                    # TIME STOP
                     open_ts = get_position_entry_time(p)
                     if open_ts and (time.time()-open_ts)/3600 >= TIME_STOP_HOURS:
                         close_side = "sell" if "long" in side else "buy"
@@ -114,7 +111,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
             except Exception as e:
                 print(f"pos err {e}")
 
-        # NO POSITION -> SCALP ENTRY
+        # NO POSITION -> ENTRY
         try:
             ohlcv5 = ex.fetch_ohlcv(SYMBOL, '5m', limit=30)
             df5 = pd.DataFrame(ohlcv5, columns=['t','o','h','l','c','v'])
@@ -138,29 +135,16 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
             rsi = last5['rsi']
             vwap = last5['vwap']
             vwap_dist = (price - vwap)/vwap*100
-            ema9_5 = last5['ema9']
-            ema21_5 = last5['ema21']
             ema9_1 = last1['ema9']
             ema21_1 = last1['ema21']
-
-            # VOL SPIKE + VOL INCREASE
-            vol_increasing = last5['v'] > prev5['v'] and last5['v'] > last5['vol_ma10']
 
             if vol_ratio < VOL_MULT and abs(change_5m) < PUMP_TRIGGER:
                 return f"WAIT Vol {vol_ratio:.1f}x change {change_5m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}%"
 
-            # LONG SCALP: DUMP
+            # LONG
             if change_5m <= DUMP_TRIGGER:
-                if not vol_increasing and vol_ratio < VOL_SPIKE:
-                    return f"FAKE DUMP Vol {vol_ratio:.1f}x < {VOL_SPIKE}x"
                 if rsi > RSI_OVERSOLD:
                     return f"FAKE DUMP RSI {rsi:.0f}>{RSI_OVERSOLD}"
-                if vwap_dist > -1.0: # must be below VWAP -1%
-                    return f"FAKE DUMP VWAP {vwap_dist:.2f}% need <-1%"
-                if ema9_1 > ema21_1: # 1m still uptrend = don't long
-                    return f"FAKE DUMP EMA 1m uptrend"
-                if change_1m > -0.3: # 1m already bouncing
-                    return f"FAKE DUMP 1m bouncing {change_1m:.2f}%"
                 if last5['wick_ratio'] > MAX_WICK_RATIO:
                     return f"FAKE DUMP wick {last5['wick_ratio']:.1f}x"
                 if not can_send_func(SYMBOL, f"DUMP{change_5m:.0f}", 10):
@@ -174,21 +158,13 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                 except: pass
                 ex.create_market_order(SYMBOL, "buy", qty)
                 peak_pnl['long']=0
-                send_msg(send_telegram, f"🟢 *SCALP LONG* {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x EMA {ema9_1:.6f}<{ema21_1:.6f}")
-                return f"LONG {change_5m:.2f}% 1m {change_1m:.2f}%"
+                send_msg(send_telegram, f"🟢 *KOMA BEAST LONG* {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x")
+                return f"LONG {change_5m:.2f}%"
 
-            # SHORT SCALP: PUMP
+            # SHORT - KOMA 1.5% OVERRIDE REAL MONEY
             if change_5m >= PUMP_TRIGGER:
-                if not vol_increasing and vol_ratio < VOL_SPIKE:
-                    return f"FAKE PUMP Vol {vol_ratio:.1f}x < {VOL_SPIKE}x"
                 if rsi < RSI_OVERBOUGHT:
                     return f"FAKE PUMP RSI {rsi:.0f}<{RSI_OVERBOUGHT}"
-                if vwap_dist < 1.0: # must be above VWAP +1%
-                    return f"FAKE PUMP VWAP {vwap_dist:.2f}% need >+1%"
-                if ema9_1 < ema21_1:
-                    return f"FAKE PUMP EMA 1m downtrend"
-                if change_1m < 0.3:
-                    return f"FAKE PUMP 1m fading {change_1m:.2f}%"
                 if last5['wick_ratio'] > MAX_WICK_RATIO:
                     return f"FAKE PUMP wick {last5['wick_ratio']:.1f}x"
                 if not can_send_func(SYMBOL, f"PUMP{change_5m:.0f}", 10):
@@ -202,7 +178,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send_func):
                 except: pass
                 ex.create_market_order(SYMBOL, "sell", qty)
                 peak_pnl['short']=0
-                send_msg(send_telegram, f"🔴 *SCALP SHORT* {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x EMA {ema9_1:.6f}>{ema21_1:.6f}")
+                send_msg(send_telegram, f"🔴 *KOMA BEAST SHORT* {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x OVERRIDE REAL")
                 return f"SHORT {change_5m:.2f}% 1m {change_1m:.2f}%"
 
             return f"WAIT {change_5m:.2f}% 1m {change_1m:.2f}% RSI {rsi:.0f} VWAP {vwap_dist:.2f}% Vol {vol_ratio:.1f}x need {PUMP_TRIGGER}%"
