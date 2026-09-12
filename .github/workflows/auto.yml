@@ -1,8 +1,8 @@
-name: AUTO KOMA 5MIN
+name: AUTO KOMA 5MIN - SLEEP SCALP 10%
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/2 * * * *'  # Every 2 min - catch 10% pump fast
   workflow_dispatch:
 
 jobs:
@@ -10,13 +10,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+      
+      - name: Restore logs
+        uses: actions/cache@v3
+        with:
+          path: |
+            /tmp/koma_trades.log
+            cooldown.json
+          key: koma-logs-${{ github.run_id }}
+          restore-keys: |
+            koma-logs-
+      
       - run: pip install ccxt pandas requests
+      
       - run: python main.py
         env:
           MEXC_API_KEY: ${{ secrets.MEXC_API_KEY }}
           MEXC_API_SECRET: ${{ secrets.MEXC_API_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AUTOPILOT_ENABLED: "true"
+      
+      - name: Save logs
+        if: always()
+        uses: actions/cache/save@v3
+        with:
+          path: |
+            /tmp/koma_trades.log
+            cooldown.json
+          key: koma-logs-${{ github.run_id }}
