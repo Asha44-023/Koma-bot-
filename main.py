@@ -15,10 +15,10 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-KOMA_PUMP_TRIGGER = 10.0
-KOMA_DUMP_TRIGGER = -10.0
-KOMA_SLEEP_TP = 8.0
-KOMA_SLEEP_SL = 5.0
+KOMA_PUMP_TRIGGER = 5.0 # ULTRA was 10
+KOMA_DUMP_TRIGGER = -5.0
+KOMA_SLEEP_TP = 5.0 # ULTRA was 8
+KOMA_SLEEP_SL = 4.0 # ULTRA was 5
 
 def get_env_clean(*names):
     for n in names:
@@ -39,8 +39,8 @@ ENGINE = os.getenv("ENGINE","AUTO").upper()
 SYMBOLS = ["KOMA/USDT:USDT"]
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
 
-SCALP_TP1 = 0.035
-SCALP_SL = 0.022
+SCALP_TP1 = 0.05 # ULTRA was 0.035
+SCALP_SL = 0.04 # ULTRA was 0.022
 TRADES_FILE = "/tmp/koma_trades.log"
 
 def _log(pnl):
@@ -68,14 +68,14 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
     if range_4h_pct < 0.015:
         if not whale_override: return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT"
         else:
-            if vol_now < vol_avg * 1.1: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
+            if vol_now < vol_avg * 1.0: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT" # ULTRA was 1.1
             return False, f"CONFIRMED BREAKOUT Vol {vol_now/vol_avg:.1f}x"
     if not whale_override:
         if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
         if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
         if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
-    if not whale_override and vol_now < vol_avg * 0.7: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
+    if not whale_override and vol_now < vol_avg * 0.5: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT" # ULTRA was 0.7
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
         if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
@@ -95,7 +95,7 @@ def get_exchange():
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
     except: bal=BALANCE_START
-    notional = round(bal * 0.4, 2)
+    notional = round(bal * 0.8, 2) # ULTRA 80% - was 0.4
     if notional < 3.0: notional = 3.0
     if notional > bal * 0.9: notional = round(bal * 0.9,2)
     return notional
@@ -137,16 +137,16 @@ def get_killzone():
 
 def get_session_cooldown(session, decision):
     if "TAKE PROFIT" in decision or "CLOSE NOW" in decision or "REVERSAL" in decision:
-        return 20
+        return 15 # ULTRA was 20
     if "HOLD" in decision:
-        return 90
+        return 60 # ULTRA was 90
     if "JUNCTION" in decision:
-        return 60
-    if session == "ASIAN": return 60
-    if session == "LONDON": return 30
-    if session == "NEW YORK": return 30
-    if session == "LONDON CLOSE": return 30
-    return 60
+        return 30 # ULTRA was 60
+    if session == "ASIAN": return 30
+    if session == "LONDON": return 20
+    if session == "NEW YORK": return 20
+    if session == "LONDON CLOSE": return 20
+    return 30
 
 def can_send(sym,typ,mins):
     k=f"{sym}_{typ}"; now=time.time()
@@ -273,21 +273,21 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if wm_type=="M_PATTERN": score+=3; reasons.append(f"🔄 {wm_msg}")
     if bos_type=="BOS_UP": score+=3; reasons.append(f"📈 {bos_msg}")
     if bos_type=="BOS_DOWN": score+=3; reasons.append(f"📉 {bos_msg}")
-    if ratio5m>=2.5: score+=2; reasons.append(f"🔥 {vol5m}")
-    elif ratio5m>=1.5: score+=1; reasons.append(vol5m)
-    if ratio15m>=1.3: score+=1; reasons.append(f"15M {vol15m}")
+    if ratio5m>=1.0: score+=2; reasons.append(f"🔥 {vol5m}") # ULTRA was 2.5
+    elif ratio5m>=0.8: score+=1; reasons.append(vol5m) # ULTRA was 1.5
+    if ratio15m>=1.0: score+=1; reasons.append(f"15M {vol15m}") # ULTRA was 1.3
 
     dir_ok_long = trend4h in ["UP","RANGE"]
     dir_ok_short = trend4h in ["DOWN","RANGE"]
 
-    if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up or bos_type=="BOS_UP") and mom5m>0.2 and ratio5m>=1.0 and 20<rsi5m<80 and dir_ok_long:
+    if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up or bos_type=="BOS_UP") and mom5m>0.2 and ratio5m>=0.8 and 20<rsi5m<80 and dir_ok_long:
         if trend1h=="UP" or bos_type=="BOS_UP":
             decision="BUY NOW"; emoji="🟢"; score+=3; reasons.append(f"4H DIR {trend4h} + 1H BOS {trend1h} + 5-15M ENTRY OK")
         else:
             decision="JUNCTION WAIT"; emoji="🔀"; score=3; reasons.append(f"4H {trend4h} but 1H {trend1h} no BOS - JUNCTION")
             info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} STRUCT mom{mom1h:.1f}% RSI{int(rsi1h)} BOS:{bos_msg}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M ENTRY {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
             return decision,score,emoji,info
-    elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down or bos_type=="BOS_DOWN") and mom5m<-0.2 and ratio5m>=1.0 and 20<rsi5m<80 and dir_ok_short:
+    elif (whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or two_down or bos_type=="BOS_DOWN") and mom5m<-0.2 and ratio5m>=0.8 and 20<rsi5m<80 and dir_ok_short:
         if trend1h=="DOWN" or bos_type=="BOS_DOWN":
             decision="SELL NOW"; emoji="🔴"; score+=3; reasons.append(f"4H DIR {trend4h} + 1H BOS {trend1h} + 5-15M ENTRY OK")
         else:
@@ -305,7 +305,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
     if not AUTOPILOT_ENABLED: return False
     if "WAIT" in decision or "JUNCTION" in decision or "HOLD" in decision: return False
-    if "NOW" in decision and score<4: return False
+    if "NOW" in decision and score<3: return False # ULTRA was 4
     try:
         existing_side = None
         for p in ex.fetch_positions([sym]):
@@ -327,7 +327,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
                 send_telegram(f"🔄 *FLIPPED {sym}* {existing_side.upper()} -> {decision}\n💰 ${free2:.2f} Size ${new_notional}\n📍 {price:.5f}")
                 return True
             if "CLOSE" in decision or "TAKE PROFIT" in decision: close_position(ex,sym); return True
-        if not existing_side and "NOW" in decision and score>=4:
+        if not existing_side and "NOW" in decision and score>=3:
             qty = notional / price
             try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
             except: pass
@@ -395,7 +395,7 @@ def scan():
                 try: vol_now=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1]
                 except: vol_now=1; vol_avg=1
                 filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision or "HOLD LONG" in decision else "SHORT", info['reasons'])
-                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason="KOMA 10% OVERRIDE SIGNAL"
+                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason="KOMA 5% OVERRIDE SIGNAL"
                 if filtered and not any(x in decision for x in ["TAKE PROFIT","HOLD","CLOSE NOW","JUNCTION"]):
                     print(f"Filter {sym} {reason}"); continue
                 if "HOLD" in decision:
