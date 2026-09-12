@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 # === CONFIG ===
 BALANCE_START = 14.99
 TARGET = 10000.0
-LEVERAGE = 10
+LEVERAGE = 7
 MAX_QTY_CAP = 5000
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
@@ -38,8 +38,6 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
     range_4h_pct = (high_4h - low_4h) / price if price > 0 else 0
     range_24h_pct = high_24h - low_24h
     location_24h = ((price - low_24h) / range_24h_pct * 100) if range_24h_pct > 0 else 50
-
-    # 1. JUNCTION BOX - WAIT FOR CONFIRMATION
     if range_4h_pct < 0.015:
         if not whale_override:
             return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT no {signal_type}"
@@ -47,19 +45,14 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
             if vol_now < vol_avg * 1.1:
                 return True, f"JUNCTION + whale weak vol {vol_now/vol_avg:.1f}x WAIT"
             return False, f"CONFIRMED {signal_type} BREAKOUT Vol {vol_now/vol_avg:.1f}x"
-
-    # 2. LOCATION
     if not whale_override:
         if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
         if signal_type == "SHORT" and location_24h < 15: return True, f"At bottom {location_24h:.1f}% no SHORT"
-    # 3. RSI
     if not whale_override:
         if signal_type == "LONG" and rsi_1h > 82: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 18: return True, f"RSI {rsi_1h:.1f} no SHORT"
-    # 4. VOL
     if not whale_override and vol_now < vol_avg * 0.7:
         return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT"
-    # 5. BTC
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
         if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
@@ -194,7 +187,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     wm_type,wm_msg = detect_w_m_pattern(df5m)
     whale15,whale15_msg = detect_whale_manipulation(df15m)
     wm15,wm15_msg = detect_w_m_pattern(df15m)
-
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
         if change>=SCALP_TP1: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} +{change*100:.2f}% {whale_msg} {wm_msg}","score":9,"reasons":[f"TP {change*100:.2f}% {whale_msg}"],"price":price}
@@ -205,7 +197,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
         if change>=SCALP_TP1: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} +{change*100:.2f}% {whale_msg} {wm_msg}","score":9,"reasons":[f"TP {change*100:.2f}% {whale_msg}"],"price":price}
         if change<=-SCALP_SL: return "TAKE PROFIT",9,"💰",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} SL {change*100:.2f}%","score":9,"reasons":[f"SL {change*100:.2f}%"],"price":price}
         return "HOLD SHORT",8,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{trend15m} {vol15m} {vol5m} {change*100:.2f}% {whale_msg} {wm_msg}","score":8,"reasons":[f"HOLD {change*100:.2f}% {whale_msg} {wm_msg}"],"price":price}
-
     c0=df5m['close'].iloc[-1]; c1=df5m['close'].iloc[-2]; c2=df5m['close'].iloc[-3]
     two_up=c0>c1 and c1>c2; two_down=c0<c1 and c1<c2
     score=0; reasons=[]
@@ -222,7 +213,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if trend1h=="UP": score+=2
     if trend1h=="DOWN": score+=2
     if trend4h!="RANGE": score+=1
-
     if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up) and mom5m>0.5 and ratio5m>=1.2 and 30<rsi5m<70 and trend1h!="DOWN":
         if two_up: reasons.append(f"5M UP {mom5m:.1f}% x2")
         decision="BUY NOW"; emoji="🟢"; score+=3
@@ -231,42 +221,84 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
         decision="SELL NOW"; emoji="🔴"; score+=3
     else:
         decision="AVOID BUY" if mom5m>=0 else "AVOID SELL"; emoji="⚪"; reasons.append(f"WAIT 5M {mom5m:.1f}% {vol5m} RSI{int(rsi5m)}")
-
     if "NOW" in decision:
         reasons.append(f"4H:{trend4h} 1H:{trend1h} 15M:{trend15m}")
         if score<6: decision=f"AVOID {decision.split()[0]}"; emoji="⚪"
         if ratio15m<0.5: decision=f"AVOID {decision.split()[0]}"; emoji="⚪"
-
     if score>10: score=10
     if score<0: score=0
     info={"4H":f"{trend4h} mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
 
+# === FIXED: FLIP LOGIC + COMPOUNDING - NO DOUBLE OPEN ===
 def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
     if not AUTOPILOT_ENABLED: return False
     if sess=="DEAD ZONE": return False
-    if "NOW" not in decision and "TAKE PROFIT" not in decision: return False
+    if "NOW" not in decision and "TAKE PROFIT" not in decision and "HOLD" not in decision:
+        return False
     if "NOW" in decision and score<6: return False
     try:
-        has=False
+        existing_side = None
+        existing_contracts = 0
         for p in ex.fetch_positions([sym]):
-            c,_,_,_,_=parse_position(p)
-            if abs(c)>0: has=True; break
-        if "TAKE PROFIT" in decision and has:
-            close_position(ex,sym)
-            print(f"💰 AUTO TP {sym}"); return True
-        if has or TRADED_THIS_RUN: return False
-        qty = notional / price
-        qty = max(1, min(qty, MAX_QTY_CAP))
-        try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
-        except: pass
-        side="buy" if "BUY" in decision else "sell"
-        ex.create_market_order(sym,side,qty)
-        TRADED_THIS_RUN=True
-        print(f"🤖 AUTO {sym} {decision} qty {qty} @ {price}")
-        return True
-    except Exception as e: print(f"Auto err {sym} {e}"); return False
+            c,s,_,_,_=parse_position(p)
+            if abs(c)>0:
+                existing_side = s
+                existing_contracts = c
+                break
+        try:
+            bal=ex.fetch_balance()
+            free_bal=bal['USDT']['free'] if 'USDT' in bal else notional
+        except:
+            free_bal=notional
+        if existing_side:
+            if ("BUY" in decision and existing_side=="long") or ("SELL" in decision and existing_side=="short"):
+                print(f"🟢 HOLDING {sym} {existing_side} trend continues - no double open")
+                return False
+            if ("BUY" in decision and existing_side=="short") or ("SELL" in decision and existing_side=="long"):
+                if TRADED_THIS_RUN:
+                    print(f"⏳ FLIP blocked {sym} already traded this run")
+                    return False
+                print(f"🔄 FLIPPING {sym} {existing_side.upper()} -> {decision}")
+                close_position(ex,sym)
+                time.sleep(1.5)
+                try:
+                    bal2=ex.fetch_balance()
+                    free2=bal2['USDT']['free'] if 'USDT' in bal2 else free_bal
+                    new_notional=get_auto_notional(free2)
+                except:
+                    free2=free_bal
+                    new_notional=notional
+                qty = new_notional / price
+                qty = max(1, min(qty, MAX_QTY_CAP))
+                try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
+                except: pass
+                side="buy" if "BUY" in decision else "sell"
+                ex.create_market_order(sym,side,qty)
+                TRADED_THIS_RUN=True
+                send_telegram(f"🔄 *FLIPPED {sym}* {existing_side.upper()} -> {decision}\n💰 Compounded Balance ${free2:.2f} -> New Size ${new_notional}\n📍 Price {price:.5f}\n🎯 Trend capacity continues - flipped for scalping")
+                print(f"🤖 FLIPPED {sym} {existing_side} -> {decision} qty {qty} @ {price}")
+                return True
+            if "TAKE PROFIT" in decision:
+                close_position(ex,sym)
+                print(f"💰 AUTO TP/SL {sym} closed")
+                send_telegram(f"💰 *TP/SL CLOSED {sym}* Closed at {price:.5f}\n💰 Balance ${free_bal:.2f} waiting for next trend")
+                return True
+        if not existing_side and "NOW" in decision and score>=6 and not TRADED_THIS_RUN:
+            qty = notional / price
+            qty = max(1, min(qty, MAX_QTY_CAP))
+            try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
+            except: pass
+            side="buy" if "BUY" in decision else "sell"
+            ex.create_market_order(sym,side,qty)
+            TRADED_THIS_RUN=True
+            print(f"🤖 AUTO OPEN {sym} {decision} qty {qty} @ {price}")
+            send_telegram(f"🤖 *AUTO OPEN {sym}* {decision} @ {price:.5f} Qty {qty:.1f}")
+            return True
+    except Exception as e:
+        print(f"Auto err {sym} {e}")
+    return False
 
 def check_monthly_report(free):
     now = datetime.now(timezone.utc)
@@ -287,17 +319,13 @@ def scan():
     progress=(float(free)/TARGET)*100
     current_min = datetime.now(timezone.utc).minute
     allow_manual = current_min < 10
-
-    # BTC TREND FOR FILTER
     try:
         btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
         btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
         btc_ema21=btc_df['c'].ewm(span=21).mean().iloc[-1]
         btc_trend="BULLISH" if btc_ema9>btc_ema21 else "BEARISH"
     except: btc_trend="RANGE"
-
     check_monthly_report(free)
-
     for sym in SYMBOLS:
         try:
             df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
@@ -315,23 +343,19 @@ def scan():
                         else: has_short=True
             except: pass
             decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
-
-            # === MERGED FILTER - JUNCTION CONFIRMATION ===
             low_24h=df1h['low'].tail(24).min()
             high_24h=df1h['high'].tail(24).max()
-            low_4h=df4h['low'].tail(6).min() # 4h box
+            low_4h=df4h['low'].tail(6).min()
             high_4h=df4h['high'].tail(6).max()
             _,rsi1h,_,_=get_mom_rsi_vol(df1h)
             _,_,vol_ratio_now,_=get_mom_rsi_vol(df5m)
             vol_avg=df15m['volume'].tail(20).mean()
             vol_now=df15m['volume'].iloc[-1]
             sig_type="LONG" if "BUY" in decision else "SHORT" if "SELL" in decision else "NONE"
-
             if sig_type!="NONE":
                 blocked, filter_msg = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, sig_type, info['reasons'])
                 if blocked:
                     print(f"⛔ FILTERED {sym} {filter_msg} | {info['reasons']}")
-                    # Change to WAIT - no auto, no manual
                     if "JUNCTION" in filter_msg:
                         decision=f"WAIT {sig_type} - {filter_msg}"
                         score=0
@@ -340,9 +364,7 @@ def scan():
                 else:
                     print(f"✅ {sym} {filter_msg}")
                     info['reasons'].append(filter_msg)
-
             safe_autopilot_enter(ex,sym,price,session,score,info,decision,notional)
-
             if allow_manual:
                 send_now=False
                 if "NOW" in decision or "TAKE PROFIT" in decision: send_now=can_send(sym,decision,1)
@@ -356,7 +378,6 @@ def scan():
                     ALL_SIGNALS.append(line)
             time.sleep(0.8)
         except Exception as e: print(f"Err {sym} {e}"); continue
-
     if ALL_SIGNALS and allow_manual:
         mode_txt="📱 MANUAL PEAK" if AUTOPILOT_ENABLED else "📱 MANUAL ONLY"
         header=f"⚡ *{get_killzone()[0]} {h}UTC - {mode_txt} - CONFIRMED ONLY*\n💰 ${float(free):.2f} | Trade ${notional} | {progress:.2f}% to $10k | SIREN LAB KOMA\n{'-'*40}\n\n"
