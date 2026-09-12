@@ -26,7 +26,7 @@ TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
 
-SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT"]
+SYMBOLS = ["SIREN/USDT:USDT","LAB/USDT:USDT","KOMA/USDT:USDT","GRASS/USDT:USDT"]
 SCALP_TP1 = 0.015
 SCALP_SL = 0.008
 
