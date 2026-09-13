@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 BALANCE_START = 14.99
 TARGET = 60000.0
-LEVERAGE = 10
+LEVERAGE = 11
 TRADED_THIS_RUN, ALL_SIGNALS = False, []
 try: LAST_ALERT = json.load(open("cooldown.json"))
 except: LAST_ALERT = {}
@@ -342,7 +342,14 @@ def scan():
     if ENGINE in ["AUTO","BOTH","CONCURRENT",""]:
         if KOMA_BEAST and koma_beast_plan:
             try:
-                res = koma_beast_plan(ex, free, send_telegram, lambda *a: True)
+                def filtered_send(msg):
+                    IMPORTANT = ["💰","🐋 RETEST","🎯 MID","🔥 REAL","🛑 SL","🕛 6H","📅 NEW","👀 FIRST","👑 FLIP","🤖 AUTO","🔄 FLIPPED"]
+                    if any(x in msg for x in IMPORTANT):
+                        if can_send("KOMA", msg[:30], 15):
+                            send_telegram(msg)
+                    print(msg)
+
+                res = koma_beast_plan(ex, free, filtered_send, can_send)
                 print(f"KOMA BEAST AUTO TRADE: {res}")
             except Exception as e: print(f"KOMA beast err {e}")
     if ENGINE in ["MANUAL","BOTH","CONCURRENT",""]:
