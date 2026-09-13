@@ -1,5 +1,5 @@
 import ccxt
-SYMBOL="KOMA/USDT:USDT"; LEVERAGE=10; SIZE_PCT=0.5; VOL_MULT=1.4
+SYMBOL="KOMA/USDT:USDT"; LEVERAGE=10; SIZE_PCT=0.9; VOL_MULT=1.4
 TP_PCT=3.0; SL_PCT=2.5
 
 def calc_rsi(c,p=14):
@@ -14,13 +14,17 @@ def calc_rsi(c,p=14):
 
 def scalp_plan(ex, free_bal, send_telegram, can_send):
     try:
-        c5=ex.fetch_ohlcv(SYMBOL,'5m',limit=50); c30=ex.fetch_ohlcv(SYMBOL,'30m',limit=20)
-        cl5=[x[4] for x in c5]; price=cl5[-1]
+        c5=ex.fetch_ohlcv(SYMBOL,'5m',limit=50)
+        c30=ex.fetch_ohlcv(SYMBOL,'30m',limit=20)
+        cl5=[x[4] for x in c5]
+        price=cl5[-1]
         ch5=(c5[-1][4]-c5[-2][4])/c5[-2][4]*100
         ch30=(c30[-1][4]-c30[-6][4])/c30[-6][4]*100 if len(c30)>=6 else ch5*6
-        va=sum([x[5] for x in c5[-21:-1]])/20; vn=c5[-1][5]; vp=c5[-2][5]
+        va=sum([x[5] for x in c5[-21:-1]])/20
+        vn=c5[-1][5]
         vr=vn/(va+0.001)
-        rsi=calc_rsi(cl5); vwap=sum([c5[i][4]*c5[i][5] for i in range(-20,0)])/sum([c5[i][5] for i in range(-20,0)])
+        rsi=calc_rsi(cl5)
+        vwap=sum([c5[i][4]*c5[i][5] for i in range(-20,0)])/sum([c5[i][5] for i in range(-20,0)] if sum([c5[i][5] for i in range(-20,0)])!=0 else 1)
 
         pos_side=None; amt=0; entry=0
         for p in ex.fetch_positions([SYMBOL]):
@@ -46,12 +50,14 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
 
         try: bal=float(free_bal)
         except: bal=10.0
+        # FIXED: Use 90% of balance as margin, not * leverage
         notional=bal*SIZE_PCT
         if notional<3: notional=3
-        qty=notional*LEVERAGE/price
+        if notional>bal*0.9: notional=bal*0.9
+        qty=notional/price
         qty=float(ex.amount_to_precision(SYMBOL,qty))
 
-        # === FIXED OVERRIDE: SAME AS MANUAL - NO VOL/RSI BLOCK ===
+        # === FIXED: SELL on -0.8% DUMP - NO VOL BLOCK ===
         if ch5 <= -0.8 or ch30 <= -0.8:
             try: ex.set_leverage(LEVERAGE,SYMBOL); ex.set_margin_mode('isolated',SYMBOL)
             except: pass
