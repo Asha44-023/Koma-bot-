@@ -16,7 +16,7 @@ except:
     koma_beast_plan = None
 
 KOMA_PUMP_TRIGGER = 0.8
-KOMA_DUMP_TRIGGER = 0.8
+KOMA_DUMP_TRIGGER = -0.8
 KOMA_SLEEP_TP = 5.0
 KOMA_SLEEP_SL = 3.0
 
@@ -232,9 +232,9 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     except: change_30m = 0
     if is_koma and not has_long and not has_short:
         if change_30m >= KOMA_PUMP_TRIGGER and rsi5m > 58:
-            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
+            return "BUY NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
         if change_30m <= KOMA_DUMP_TRIGGER and rsi5m < 42:
-            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
+            return "SELL NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
