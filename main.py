@@ -34,7 +34,7 @@ TELEGRAM_TOKEN = get_env_clean("TELEGRAM_BOT_TOKEN","BOT_TOKEN","TELEGRAM_TOKEN"
 TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
-ENGINE = os.getenv("ENGINE","BOTH").upper()
+ENGINE = os.getenv("ENGINE","AUTO").upper() # FIX: default AUTO not BOTH
 
 SYMBOLS = ["KOMA/USDT:USDT"]
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
@@ -76,7 +76,6 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
         if signal_type == "LONG" and rsi_1h > 85: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 15: return True, f"RSI {rsi_1h:.1f} no SHORT"
     if not whale_override and vol_now < vol_avg * 0.2: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT 5-15M"
-    # BTC FILTER REMOVED - KOMA DOES NOT FOLLOW BTC
     return False, f"CONFIRMED {signal_type} loc {location_24h:.0f}% RSI {rsi_1h:.0f} Vol {vol_now/vol_avg:.1f}x 5-15M OK"
 
 def send_telegram(msg):
@@ -288,44 +287,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} BOS {bos_msg} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M ENTRY {vol5m} RSI{int(rsi5m)} mom{mom5m:.2f}%","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
 
-def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
-    global TRADED_THIS_RUN
-    if "KOMA" in sym: return False
-    if not AUTOPILOT_ENABLED: return False
-    if "WAIT" in decision or "JUNCTION" in decision or "HOLD" in decision: return False
-    if "NOW" in decision and score<3: return False
-    try:
-        existing_side = None
-        for p in ex.fetch_positions([sym]):
-            c,s,_,_,_=parse_position(p)
-            if abs(c)>0: existing_side = s; break
-        try: bal=ex.fetch_balance(); free_bal=bal['USDT']['free'] if 'USDT' in bal else notional
-        except: free_bal=notional
-        if existing_side:
-            if ("BUY" in decision and existing_side=="long") or ("SELL" in decision and existing_side=="short"): return False
-            if ("BUY" in decision and existing_side=="short") or ("SELL" in decision and existing_side=="long"):
-                close_position(ex,sym); time.sleep(1.5)
-                try: bal2=ex.fetch_balance(); free2=bal2['USDT']['free'] if 'USDT' in bal2 else free_bal; new_notional=get_auto_notional(free2)
-                except: free2=free_bal; new_notional=notional
-                qty = new_notional * LEVERAGE / price
-                try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
-                except: pass
-                side="buy" if "BUY" in decision else "sell"
-                ex.create_market_order(sym,side,qty); TRADED_THIS_RUN=True
-                send_telegram(f"🔄 *FLIPPED {sym}* {existing_side.upper()} -> {decision}\n💰 ${free2:.2f} Size ${new_notional}\n📍 {price:.5f}")
-                return True
-            if "CLOSE" in decision or "TAKE PROFIT" in decision: close_position(ex,sym); return True
-        if not existing_side and "NOW" in decision and score>=3:
-            qty = notional * LEVERAGE / price
-            try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
-            except: pass
-            side="buy" if "BUY" in decision else "sell"
-            ex.create_market_order(sym,side,qty)
-            send_telegram(f"🤖 *AUTO {sym}* {decision} @ {price:.5f}\nSize ${notional:.2f} TP {KOMA_SLEEP_TP}% SL {KOMA_SLEEP_SL}%\n{','.join(info['reasons'])}")
-            return True
-    except Exception as e: print(f"Auto err {sym} {e}")
-    return False
-
 def scan():
     global TRADED_THIS_RUN,ALL_SIGNALS
     TRADED_THIS_RUN=False; ALL_SIGNALS=[]
@@ -337,20 +298,21 @@ def scan():
     except: free=BALANCE_START
     notional=get_auto_notional(free)
     print(f"ENGINE={ENGINE} AUTOPILOT={AUTOPILOT_ENABLED} Balance=${free:.2f} / ${TARGET} Progress {(free/TARGET*100):.4f}%")
-    if ENGINE in ["AUTO","BOTH","CONCURRENT",""]:
+
+    # FIX: AUTO block - direct send, no double can_send
+    if ENGINE in ["AUTO"]:
         if KOMA_BEAST and koma_beast_plan:
             try:
-                def filtered_send(msg):
-                    IMPORTANT = ["💰","🐋 RETEST","🎯 MID","🔥 REAL","🛑 SL","🕛 6H","📅 NEW","👀 FIRST","👑 FLIP","🤖 AUTO","🔄 FLIPPED"]
-                    if any(x in msg for x in IMPORTANT):
-                        if can_send("KOMA", msg[:30], 15):
-                            send_telegram(msg)
-                    print(msg)
+                # direct_send - beast handles its own cooldown, don't double-filter
+                def direct_send(msg):
+                    send_telegram(msg)
 
-                res = koma_beast_plan(ex, free, filtered_send, can_send)
+                res = koma_beast_plan(ex, free, direct_send, can_send)
                 print(f"KOMA BEAST AUTO TRADE: {res}")
             except Exception as e: print(f"KOMA beast err {e}")
-    if ENGINE in ["MANUAL","BOTH","CONCURRENT",""]:
+
+    # FIX: MANUAL block only when ENGINE=MANUAL
+    if ENGINE in ["MANUAL"]:
         try:
             btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
             btc_ema9=btc_df['c'].ewm(span=9).mean().iloc[-1]
@@ -372,7 +334,7 @@ def scan():
                 except: pass
                 decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
                 if "WAIT" in decision or score < 3:
-                    print(f"MANUAL WAIT {sym} Score {score} {info['15M']} - NO TELEGRAM")
+                    print(f"MANUAL WAIT {sym} Score {score} - NO TELEGRAM")
                     continue
                 low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
                 low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
