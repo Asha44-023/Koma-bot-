@@ -15,10 +15,13 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-KOMA_PUMP_TRIGGER = 0.8
-KOMA_DUMP_TRIGGER = -0.8
+KOMA_PUMP_TRIGGER = 1.5
+KOMA_DUMP_TRIGGER = -1.5
 KOMA_SLEEP_TP = 5.0
 KOMA_SLEEP_SL = 3.0
+
+MANUAL_PUMP_TRIGGER = 1.5
+MANUAL_DUMP_TRIGGER = -1.5
 
 def get_env_clean(*names):
     for n in names:
@@ -34,7 +37,7 @@ TELEGRAM_TOKEN = get_env_clean("TELEGRAM_BOT_TOKEN","BOT_TOKEN","TELEGRAM_TOKEN"
 TELEGRAM_CHAT = get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 auto_env = get_env_clean("AUTOPILOT_ENABLED")
 AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","1","on","yes"]
-ENGINE = os.getenv("ENGINE","AUTO").upper() # FIX: default AUTO not BOTH
+ENGINE = os.getenv("ENGINE","AUTO").upper()
 
 SYMBOLS = ["KOMA/USDT:USDT"]
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
@@ -57,6 +60,34 @@ def _monthly_report():
         profit = sum(float(l.split(",")[1]) for l in lines if "," in l)
         send_telegram(f"📊 *MONTHLY {datetime.utcnow().strftime('%B %Y')}*\nEngine: {ENGINE}\nTrades: {total}\nPNL: {profit:.2f}%\nTarget: $60K")
     except: pass
+
+def is_double_wick_fake(df5m):
+    try:
+        for i in [-1, -2]:
+            o=df5m['open'].iloc[i]; c=df5m['close'].iloc[i]
+            h=df5m['high'].iloc[i]
+            body = abs(c-o) or 0.00001
+            upper = h-max(o,c)
+            if upper < body*1.2:
+                return False
+        return True
+    except: return False
+
+def is_fake_pump_smart(df5m, session, vol_ratio):
+    try:
+        o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]
+        h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
+        body = abs(c-o) or 0.00001
+        upper = h-max(o,c)
+        # DOUBLE WICK CHECK FIRST - 95% fake
+        if is_double_wick_fake(df5m):
+            return True, "FAKE DOUBLE WICK top 2x rejection"
+        if upper > body*1.8: return True, f"FAKE wick {upper/body:.1f}x"
+        if session == "DEAD ZONE" and vol_ratio < 1.5: return True, f"FAKE DEAD vol {vol_ratio:.1f}x"
+        if body < (h-l)*0.2: return True, "FAKE doji"
+        if vol_ratio < 0.8: return True, f"FAKE low vol {vol_ratio:.1f}x"
+        return False, "REAL"
+    except: return False, "REAL"
 
 def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now, vol_avg, btc_trend, signal_type, reasons=None):
     if reasons is None: reasons = []
@@ -226,11 +257,18 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     is_koma = "KOMA" in sym
     try: change_30m = (df5m['close'].iloc[-1] - df5m['close'].iloc[-6]) / df5m['close'].iloc[-6] * 100
     except: change_30m = 0
-    if is_koma and not has_long and not has_short:
-        if change_30m >= KOMA_PUMP_TRIGGER and rsi5m > 58:
-            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
-        if change_30m <= KOMA_DUMP_TRIGGER and rsi5m < 42:
-            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
+    session,_,_ = get_killzone()
+
+    if not has_long and not has_short:
+        is_fake, fake_reason = is_fake_pump_smart(df5m, session, ratio5m)
+        if is_fake and abs(change_30m) < 2.5:
+            if change_30m >= 0.8 or change_30m <= -0.8:
+                return "FAKE PUMP", 1, "👀",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{fake_reason} {change_30m:.2f}%","score":1,"reasons":[fake_reason, f"{change_30m:.2f}%"],"price":price}
+        if change_30m >= (KOMA_PUMP_TRIGGER if is_koma else MANUAL_PUMP_TRIGGER) and rsi5m > 58 and ratio5m >= 1.0:
+            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"PUMP_OVERRIDE {change_30m:.2f}% REAL","score":10,"reasons":[f"PUMP_OVERRIDE {change_30m:.2f}% BUY REAL {vol5m}"],"price":price}
+        if change_30m <= (KOMA_DUMP_TRIGGER if is_koma else MANUAL_DUMP_TRIGGER) and rsi5m < 42 and ratio5m >= 1.0:
+            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"DUMP_OVERRIDE {change_30m:.2f}% REAL","score":10,"reasons":[f"DUMP_OVERRIDE {change_30m:.2f}% SELL REAL {vol5m}"],"price":price}
+
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
@@ -254,8 +292,8 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     two_up=c0>c1 and c1>c2
     two_down=c0<c1 and c1<c2
     score=0; reasons=[]
-    vol_ok_5m = ratio5m >= 0.4
-    vol_ok_15m = ratio15m >= 0.5
+    vol_ok_5m = ratio5m >= 0.8
+    vol_ok_15m = ratio15m >= 0.8
     trend_ok_long = trend4h in ["UP","RANGE"]
     trend_ok_short = trend4h in ["DOWN","RANGE"]
     if whale_type=="BULL_LIQ_GRAB": score+=3; reasons.append(f"🐋 {whale_msg}")
@@ -281,8 +319,8 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
             info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} BOS {bos_msg} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} ENTRY {vol15m} mom{mom15m:.2f}% | 5M {vol5m} RSI{int(rsi5m)} mom{mom5m:.2f}% 2DOWN={two_down}","score":min(score,10),"reasons":reasons,"price":price}
             return decision,info["score"],emoji,info
     decision="WAIT"; emoji="⚪"
-    if not vol_ok_5m: reasons.append(f"WAIT 5M VOL {vol5m} <0.4x")
-    if not vol_ok_15m: reasons.append(f"WAIT 15M VOL {vol15m} <0.5x")
+    if not vol_ok_5m: reasons.append(f"WAIT 5M VOL {vol5m} <0.8x")
+    if not vol_ok_15m: reasons.append(f"WAIT 15M VOL {vol15m} <0.8x")
     if len(reasons)<2: reasons.append(f"WAIT 5-15M mom5m {mom5m:.2f}% {vol5m} {vol15m}")
     info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} BOS {bos_msg} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M ENTRY {vol5m} RSI{int(rsi5m)} mom{mom5m:.2f}%","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
@@ -299,19 +337,15 @@ def scan():
     notional=get_auto_notional(free)
     print(f"ENGINE={ENGINE} AUTOPILOT={AUTOPILOT_ENABLED} Balance=${free:.2f} / ${TARGET} Progress {(free/TARGET*100):.4f}%")
 
-    # FIX: AUTO block - direct send, no double can_send
     if ENGINE in ["AUTO"]:
         if KOMA_BEAST and koma_beast_plan:
             try:
-                # direct_send - beast handles its own cooldown, don't double-filter
                 def direct_send(msg):
                     send_telegram(msg)
-
                 res = koma_beast_plan(ex, free, direct_send, can_send)
                 print(f"KOMA BEAST AUTO TRADE: {res}")
             except Exception as e: print(f"KOMA beast err {e}")
 
-    # FIX: MANUAL block only when ENGINE=MANUAL
     if ENGINE in ["MANUAL"]:
         try:
             btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
@@ -333,7 +367,10 @@ def scan():
                         if abs(c)>0: entry=e; has_long=(s=="long"); has_short=(s=="short")
                 except: pass
                 decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
-                if "WAIT" in decision or score < 3:
+                if "FAKE" in decision:
+                    print(f"👀 FAKE FILTERED {sym} {info['15M']}")
+                    continue
+                if "WAIT" in decision or score < 5:
                     print(f"MANUAL WAIT {sym} Score {score} - NO TELEGRAM")
                     continue
                 low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
@@ -342,11 +379,6 @@ def scan():
                 try: vol_now=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1]
                 except: vol_now=1; vol_avg=1
                 filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision or "HOLD LONG" in decision else "SHORT", info['reasons'])
-                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']) or "KOMA_DUMP_OVERRIDE" in str(info['reasons']):
-                    filtered=False; reason=f"KOMA {KOMA_PUMP_TRIGGER}% OVERRIDE SIGNAL"
-                if score >=3:
-                    filtered=False
-                    reason=f"SCORE {score}/10 5-15M OVERRIDE - {reason}"
                 if filtered and not any(x in decision for x in ["TAKE PROFIT","HOLD","CLOSE NOW","JUNCTION"]):
                     print(f"Filter {sym} {reason}"); continue
                 if "HOLD" in decision:
