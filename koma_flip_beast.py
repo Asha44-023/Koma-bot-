@@ -143,9 +143,10 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         shoot_out_low = wick_low_15 < RANGE_LOW*0.985
         shoot_out_high = wick_high_15 > RANGE_HIGH*1.015
 
-        at_mid = abs(price - MID_HOUSE)/RANGE_SIZE < 0.25
-        mid_bull_rev = wick_low_size > body_15*1.2 and close_15 > open_15 and at_mid and vr >= 0.7
-        mid_bear_rev = wick_high_size > body_15*1.2 and close_15 < open_15 and at_mid and vr >= 0.7
+        # === TIGHT FILTER 20% - BALANCED SNIPER - YOUR IDEA ===
+        at_mid = abs(price - MID_HOUSE)/RANGE_SIZE < 0.20
+        mid_bull_rev = wick_low_size > body_15*1.5 and close_15 > open_15 and at_mid and vr >= 1.0
+        mid_bear_rev = wick_high_size > body_15*1.5 and close_15 < open_15 and at_mid and vr >= 1.0
 
         if pos_side and entry>0:
             if state.get("pos_time",0)==0:
