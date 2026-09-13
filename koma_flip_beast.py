@@ -12,7 +12,7 @@ PUMP_PAUSE=0.025
 MIN_NOTIONAL=7
 COMPOUND=True
 
-STATE_FILE="koma_retest_state.json" # FIXED - not /tmp so it persists
+STATE_FILE="koma_retest_state.json"
 def load_state():
     try:
         if os.path.exists(STATE_FILE):
@@ -24,16 +24,13 @@ def save_state(s):
     except: pass
 
 def scalp_plan(ex, free_bal, send_telegram, can_send):
-    # --- ANTI-SPAM WRAPPER ---
     def _safe_send(msg):
         IMPORTANT = ["💰 BIG CATCH", "🐋 RETEST", "🔥 REAL BREAK", "🛑 SL", "🎯 MID", "📅 NEW DAILY", "🕛 6H CUT"]
         if not any(x in msg for x in IMPORTANT):
             return
         try:
-            # Use full message key for house to avoid duplicate in same day
             if "NEW DAILY" in msg:
-                key = f"HOUSE_{msg}"
-                if not can_send("KOMA", key[:40], 1440):
+                if not can_send("KOMA", f"HOUSE_{msg[:30]}", 1440):
                     return
             else:
                 if not can_send("KOMA", msg[:30], 15):
@@ -119,15 +116,16 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         now=time.time()
         day_id = int(cD[-1][0]/86400000)
 
-        # FIXED DAILY HOUSE - ONLY ONCE PER DAY
+        # FINAL FIX - HOUSE ONLY 1X PER DAY
         if state.get("day_id",0)!= day_id:
-            state = {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": state.get("pos_time",0), "day_id": day_id, "house_sent": 0}
+            prev_sent = state.get("house_sent",0)
+            state = {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": state.get("pos_time",0), "day_id": day_id, "house_sent": prev_sent}
             save_state(state)
-            # Send only if not sent today
-            if state.get("house_sent",0)!= day_id:
-                _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} old retest cleared")
-                state["house_sent"] = day_id
-                save_state(state)
+
+        if state.get("house_sent",0)!= day_id:
+            _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} old retest cleared")
+            state["house_sent"] = day_id
+            save_state(state)
 
         is_cut_low = wick_low_15 < RANGE_LOW
         is_cut_high = wick_high_15 > RANGE_HIGH
@@ -144,17 +142,10 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         real_break_high = close_15 > RANGE_HIGH and vr >= 1.1
         shoot_out_low = wick_low_15 < RANGE_LOW*0.985
         shoot_out_high = wick_high_15 > RANGE_HIGH*1.015
-        big_wick_low = wick_low_size > body_15*2.0
-        big_wick_high = wick_high_size > body_15*2.0
 
         at_mid = abs(price - MID_HOUSE)/RANGE_SIZE < 0.25
         mid_bull_rev = wick_low_size > body_15*1.2 and close_15 > open_15 and at_mid and vr >= 0.7
         mid_bear_rev = wick_high_size > body_15*1.2 and close_15 < open_15 and at_mid and vr >= 0.7
-
-        y_low=cD[-2][3]; y_high=cD[-2][2]
-        y_mid=(y_high+y_low)/2
-        near_y_liq = abs(price-y_low)/y_low < 0.02 or abs(price-y_high)/y_high < 0.02
-        vol_trend = "BUY" if vr > 1.2 else "SELL" if vr < 0.8 else "NEUTRAL"
 
         if pos_side and entry>0:
             if state.get("pos_time",0)==0:
