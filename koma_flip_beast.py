@@ -1,5 +1,6 @@
 import ccxt
 import os, json, time
+from datetime import datetime, timezone
 
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=11
@@ -11,13 +12,13 @@ PUMP_PAUSE=0.025
 MIN_NOTIONAL=7
 COMPOUND=True
 
-STATE_FILE="/tmp/koma_retest_state.json"
+STATE_FILE="koma_retest_state.json" # FIXED - not /tmp so it persists
 def load_state():
     try:
         if os.path.exists(STATE_FILE):
             return json.loads(open(STATE_FILE).read())
     except: pass
-    return {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": 0}
+    return {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": 0, "house_sent": 0}
 def save_state(s):
     try: open(STATE_FILE,'w').write(json.dumps(s))
     except: pass
@@ -25,16 +26,20 @@ def save_state(s):
 def scalp_plan(ex, free_bal, send_telegram, can_send):
     # --- ANTI-SPAM WRAPPER ---
     def _safe_send(msg):
-        # ONLY important messages get telegram
         IMPORTANT = ["💰 BIG CATCH", "🐋 RETEST", "🔥 REAL BREAK", "🛑 SL", "🎯 MID", "📅 NEW DAILY", "🕛 6H CUT"]
         if not any(x in msg for x in IMPORTANT):
-            return # BLOCK HOLD/WAIT
-        # 15 min cooldown for all KOMA alerts
+            return
         try:
-            if can_send("KOMA", msg[:20], 15):
-                send_telegram(msg)
+            # Use full message key for house to avoid duplicate in same day
+            if "NEW DAILY" in msg:
+                key = f"HOUSE_{msg}"
+                if not can_send("KOMA", key[:40], 1440):
+                    return
+            else:
+                if not can_send("KOMA", msg[:30], 15):
+                    return
+            send_telegram(msg)
         except:
-            # if old lambda, still send but only important
             send_telegram(msg)
 
     try:
@@ -113,10 +118,16 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         state=load_state()
         now=time.time()
         day_id = int(cD[-1][0]/86400000)
+
+        # FIXED DAILY HOUSE - ONLY ONCE PER DAY
         if state.get("day_id",0)!= day_id:
-            state = {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": state.get("pos_time",0), "day_id": day_id}
+            state = {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": state.get("pos_time",0), "day_id": day_id, "house_sent": 0}
             save_state(state)
-            _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} old retest cleared")
+            # Send only if not sent today
+            if state.get("house_sent",0)!= day_id:
+                _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} old retest cleared")
+                state["house_sent"] = day_id
+                save_state(state)
 
         is_cut_low = wick_low_15 < RANGE_LOW
         is_cut_high = wick_high_15 > RANGE_HIGH
@@ -153,7 +164,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
 
             if held_hours >= MAX_HOLD_HOURS and pct <= -MAX_HOLD_LOSS:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
+                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id})
                 m=f"🕛 6H CUT {pos_side.upper()} {pct:.1f}% {held_hours:.1f}h HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f}"; _safe_send(m); return m
 
             if pos_side=='short' and is_stop_hunt_high:
@@ -182,18 +193,18 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             if pos_side=='long' and at_top:
                 ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
+                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id})
                 m=f"💰 BIG CATCH LONG {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} +{pct:.1f}% VOL {vr:.1f}x -> SHORT"; _safe_send(m); return m
 
             if pos_side=='short' and at_bottom:
                 ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
+                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id})
                 m=f"💰 BIG CATCH SHORT {RANGE_HIGH:.5f}->{RANGE_LOW:.5f} +{pct:.1f}% VOL {vr:.1f}x -> LONG"; _safe_send(m); return m
 
             if pct<=-SL_PCT and vr >= 1.1:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
+                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id})
                 m=f"🛑 SL REAL {pos_side.upper()} {pct:.1f}% VOL {vr:.1f}x"; _safe_send(m); return m
             if pct<=-SL_PCT and vr < 0.9:
                 return f"HOLD {pos_side.upper()} {pct:.1f}% FAKE WICK IGNORE"
