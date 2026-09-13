@@ -15,10 +15,10 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-KOMA_PUMP_TRIGGER = 2.8
-KOMA_DUMP_TRIGGER = -2.8
-KOMA_SLEEP_TP = 3.0
-KOMA_SLEEP_SL = 2.5
+KOMA_PUMP_TRIGGER = 0.8
+KOMA_DUMP_TRIGGER = 0.8
+KOMA_SLEEP_TP = 5.0
+KOMA_SLEEP_SL = 3.0
 
 def get_env_clean(*names):
     for n in names:
