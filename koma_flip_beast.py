@@ -1,10 +1,10 @@
 import ccxt
+
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=10
-SIZE_PCT=0.4 # 40% base, 90% max after adds - safe for 365 days
-SL_PCT=12.0 # wide for MEXC wicks
-PUMP_PAUSE=0.025 # pause shorts above this - your I top
-TP_MID_OFFSET=0.0
+SIZE_PCT=0.4
+SL_PCT=12.0
+PUMP_PAUSE=0.025
 
 def calc_rsi(c,p=14):
     if len(c)<p+1: return 50
@@ -16,54 +16,39 @@ def calc_rsi(c,p=14):
     if l==0: return 75
     return 100-(100/(1+g/(l+0.0001)))
 
-def calc_ema(c, p=20):
-    if len(c) < p: return sum(c)/len(c)
-    k = 2/(p+1)
-    ema = sum(c[:p])/p
-    for price in c[p:]:
-        ema = price * k + ema * (1-k)
-    return ema
-
 def scalp_plan(ex, free_bal, send_telegram, can_send):
     try:
         c5=ex.fetch_ohlcv(SYMBOL,'5m',limit=50)
-        c30=ex.fetch_ohlcv(SYMBOL,'30m',limit=20)
-        c4h=ex.fetch_ohlcv(SYMBOL,'4h',limit=120) # 120*4h = 20 days, enough for wicks
+        c15=ex.fetch_ohlcv(SYMBOL,'15m',limit=80)
+        cD=ex.fetch_ohlcv(SYMBOL,'1d',limit=10)
         cl5=[x[4] for x in c5]
-        cl4h=[x[4] for x in c4h]
-        if len(c4h)<30: return "WAIT loading candles"
+        cl15=[x[4] for x in c15]
+        if len(cD)<2 or len(c15)<10: return "WAIT loading daily"
         price=cl5[-1]
         rsi=calc_rsi(cl5)
-        rsi_4h=calc_rsi(cl4h)
-        ema20_4h=calc_ema(cl4h,20)
 
-        ch5=(c5[-1][4]-c5[-2][4])/c5[-2][4]*100 if c5[-2][4]>0 else 0
+        # === DAILY MOST WICK - every day own house ===
+        today_high=cD[-1][2]
+        today_low=cD[-1][3]
+        if today_high==today_low:
+            today_high=cD[-2][2]
+            today_low=cD[-2][3]
+
+        RANGE_LOW=today_low
+        RANGE_HIGH=today_high
+        MID=(RANGE_LOW+RANGE_HIGH)/2
+
+        wick_low_15=c15[-1][3]
+        wick_high_15=c15[-1][2]
         va=sum([x[5] for x in c5[-21:-1]])/20 if len(c5)>21 else c5[-1][5]
         vr=c5[-1][5]/(va+0.001)
 
-        wick_low=c5[-1][3]
-        wick_high=c5[-1][2]
+        # direction at mid - 15m last 5
+        up_c=sum(1 for i in range(-5,0) if cl15[i] > c15[i][1])
+        direction_up=up_c>=3
+        in_mid_zone=MID*0.96 < price < MID*1.04
 
-        # === AUTO WICK RANGE - from last low wicks, last high wicks ===
-        lows_90=sorted([x[3] for x in c4h]) # all low wicks
-        highs_90=sorted([x[2] for x in c4h]) # all high wicks
-        # bottom 15% median = real floor
-        bn=int(len(lows_90)*0.15) or 1
-        tn=int(len(highs_90)*0.15) or 1
-        RANGE_LOW=sum(lows_90[:bn])/bn
-        RANGE_HIGH=sum(highs_90[-tn:])/tn
-        # Ignore outlier I pump >35% above median
-        median_high = highs_90[int(len(highs_90)*0.5)]
-        if RANGE_HIGH > median_high*1.35:
-            RANGE_HIGH = sum(highs_90[-tn*2:-tn])/tn # take second top
-        MID=(RANGE_LOW+RANGE_HIGH)/2
-
-        # safety clamp for MEXC KOMA now
-        if RANGE_LOW<0.005: RANGE_LOW=0.0115
-        if RANGE_HIGH>0.04: RANGE_HIGH=0.020
-        MID=(RANGE_LOW+RANGE_HIGH)/2
-
-        # === POS ===
+        # POS
         pos_side=None; amt=0; entry=0
         for p in ex.fetch_positions([SYMBOL]):
             c=float(p.get('contracts',0) or p.get('info',{}).get('holdVol',0) or 0)
@@ -93,54 +78,70 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             q=notional/price
             return float(ex.amount_to_precision(SYMBOL,q))
 
-        # === PUMP PAUSE - don't trade breakout I ===
-        if price > PUMP_PAUSE and pos_side=='short':
-            return f"⏸️ PAUSE SHORT BREAKOUT I price {price:.5f} > {PUMP_PAUSE} - wait new house"
-        if price < RANGE_LOW*0.6:
-            return f"⏸️ PAUSE LONG BREAKDOWN price {price:.5f} < floor*0.6 - wait new house"
+        # PAUSE
+        if price>PUMP_PAUSE and pos_side=='short':
+            return f"⏸️ PAUSE SHORT breakout {price:.5f}"
+        if price<RANGE_LOW*0.6:
+            return f"⏸️ PAUSE LONG breakdown {price:.5f} wait new daily"
 
-        # === HOLD + TP MID + ADD ===
+        # HOLD + TP MID + AUTO SWITCH
         if pos_side and entry>0:
-            pct = (price-entry)/entry*100 if pos_side=='long' else (entry-price)/entry*100
-            pnl_pct = pct * LEVERAGE
+            pct=(price-entry)/entry*100 if pos_side=='long' else (entry-price)/entry*100
+            pnl_pct=pct*LEVERAGE
 
-            # TP to MID - catches every trade
-            if pos_side=='long' and price >= MID*0.995:
+            # FADE MID - TP only, block with direction
+            if in_mid_zone:
+                if pos_side=='long' and direction_up:
+                    ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
+                    m=f"✅ FADE MID TP LONG mid {MID:.5f} UP {up_c}/5 +{pct:.1f}% @{price:.5f}"; send_telegram(m); return m
+                if pos_side=='short' and not direction_up:
+                    ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
+                    m=f"✅ FADE MID TP SHORT mid {MID:.5f} DOWN {5-up_c}/5 +{pct:.1f}% @{price:.5f}"; send_telegram(m); return m
+
+            # TP MID + AUTO SWITCH to most wick
+            if pos_side=='long' and price>=MID*0.995:
                 ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
-                m=f"✅ TP MID LONG {RANGE_LOW:.5f}->{MID:.5f} +{pct:.1f}% PnL {pnl_pct:.1f}% @{price:.5f}"; send_telegram(m); return m
-            if pos_side=='short' and price <= MID*1.005:
+                if wick_high_15>=RANGE_HIGH*0.99:
+                    set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
+                    m=f"✅ TP MID LONG + 🔄 AUTO SELL TOP MOST {RANGE_HIGH:.5f} +{pct:.1f}%"; send_telegram(m); return m
+                m=f"✅ TP MID LONG {RANGE_LOW:.5f}->{MID:.5f} +{pct:.1f}%"; send_telegram(m); return m
+
+            if pos_side=='short' and price<=MID*1.005:
                 ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
-                m=f"✅ TP MID SHORT {RANGE_HIGH:.5f}->{MID:.5f} +{pct:.1f}% PnL {pnl_pct:.1f}% @{price:.5f}"; send_telegram(m); return m
+                if wick_low_15<=RANGE_LOW*1.01:
+                    set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
+                    m=f"✅ TP MID SHORT + 🔄 AUTO BUY BOTTOM MOST {RANGE_LOW:.5f} +{pct:.1f}%"; send_telegram(m); return m
+                m=f"✅ TP MID SHORT {RANGE_HIGH:.5f}->{MID:.5f} +{pct:.1f}%"; send_telegram(m); return m
 
-            # ADD to catch every wick - double bottom/top
-            if pos_side=='long' and wick_low <= RANGE_LOW*1.05 and vr>1.2 and rsi<40:
+            # ADD at most wicks
+            if pos_side=='long' and wick_low_15<=RANGE_LOW*1.01 and vr>1.2:
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.7))
-                m=f"➕ ADD LONG double bottom floor {RANGE_LOW:.5f} wick {wick_low:.5f} RSI {rsi:.0f}"; send_telegram(m); return m
-            if pos_side=='short' and wick_high >= RANGE_HIGH*0.95 and vr>1.2 and rsi>60:
+                m=f"➕ ADD LONG bottom most {RANGE_LOW:.5f}"; send_telegram(m); return m
+            if pos_side=='short' and wick_high_15>=RANGE_HIGH*0.99 and vr>1.2:
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.7))
-                m=f"➕ ADD SHORT double top roof {RANGE_HIGH:.5f} wick {wick_high:.5f} RSI {rsi:.0f}"; send_telegram(m); return m
+                m=f"➕ ADD SHORT top most {RANGE_HIGH:.5f}"; send_telegram(m); return m
 
-            # SL
-            if pct <= -SL_PCT:
+            if pct<=-SL_PCT:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
-                m=f"🛑 STRUCTURE SL {pos_side.upper()} {pct:.1f}% ({pnl_pct:.1f}%) floor {RANGE_LOW:.5f} roof {RANGE_HIGH:.5f} @{price:.5f}"; send_telegram(m); return m
+                m=f"🛑 SL {pos_side.upper()} {pct:.1f}% DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"; send_telegram(m); return m
 
-            return f"HOLD {pos_side.upper()} {pct:.1f}% -> MID {MID:.5f} range {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} RSI {rsi:.0f} 4H {rsi_4h:.0f} VOL {vr:.1f}x"
+            return f"HOLD {pos_side.upper()} {pct:.1f}% -> MID {MID:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} DIR {'UP' if direction_up else 'DOWN'}"
 
-        # === ENTRY - CATCH EVERY WICK TIER 1 ===
-        if wick_low <= RANGE_LOW*1.12:
-            set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6)) # 24% balance = catches every
-            m=f"🟢 EVERY WICK BUY FLOOR {RANGE_LOW:.5f} wick {wick_low:.5f} -> TP MID {MID:.5f} 5m {ch5:.1f}% RSI {rsi:.0f} VOL {vr:.1f}x @{price:.5f}"; send_telegram(m); return m
+        # ENTRY - BLOCK MID with direction
+        if in_mid_zone:
+            if direction_up:
+                return f"WAIT FADE MID UP {up_c}/5 mid {MID:.5f} BLOCK BUY price {price:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"
+            else:
+                return f"WAIT FADE MID DOWN {5-up_c}/5 mid {MID:.5f} BLOCK SELL price {price:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"
 
-        if wick_high >= RANGE_HIGH*0.88:
+        if wick_low_15<=RANGE_LOW*1.01:
+            set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
+            m=f"🟢 BUY BOTTOM MOST {RANGE_LOW:.5f} wick {wick_low_15:.5f} -> MID {MID:.5f} @{price:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
+
+        if wick_high_15>=RANGE_HIGH*0.99:
             set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
-            m=f"🔴 EVERY WICK SELL ROOF {RANGE_HIGH:.5f} wick {wick_high:.5f} -> TP MID {MID:.5f} 5m {ch5:.1f}% RSI {rsi:.0f} VOL {vr:.1f}x @{price:.5f}"; send_telegram(m); return m
+            m=f"🔴 SELL TOP MOST {RANGE_HIGH:.5f} wick {wick_high_15:.5f} -> MID {MID:.5f} @{price:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
 
-        # === REVERSE ON 4H ===
-        last_4h=c4h[-2]
-        is_bull_4h = last_4h[4] > ema20_4h and last_4h[4] > last_4h[1]
-        is_bear_4h = last_4h[4] < ema20_4h and last_4h[4] < last_4h[1]
-
-        return f"WAIT MEXC HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID:.5f} price {price:.5f} RSI {rsi:.0f} 4H {rsi_4h:.0f} VOL {vr:.1f}x 4H {'BULL' if is_bull_4h else 'BEAR' if is_bear_4h else 'SIDE'}"
+        return f"WAIT DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID:.5f} price {price:.5f} DIR {'UP' if direction_up else 'DOWN'} RSI {rsi:.0f} VOL {vr:.1f}x"
     except Exception as e:
-        return f"ERR beast {e}"
+        return f"ERR {e}"
