@@ -76,9 +76,7 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
         if signal_type == "LONG" and rsi_1h > 85: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 15: return True, f"RSI {rsi_1h:.1f} no SHORT"
     if not whale_override and vol_now < vol_avg * 0.2: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT 5-15M"
-    if not whale_override:
-        if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
-        if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
+    # BTC FILTER REMOVED - KOMA DOES NOT FOLLOW BTC
     return False, f"CONFIRMED {signal_type} loc {location_24h:.0f}% RSI {rsi_1h:.0f} Vol {vol_now/vol_avg:.1f}x 5-15M OK"
 
 def send_telegram(msg):
