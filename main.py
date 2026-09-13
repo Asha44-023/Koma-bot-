@@ -15,8 +15,8 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-KOMA_PUMP_TRIGGER = 1.5
-KOMA_DUMP_TRIGGER = -1.5
+KOMA_PUMP_TRIGGER = 2.8
+KOMA_DUMP_TRIGGER = -2.8
 KOMA_SLEEP_TP = 3.0
 KOMA_SLEEP_SL = 2.5
 
@@ -37,7 +37,6 @@ AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","
 ENGINE = os.getenv("ENGINE","BOTH").upper()
 
 SYMBOLS = ["KOMA/USDT:USDT"]
-# KOMA KEPT FOR MANUAL SIGNAL ONLY - BEAST OWNS TRADING
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
 
 SCALP_TP1 = 0.05
@@ -137,6 +136,8 @@ def get_killzone():
     return "DEAD ZONE","Avoid",h
 
 def get_session_cooldown(session, decision):
+    if "KOMA" in decision or "OVERRIDE" in decision:
+        return 60
     if "TAKE PROFIT" in decision or "CLOSE NOW" in decision or "REVERSAL" in decision: return 15
     if "HOLD" in decision: return 60
     if "JUNCTION" in decision: return 30
@@ -227,17 +228,13 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     wm_type,wm_msg = detect_w_m_pattern(df5m)
     bos_type,bos_msg = detect_bos_1h(df1h)
     is_koma = "KOMA" in sym
-
-    # FIXED: 30m change like beast, not 5m vs 1h
     try: change_30m = (df5m['close'].iloc[-1] - df5m['close'].iloc[-6]) / df5m['close'].iloc[-6] * 100
     except: change_30m = 0
-
     if is_koma and not has_long and not has_short:
-        if change_30m >= KOMA_PUMP_TRIGGER:
+        if change_30m >= KOMA_PUMP_TRIGGER and rsi5m > 58:
             return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
-        if change_30m <= KOMA_DUMP_TRIGGER:
-            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
-
+        if change_30m <= KOMA_DUMP_TRIGGER and rsi5m < 42:
+            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
@@ -247,7 +244,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
         if rsi5m>75 or (trend15m=="DOWN" and mom5m<-0.5):
             return "CLOSE NOW - REVERSAL LONG",8,"⚠️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}% REVERSAL","score":8,"reasons":[f"REVERSAL {change*100:.2f}% RSI{int(rsi5m)}"],"price":price}
         return "HOLD LONG PROFIT",8,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}%","score":8,"reasons":[f"HOLD {change*100:.2f}%"],"price":price}
-
     if has_short and entry_price>0:
         change=(entry_price-price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
@@ -257,7 +253,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
         if rsi5m<25 or (trend15m=="UP" and mom5m>0.5):
             return "CLOSE NOW - REVERSAL SHORT",8,"⚠️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}% REVERSAL","score":8,"reasons":[f"REVERSAL {change*100:.2f}% RSI{int(rsi5m)}"],"price":price}
         return "HOLD SHORT PROFIT",8,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}%","score":8,"reasons":[f"HOLD {change*100:.2f}%"],"price":price}
-
     c0=df5m['close'].iloc[-1]; c1=df5m['close'].iloc[-2]; c2=df5m['close'].iloc[-3]
     two_up=c0>c1 and c1>c2; two_down=c0<c1 and c1<c2
     score=0; reasons=[]
@@ -270,10 +265,8 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if ratio5m>=1.0: score+=2; reasons.append(f"🔥 {vol5m}")
     elif ratio5m>=0.8: score+=1; reasons.append(vol5m)
     if ratio15m>=1.0: score+=1; reasons.append(f"15M {vol15m}")
-
     dir_ok_long = trend4h in ["UP","RANGE"]
     dir_ok_short = trend4h in ["DOWN","RANGE"]
-
     if (whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or two_up or bos_type=="BOS_UP") and mom5m>0.2 and ratio5m>=0.8 and 20<rsi5m<80 and dir_ok_long:
         if trend1h=="UP" or bos_type=="BOS_UP":
             decision="BUY NOW"; emoji="🟢"; score+=3; reasons.append(f"4H DIR {trend4h} + 1H BOS {trend1h} + 5-15M ENTRY OK")
@@ -290,17 +283,13 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
             return decision,score,emoji,info
     else:
         decision="WAIT"; emoji="⚪"; score=0; reasons=[f"WAIT ENTRY 5-15M mom {mom5m:.1f}% {vol5m} 1H BOS {bos_type}"]
-
     if score>10: score=10
     info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} BOS {bos_msg} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} mom{mom15m:.1f}% RSI{int(rsi15m)} {vol15m} | 5M ENTRY {vol5m} RSI{int(rsi5m)}","score":score,"reasons":reasons,"price":price}
     return decision,score,emoji,info
 
 def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
-    # === FIX: KOMA MANUAL NEVER TRADES - BEAST OWNS KOMA ===
-    if "KOMA" in sym:
-        return False
-
+    if "KOMA" in sym: return False
     if not AUTOPILOT_ENABLED: return False
     if "WAIT" in decision or "JUNCTION" in decision or "HOLD" in decision: return False
     if "NOW" in decision and score<3: return False
@@ -347,14 +336,12 @@ def scan():
     except: free=BALANCE_START
     notional=get_auto_notional(free)
     print(f"ENGINE={ENGINE} AUTOPILOT={AUTOPILOT_ENABLED} Balance=${free:.2f} / ${TARGET} Progress {(free/TARGET*100):.4f}%")
-
     if ENGINE in ["AUTO","BOTH","CONCURRENT",""]:
         if KOMA_BEAST and koma_beast_plan:
             try:
                 res = koma_beast_plan(ex, free, send_telegram, lambda *a: True)
                 print(f"KOMA BEAST AUTO TRADE: {res}")
             except Exception as e: print(f"KOMA beast err {e}")
-
     if ENGINE in ["MANUAL","BOTH","CONCURRENT",""]:
         try:
             btc_df=pd.DataFrame(ex.fetch_ohlcv("BTC/USDT:USDT",'1h',limit=50),columns=['t','o','h','l','c','v'])
@@ -384,7 +371,11 @@ def scan():
                 try: vol_now=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1]
                 except: vol_now=1; vol_avg=1
                 filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision or "HOLD LONG" in decision else "SHORT", info['reasons'])
-                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']): filtered=False; reason=f"KOMA {KOMA_PUMP_TRIGGER}% OVERRIDE SIGNAL"
+                if "KOMA_PUMP_OVERRIDE" in str(info['reasons']) or "KOMA_DUMP_OVERRIDE" in str(info['reasons']):
+                    filtered=False; reason=f"KOMA {KOMA_PUMP_TRIGGER}% OVERRIDE SIGNAL"
+                if score >=5 and "KOMA" not in sym:
+                    filtered=False
+                    reason=f"SCORE {score}/10 MANUAL OVERRIDE - {reason}"
                 if filtered and not any(x in decision for x in ["TAKE PROFIT","HOLD","CLOSE NOW","JUNCTION"]):
                     print(f"Filter {sym} {reason}"); continue
                 if "HOLD" in decision:
@@ -397,9 +388,8 @@ def scan():
                     msg = f"{emoji} *{decision} {sym}* {score}/10\n🔀 JUNCTION - AT KEY LEVEL\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\nAction: WAIT - Dont enter, at junction\n{reason}"
                 else:
                     msg = f"{emoji} *MANUAL SIGNAL {sym}* {decision} Score {score}/10\n4H {info['4H']}\n1H {info['1H']} BOS\n15M {info['15M']} ENTRY 5-15M\nPrice {price}\n{reason}\nSession {session} {h}UTC\n(SIGNAL ONLY - NO MONEY USED)"
-
                 cooldown_key = f"{decision}_{sym}_{session}"
-                cd_mins = get_session_cooldown(session, decision)
+                cd_mins = get_session_cooldown(session, cooldown_key)
                 if can_send(sym, cooldown_key, cd_mins):
                     send_telegram(msg)
                     ALL_SIGNALS.append(msg)
