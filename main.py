@@ -75,7 +75,6 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
         if signal_type == "SHORT" and location_24h < 8: return True, f"At bottom {location_24h:.1f}% no SHORT"
         if signal_type == "LONG" and rsi_1h > 85: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 15: return True, f"RSI {rsi_1h:.1f} no SHORT"
-    # FINAL: 0.2x for ASIAN 5-15M entry
     if not whale_override and vol_now < vol_avg * 0.2: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT 5-15M"
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
@@ -232,9 +231,9 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     except: change_30m = 0
     if is_koma and not has_long and not has_short:
         if change_30m >= KOMA_PUMP_TRIGGER and rsi5m > 58:
-            return "BUY NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
+            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
         if change_30m <= KOMA_DUMP_TRIGGER and rsi5m < 42:
-            return "SELL NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
+            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
@@ -367,7 +366,6 @@ def scan():
                         if abs(c)>0: entry=e; has_long=(s=="long"); has_short=(s=="short")
                 except: pass
                 decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
-                # FINAL FIX: Don't send WAIT at all, only score >=3 BUY/SELL
                 if "WAIT" in decision or score < 3:
                     print(f"MANUAL WAIT {sym} Score {score} {info['15M']} - NO TELEGRAM")
                     continue
