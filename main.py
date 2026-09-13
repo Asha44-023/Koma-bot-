@@ -15,11 +15,10 @@ except:
     KOMA_BEAST = False
     koma_beast_plan = None
 
-# === ALIGNED WITH BEAST ===
 KOMA_PUMP_TRIGGER = 1.5
 KOMA_DUMP_TRIGGER = -1.5
-KOMA_SLEEP_TP = 3.0 # ALIGNED with beast TP 3% = +15% bal
-KOMA_SLEEP_SL = 2.5 # ALIGNED with beast SL 2.5% = -12.5% bal
+KOMA_SLEEP_TP = 3.0
+KOMA_SLEEP_SL = 2.5
 
 def get_env_clean(*names):
     for n in names:
@@ -38,6 +37,7 @@ AUTOPILOT_ENABLED = True if not auto_env else str(auto_env).lower() in ["true","
 ENGINE = os.getenv("ENGINE","BOTH").upper()
 
 SYMBOLS = ["KOMA/USDT:USDT"]
+# KOMA KEPT FOR MANUAL SIGNAL ONLY - BEAST OWNS TRADING
 MANUAL_WATCHLIST = ["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","KOMA/USDT:USDT","VELVET/USDT:USDT"]
 
 SCALP_TP1 = 0.05
@@ -69,7 +69,7 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
     if range_4h_pct < 0.015:
         if not whale_override: return True, f"JUNCTION BOX {range_4h_pct*100:.2f}% WAIT"
         else:
-            if vol_now < vol_avg * 1.0: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
+            if vol_now < vol_avg * 0.3: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
             return False, f"CONFIRMED BREAKOUT Vol {vol_now/vol_avg:.1f}x"
     if not whale_override:
         if signal_type == "LONG" and location_24h > 85: return True, f"At top {location_24h:.1f}% no LONG"
@@ -96,7 +96,7 @@ def get_exchange():
 def get_auto_notional(free_bal):
     try: bal=float(free_bal)
     except: bal=BALANCE_START
-    notional = round(bal * 0.5, 2) # FIXED 50% FOR $10->$60K COMPOUNDING - ALIGNED WITH BEAST
+    notional = round(bal * 0.5, 2)
     if notional < 3.0: notional = 3.0
     if notional > bal * 0.9: notional = round(bal * 0.9,2)
     return notional
@@ -137,17 +137,10 @@ def get_killzone():
     return "DEAD ZONE","Avoid",h
 
 def get_session_cooldown(session, decision):
-    if "TAKE PROFIT" in decision or "CLOSE NOW" in decision or "REVERSAL" in decision:
-        return 15
-    if "HOLD" in decision:
-        return 60
-    if "JUNCTION" in decision:
-        return 30
-    if session == "ASIAN": return 30
-    if session == "LONDON": return 20
-    if session == "NEW YORK": return 20
-    if session == "LONDON CLOSE": return 20
-    return 30
+    if "TAKE PROFIT" in decision or "CLOSE NOW" in decision or "REVERSAL" in decision: return 15
+    if "HOLD" in decision: return 60
+    if "JUNCTION" in decision: return 30
+    return 20
 
 def can_send(sym,typ,mins):
     k=f"{sym}_{typ}"; now=time.time()
@@ -216,10 +209,8 @@ def detect_bos_1h(df1h):
         low_20 = df1h['low'].iloc[-21:-1].min()
         close = df1h['close'].iloc[-1]
         prev_close = df1h['close'].iloc[-2]
-        if close > high_20 and prev_close <= high_20:
-            return "BOS_UP", f"1H BOS UP break {high_20:.5f}"
-        if close < low_20 and prev_close >= low_20:
-            return "BOS_DOWN", f"1H BOS DOWN break {low_20:.5f}"
+        if close > high_20 and prev_close <= high_20: return "BOS_UP", f"1H BOS UP break {high_20:.5f}"
+        if close < low_20 and prev_close >= low_20: return "BOS_DOWN", f"1H BOS DOWN break {low_20:.5f}"
         return None, ""
     except: return None, ""
 
@@ -235,15 +226,17 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     whale_type,whale_msg = detect_whale_manipulation(df5m)
     wm_type,wm_msg = detect_w_m_pattern(df5m)
     bos_type,bos_msg = detect_bos_1h(df1h)
-
     is_koma = "KOMA" in sym
-    change_1h = ((df5m['close'].iloc[-1] - df1h['close'].iloc[-2]) / df1h['close'].iloc[-2] * 100) if len(df1h)>=2 else 0
+
+    # FIXED: 30m change like beast, not 5m vs 1h
+    try: change_30m = (df5m['close'].iloc[-1] - df5m['close'].iloc[-6]) / df5m['close'].iloc[-6] * 100
+    except: change_30m = 0
 
     if is_koma and not has_long and not has_short:
-        if change_1h >= KOMA_PUMP_TRIGGER:
-            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_1h:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_1h:.2f}% SELL"],"price":price}
-        if change_1h <= KOMA_DUMP_TRIGGER:
-            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_1h:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_1h:.2f}% BUY"],"price":price}
+        if change_30m >= KOMA_PUMP_TRIGGER:
+            return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
+        if change_30m <= KOMA_DUMP_TRIGGER:
+            return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
 
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
@@ -304,6 +297,10 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
 
 def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
     global TRADED_THIS_RUN
+    # === FIX: KOMA MANUAL NEVER TRADES - BEAST OWNS KOMA ===
+    if "KOMA" in sym:
+        return False
+
     if not AUTOPILOT_ENABLED: return False
     if "WAIT" in decision or "JUNCTION" in decision or "HOLD" in decision: return False
     if "NOW" in decision and score<3: return False
@@ -320,7 +317,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
                 close_position(ex,sym); time.sleep(1.5)
                 try: bal2=ex.fetch_balance(); free2=bal2['USDT']['free'] if 'USDT' in bal2 else free_bal; new_notional=get_auto_notional(free2)
                 except: free2=free_bal; new_notional=notional
-                qty = new_notional / price
+                qty = new_notional * LEVERAGE / price
                 try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
                 except: pass
                 side="buy" if "BUY" in decision else "sell"
@@ -329,7 +326,7 @@ def safe_autopilot_enter(ex,sym,price,sess,score,info,decision,notional):
                 return True
             if "CLOSE" in decision or "TAKE PROFIT" in decision: close_position(ex,sym); return True
         if not existing_side and "NOW" in decision and score>=3:
-            qty = notional / price
+            qty = notional * LEVERAGE / price
             try: ex.set_leverage(LEVERAGE,sym); ex.set_margin_mode('isolated',sym)
             except: pass
             side="buy" if "BUY" in decision else "sell"
@@ -365,7 +362,6 @@ def scan():
             btc_ema21=btc_df['c'].ewm(span=21).mean().iloc[-1]
             btc_trend="BULLISH" if btc_ema9>btc_ema21 else "BEARISH"
         except: btc_trend="RANGE"
-
         for sym in MANUAL_WATCHLIST:
             try:
                 df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
