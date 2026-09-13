@@ -71,12 +71,12 @@ def check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi_1h, vol_now
             if vol_now < vol_avg * 0.2: return True, f"JUNCTION weak vol {vol_now/vol_avg:.1f}x WAIT"
             return False, f"CONFIRMED BREAKOUT Vol {vol_now/vol_avg:.1f}x"
     if not whale_override:
-        if signal_type == "LONG" and location_24h > 90: return True, f"At top {location_24h:.1f}% no LONG"
-        if signal_type == "SHORT" and location_24h < 10: return True, f"At bottom {location_24h:.1f}% no SHORT"
+        if signal_type == "LONG" and location_24h > 92: return True, f"At top {location_24h:.1f}% no LONG"
+        if signal_type == "SHORT" and location_24h < 8: return True, f"At bottom {location_24h:.1f}% no SHORT"
         if signal_type == "LONG" and rsi_1h > 85: return True, f"RSI {rsi_1h:.1f} no LONG"
         if signal_type == "SHORT" and rsi_1h < 15: return True, f"RSI {rsi_1h:.1f} no SHORT"
-    # 5-15M PRIORITY - LOWERED TO 0.3x
-    if not whale_override and vol_now < vol_avg * 0.3: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT 5-15M"
+    # FINAL: 0.2x for ASIAN 5-15M entry
+    if not whale_override and vol_now < vol_avg * 0.2: return True, f"Low vol {vol_now/vol_avg:.1f}x WAIT 5-15M"
     if not whale_override:
         if btc_trend == "BEARISH" and signal_type == "LONG": return True, f"BTC bear no LONG"
         if btc_trend == "BULLISH" and signal_type == "SHORT": return True, f"BTC bull no SHORT"
@@ -141,7 +141,7 @@ def get_session_cooldown(session, decision):
     if "TAKE PROFIT" in decision or "CLOSE NOW" in decision or "REVERSAL" in decision: return 15
     if "HOLD" in decision: return 60
     if "JUNCTION" in decision: return 30
-    return 20
+    return 30
 
 def can_send(sym,typ,mins):
     k=f"{sym}_{typ}"; now=time.time()
@@ -230,13 +230,11 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     is_koma = "KOMA" in sym
     try: change_30m = (df5m['close'].iloc[-1] - df5m['close'].iloc[-6]) / df5m['close'].iloc[-6] * 100
     except: change_30m = 0
-
     if is_koma and not has_long and not has_short:
         if change_30m >= KOMA_PUMP_TRIGGER and rsi5m > 58:
             return "SELL NOW",10,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_PUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_PUMP_OVERRIDE {change_30m:.2f}% SELL"],"price":price}
         if change_30m <= KOMA_DUMP_TRIGGER and rsi5m < 42:
             return "BUY NOW",10,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"KOMA_DUMP_OVERRIDE {change_30m:.2f}%","score":10,"reasons":[f"KOMA_DUMP_OVERRIDE {change_30m:.2f}% BUY"],"price":price}
-
     if has_long and entry_price>0:
         change=(price-entry_price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
@@ -246,7 +244,6 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
         if rsi5m>75 or (trend15m=="DOWN" and mom5m<-0.3):
             return "CLOSE NOW - REVERSAL LONG",8,"⚠️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}% REVERSAL","score":8,"reasons":[f"REVERSAL {change*100:.2f}% RSI{int(rsi5m)}"],"price":price}
         return "HOLD LONG PROFIT",8,"🟢",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}%","score":8,"reasons":[f"HOLD {change*100:.2f}%"],"price":price}
-
     if has_short and entry_price>0:
         change=(entry_price-price)/entry_price
         tp = (KOMA_SLEEP_TP/100) if is_koma else SCALP_TP1
@@ -257,18 +254,14 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
             return "CLOSE NOW - REVERSAL SHORT",8,"⚠️",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}% REVERSAL","score":8,"reasons":[f"REVERSAL {change*100:.2f}% RSI{int(rsi5m)}"],"price":price}
         return "HOLD SHORT PROFIT",8,"🔴",{"4H":f"{trend4h}","1H":f"{trend1h}","15M":f"{vol5m} {change*100:.2f}%","score":8,"reasons":[f"HOLD {change*100:.2f}%"],"price":price}
 
-    # ==== 5-15M PRIORITY LOGIC ====
     c0=df5m['close'].iloc[-1]; c1=df5m['close'].iloc[-2]; c2=df5m['close'].iloc[-3]
     two_up=c0>c1 and c1>c2
     two_down=c0<c1 and c1<c2
     score=0; reasons=[]
-
-    # 5-15M vol check - LOWERED for entry
     vol_ok_5m = ratio5m >= 0.4
     vol_ok_15m = ratio15m >= 0.5
     trend_ok_long = trend4h in ["UP","RANGE"]
     trend_ok_short = trend4h in ["DOWN","RANGE"]
-
     if whale_type=="BULL_LIQ_GRAB": score+=3; reasons.append(f"🐋 {whale_msg}")
     if whale_type=="BEAR_LIQ_GRAB": score+=3; reasons.append(f"🐋 {whale_msg}")
     if wm_type=="W_PATTERN": score+=3; reasons.append(f"🔄 {wm_msg}")
@@ -279,25 +272,18 @@ def check_scalp_engine(df4h, df1h, df15m, df5m, sym, has_long, has_short, entry_
     if vol_ok_15m: score+=1; reasons.append(f"15M {vol15m} OK")
     if two_up: score+=1; reasons.append("5M 2UP")
     if two_down: score+=1; reasons.append("5M 2DOWN")
-
-    # PRIORITY: 5M + 15M confirm entry
     if vol_ok_5m and vol_ok_15m and trend_ok_long:
         if (two_up or whale_type=="BULL_LIQ_GRAB" or wm_type=="W_PATTERN" or bos_type=="BOS_UP") and mom5m>0.05 and 18<rsi5m<80:
-            decision="BUY NOW"; emoji="🟢"
-            score+=2
+            decision="BUY NOW"; emoji="🟢"; score+=2
             reasons.append(f"5-15M ENTRY BUY mom5m {mom5m:.2f}% mom15m {mom15m:.2f}%")
             info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} BOS {bos_msg} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} ENTRY {vol15m} mom{mom15m:.2f}% | 5M {vol5m} RSI{int(rsi5m)} mom{mom5m:.2f}% 2UP={two_up}","score":min(score,10),"reasons":reasons,"price":price}
             return decision,info["score"],emoji,info
-
     if vol_ok_5m and vol_ok_15m and trend_ok_short:
         if (two_down or whale_type=="BEAR_LIQ_GRAB" or wm_type=="M_PATTERN" or bos_type=="BOS_DOWN") and mom5m<-0.05 and 20<rsi5m<82:
-            decision="SELL NOW"; emoji="🔴"
-            score+=2
+            decision="SELL NOW"; emoji="🔴"; score+=2
             reasons.append(f"5-15M ENTRY SELL mom5m {mom5m:.2f}% mom15m {mom15m:.2f}%")
             info={"4H":f"{trend4h} DIR mom{mom4h:.1f}% RSI{int(rsi4h)}","1H":f"{trend1h} BOS {bos_msg} mom{mom1h:.1f}% RSI{int(rsi1h)}","15M":f"{trend15m} ENTRY {vol15m} mom{mom15m:.2f}% | 5M {vol5m} RSI{int(rsi5m)} mom{mom5m:.2f}% 2DOWN={two_down}","score":min(score,10),"reasons":reasons,"price":price}
             return decision,info["score"],emoji,info
-
-    # No entry yet but show 5-15M status
     decision="WAIT"; emoji="⚪"
     if not vol_ok_5m: reasons.append(f"WAIT 5M VOL {vol5m} <0.4x")
     if not vol_ok_15m: reasons.append(f"WAIT 15M VOL {vol15m} <0.5x")
@@ -381,8 +367,10 @@ def scan():
                         if abs(c)>0: entry=e; has_long=(s=="long"); has_short=(s=="short")
                 except: pass
                 decision,score,emoji,info=check_scalp_engine(df4h,df1h,df15m,df5m,sym,has_long,has_short,entry)
-                if "WAIT" in decision and score==0:
-                    print(f"MANUAL WAIT {sym} {info['15M']}"); continue
+                # FINAL FIX: Don't send WAIT at all, only score >=3 BUY/SELL
+                if "WAIT" in decision or score < 3:
+                    print(f"MANUAL WAIT {sym} Score {score} {info['15M']} - NO TELEGRAM")
+                    continue
                 low_24h=df1h['low'].tail(24).min(); high_24h=df1h['high'].tail(24).max()
                 low_4h=df4h['low'].tail(6).min(); high_4h=df4h['high'].tail(6).max()
                 _,rsi1h,_,_=get_mom_rsi_vol(df1h)
@@ -391,7 +379,7 @@ def scan():
                 filtered, reason = check_all_filters(price, low_24h, high_24h, low_4h, high_4h, rsi1h, vol_now, vol_avg, btc_trend, "LONG" if "BUY" in decision or "HOLD LONG" in decision else "SHORT", info['reasons'])
                 if "KOMA_PUMP_OVERRIDE" in str(info['reasons']) or "KOMA_DUMP_OVERRIDE" in str(info['reasons']):
                     filtered=False; reason=f"KOMA {KOMA_PUMP_TRIGGER}% OVERRIDE SIGNAL"
-                if score >=3 and "KOMA" not in sym:
+                if score >=3:
                     filtered=False
                     reason=f"SCORE {score}/10 5-15M OVERRIDE - {reason}"
                 if filtered and not any(x in decision for x in ["TAKE PROFIT","HOLD","CLOSE NOW","JUNCTION"]):
@@ -401,11 +389,11 @@ def scan():
                 elif "TAKE PROFIT" in decision:
                     msg = f"{emoji} *{decision} {sym}* {score}/10\n💰 TP HIT - LOCK PROFIT NOW\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\nAction: TAKE PROFIT\n{reason}"
                 elif "CLOSE NOW" in decision:
-                    msg = f"{emoji} *{decision} {sym}* {score}/10\n⚠️ REVERSAL WARNING - MARKET REVERSING\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\nAction: CLOSE TRADE\n{reason}"
+                    msg = f"{emoji} *{decision} {sym}* {score}/10\n⚠️ REVERSAL WARNING\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\nAction: CLOSE TRADE\n{reason}"
                 elif "JUNCTION" in decision:
-                    msg = f"{emoji} *{decision} {sym}* {score}/10\n🔀 JUNCTION - AT KEY LEVEL\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\nAction: WAIT - Dont enter, at junction\n{reason}"
+                    msg = f"{emoji} *{decision} {sym}* {score}/10\n🔀 JUNCTION - AT KEY LEVEL\n4H {info['4H']}\n1H {info['1H']}\n15M {info['15M']}\nPrice {price}\nAction: WAIT - Dont enter\n{reason}"
                 else:
-                    msg = f"{emoji} *MANUAL SIGNAL {sym}* {decision} Score {score}/10\n4H {info['4H']}\n1H {info['1H']} BOS\n15M {info['15M']} ENTRY 5-15M\nPrice {price}\n{reason}\nSession {session} {h}UTC\n(SIGNAL ONLY - NO MONEY USED)"
+                    msg = f"{emoji} *MANUAL SIGNAL {sym}* {decision} Score {score}/10\n4H {info['4H']}\n1H {info['1H']} BOS\n15M {info['15M']} ENTRY 5-15M\nPrice {price}\n{reason}\nSession {session} {h}UTC\n(SIGNAL ONLY)"
                 cooldown_key = f"{decision}_{sym}_{session}"
                 cd_mins = get_session_cooldown(session, cooldown_key)
                 if can_send(sym, cooldown_key, cd_mins):
