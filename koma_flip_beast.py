@@ -2,7 +2,7 @@ import ccxt
 
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=10
-SIZE_PCT=0.4 # 40% compound
+SIZE_PCT=0.4
 SL_PCT=12.0
 PUMP_PAUSE=0.025
 
@@ -12,11 +12,10 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         c15=ex.fetch_ohlcv(SYMBOL,'15m',limit=80)
         cD=ex.fetch_ohlcv(SYMBOL,'1d',limit=10)
         cl5=[x[4] for x in c5]
-        cl15=[x[4] for x in c15]
-        if len(cD)<2: return "WAIT daily loading"
+        if len(cD)<2: return "WAIT daily"
         price=cl5[-1]
 
-        # === DAILY MOST WICK - BIG CATCH HOUSE ===
+        # === DAILY HOUSE ===
         today_high=cD[-1][2]
         today_low=cD[-1][3]
         if today_high==today_low:
@@ -61,54 +60,58 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             q=notional/price
             return float(ex.amount_to_precision(SYMBOL,q))
 
-        # PAUSE on pump
-        if price>PUMP_PAUSE and pos_side=='short':
-            return f"⏸️ PAUSE SHORT pump {price:.5f} > {PUMP_PAUSE} - wait dump to catch big"
-        if price<RANGE_LOW*0.6:
-            return f"⏸️ PAUSE breakdown {price:.5f} wait new daily"
+        # === MANIPULATION CUT HANDLER ===
+        is_cut_low = wick_low_15 < RANGE_LOW
+        is_cut_high = wick_high_15 > RANGE_HIGH
 
-        # === HOLD - BIG CATCH ONLY ===
+        # FAKE CUT low vol = whale stop hunt = BUY BIG CATCH
+        if is_cut_low and vr < 0.7:
+            if not pos_side or pos_side=='short':
+                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
+                m=f"🐋 FAKE CUT LOW {RANGE_LOW:.5f}->{wick_low_15:.5f} VOL {vr:.1f}x = MANIPULATION -> BUY BIG to {RANGE_HIGH:.5f}"; send_telegram(m); return m
+
+        if is_cut_high and vr < 0.7:
+            if not pos_side or pos_side=='long':
+                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
+                m=f"🐋 FAKE CUT HIGH {RANGE_HIGH:.5f}->{wick_high_15:.5f} VOL {vr:.1f}x = MANIPULATION -> SELL BIG to {RANGE_LOW:.5f}"; send_telegram(m); return m
+
+        # REAL BREAK high vol = update house
+        if is_cut_low and vr > 1.8:
+            RANGE_LOW = wick_low_15
+            return f"⚠️ REAL BREAK cut LOW {wick_low_15:.5f} VOL {vr:.1f}x - NEW HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} wait bottom"
+        if is_cut_high and vr > 1.8:
+            RANGE_HIGH = wick_high_15
+            return f"⚠️ REAL BREAK cut HIGH {wick_high_15:.5f} VOL {vr:.1f}x - NEW HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} wait top"
+
+        # === HOLD BIG CATCH ONLY ===
         if pos_side and entry>0:
             pct=(price-entry)/entry*100 if pos_side=='long' else (entry-price)/entry*100
 
-            # BIG CATCH TP - ONLY at opposite most wick
-            if pos_side=='long' and wick_high_15>=RANGE_HIGH*0.99:
+            if pos_side=='long' and wick_high_15 >= RANGE_HIGH*0.99:
                 ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
-                set_iso()
-                ex.create_market_order(SYMBOL,'sell',get_qty(0.6)) # AUTO SWITCH SHORT FOR NEXT BIG CATCH
-                m=f"💰 BIG CATCH LONG WIN {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} +{pct:.1f}% bal {free_bal} -> AUTO SHORT TOP"; send_telegram(m); return m
+                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
+                m=f"💰 BIG CATCH LONG {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} +{pct:.1f}% -> AUTO SHORT"; send_telegram(m); return m
 
-            if pos_side=='short' and wick_low_15<=RANGE_LOW*1.01:
+            if pos_side=='short' and wick_low_15 <= RANGE_LOW*1.01:
                 ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
-                set_iso()
-                ex.create_market_order(SYMBOL,'buy',get_qty(0.6)) # AUTO SWITCH LONG FOR NEXT BIG CATCH
-                m=f"💰 BIG CATCH SHORT WIN {RANGE_HIGH:.5f}->{RANGE_LOW:.5f} +{pct:.1f}% bal {free_bal} -> AUTO LONG BOTTOM"; send_telegram(m); return m
-
-            # MID = ADD only, NOT TP - to make big catch bigger
-            in_mid_low = price < MID*1.03 and price > MID*0.97
-            if pos_side=='long' and in_mid_low and vr>1.3 and pct>-3:
-                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.5))
-                return f"➕ ADD LONG mid {MID:.5f} to boost BIG CATCH to {RANGE_HIGH:.5f} {pct:.1f}%"
-
-            if pos_side=='short' and in_mid_low and vr>1.3 and pct>-3:
-                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.5))
-                return f"➕ ADD SHORT mid {MID:.5f} to boost BIG CATCH to {RANGE_LOW:.5f} {pct:.1f}%"
+                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
+                m=f"💰 BIG CATCH SHORT {RANGE_HIGH:.5f}->{RANGE_LOW:.5f} +{pct:.1f}% -> AUTO LONG"; send_telegram(m); return m
 
             if pct<=-SL_PCT:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
-                m=f"🛑 SL BIG CATCH {pos_side.upper()} {pct:.1f}% DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"; send_telegram(m); return m
+                m=f"🛑 SL {pos_side.upper()} {pct:.1f}% CUT {wick_low_15:.5f}/{wick_high_15:.5f}"; send_telegram(m); return m
 
-            return f"HOLD BIG CATCH {pos_side.upper()} {pct:.1f}% {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} -> target {RANGE_HIGH if pos_side=='long' else RANGE_LOW:.5f}"
+            return f"HOLD BIG {pos_side.upper()} {pct:.1f}% HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} VOL {vr:.1f}x"
 
-        # === ENTRY - ONLY AT MOST WICKS ===
-        if wick_low_15<=RANGE_LOW*1.01:
+        # === ENTRY ONLY MOST WICK ===
+        if wick_low_15 <= RANGE_LOW*1.01 and vr>0.15:
             set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
-            m=f"🟢 BIG CATCH BUY BOTTOM MOST {RANGE_LOW:.5f} wick {wick_low_15:.5f} TARGET TOP {RANGE_HIGH:.5f} @{price:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
+            m=f"🟢 BUY BOTTOM MOST {RANGE_LOW:.5f} wick {wick_low_15:.5f} TARGET {RANGE_HIGH:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
 
-        if wick_high_15>=RANGE_HIGH*0.99:
+        if wick_high_15 >= RANGE_HIGH*0.99 and vr>0.15:
             set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
-            m=f"🔴 BIG CATCH SELL TOP MOST {RANGE_HIGH:.5f} wick {wick_high_15:.5f} TARGET BOTTOM {RANGE_LOW:.5f} @{price:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
+            m=f"🔴 SELL TOP MOST {RANGE_HIGH:.5f} wick {wick_high_15:.5f} TARGET {RANGE_LOW:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
 
-        return f"WAIT BIG CATCH DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} price {price:.5f} VOL {vr:.1f}x - waiting for most wick"
+        return f"WAIT BIG CATCH DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} price {price:.5f} VOL {vr:.1f}x"
     except Exception as e:
         return f"ERR {e}"
