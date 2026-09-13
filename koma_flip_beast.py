@@ -1,5 +1,5 @@
 import ccxt
-SYMBOL="KOMA/USDT:USDT"; LEVERAGE=10; SIZE_PCT=0.9; VOL_MULT=1.4
+SYMBOL="KOMA/USDT:USDT"; LEVERAGE=10; SIZE_PCT=0.9
 TP_PCT=3.0; SL_PCT=2.5
 
 def calc_rsi(c,p=14):
@@ -50,25 +50,29 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
 
         try: bal=float(free_bal)
         except: bal=10.0
-        # FIXED: Use 90% of balance as margin, not * leverage
         notional=bal*SIZE_PCT
         if notional<3: notional=3
         if notional>bal*0.9: notional=bal*0.9
         qty=notional/price
         qty=float(ex.amount_to_precision(SYMBOL,qty))
 
-        # === FIXED: SELL on -0.8% DUMP - NO VOL BLOCK ===
+        def set_iso():
+            try:
+                ex.set_leverage(LEVERAGE,SYMBOL)
+                ex.set_margin_mode('ISOLATED', SYMBOL, {'leverage': LEVERAGE})
+            except:
+                try: ex.set_margin_mode('isolated', SYMBOL)
+                except: pass
+
         if ch5 <= -0.8 or ch30 <= -0.8:
-            try: ex.set_leverage(LEVERAGE,SYMBOL); ex.set_margin_mode('isolated',SYMBOL)
-            except: pass
+            set_iso()
             ex.create_market_order(SYMBOL,'sell',qty)
-            m=f"🔴 AUTO KOMA SELL NOW 10/10 5m {ch5:.2f}% 30m {ch30:.2f}% RSI {rsi:.0f} VOL {vr:.1f}x @{price}"; send_telegram(m); return m
+            m=f"🔴 AUTO KOMA SELL NOW ISOLATED 10x 5m {ch5:.2f}% 30m {ch30:.2f}% RSI {rsi:.0f} VOL {vr:.1f}x @{price}"; send_telegram(m); return m
 
         if ch5 >= 0.8 or ch30 >= 0.8:
-            try: ex.set_leverage(LEVERAGE,SYMBOL); ex.set_margin_mode('isolated',SYMBOL)
-            except: pass
+            set_iso()
             ex.create_market_order(SYMBOL,'buy',qty)
-            m=f"🟢 AUTO KOMA BUY NOW 10/10 5m {ch5:.2f}% 30m {ch30:.2f}% RSI {rsi:.0f} VOL {vr:.1f}x @{price}"; send_telegram(m); return m
+            m=f"🟢 AUTO KOMA BUY NOW ISOLATED 10x 5m {ch5:.2f}% 30m {ch30:.2f}% RSI {rsi:.0f} VOL {vr:.1f}x @{price}"; send_telegram(m); return m
 
         return f"WAIT 5m {ch5:.1f}% 30m {ch30:.1f}% RSI {rsi:.0f} VOL {vr:.1f}x {'ABOVE' if price>vwap else 'BELOW'} VWAP"
     except Exception as e:
