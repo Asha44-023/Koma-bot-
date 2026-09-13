@@ -1,5 +1,4 @@
 import ccxt
-
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=10
 SIZE_PCT=0.4
@@ -23,17 +22,15 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         cD=ex.fetch_ohlcv(SYMBOL,'1d',limit=10)
         cl5=[x[4] for x in c5]
         cl15=[x[4] for x in c15]
-        if len(cD)<2 or len(c15)<10: return "WAIT loading daily"
+        if len(cD)<2: return "WAIT loading daily"
         price=cl5[-1]
-        rsi=calc_rsi(cl5)
 
-        # === DAILY MOST WICK - every day own house ===
+        # DAILY MOST WICK
         today_high=cD[-1][2]
         today_low=cD[-1][3]
         if today_high==today_low:
             today_high=cD[-2][2]
             today_low=cD[-2][3]
-
         RANGE_LOW=today_low
         RANGE_HIGH=today_high
         MID=(RANGE_LOW+RANGE_HIGH)/2
@@ -43,12 +40,10 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         va=sum([x[5] for x in c5[-21:-1]])/20 if len(c5)>21 else c5[-1][5]
         vr=c5[-1][5]/(va+0.001)
 
-        # direction at mid - 15m last 5
         up_c=sum(1 for i in range(-5,0) if cl15[i] > c15[i][1])
         direction_up=up_c>=3
         in_mid_zone=MID*0.96 < price < MID*1.04
 
-        # POS
         pos_side=None; amt=0; entry=0
         for p in ex.fetch_positions([SYMBOL]):
             c=float(p.get('contracts',0) or p.get('info',{}).get('holdVol',0) or 0)
@@ -78,27 +73,22 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             q=notional/price
             return float(ex.amount_to_precision(SYMBOL,q))
 
-        # PAUSE
         if price>PUMP_PAUSE and pos_side=='short':
-            return f"⏸️ PAUSE SHORT breakout {price:.5f}"
+            return f"⏸️ PAUSE SHORT I breakout {price:.5f} > {PUMP_PAUSE}"
         if price<RANGE_LOW*0.6:
             return f"⏸️ PAUSE LONG breakdown {price:.5f} wait new daily"
 
-        # HOLD + TP MID + AUTO SWITCH
         if pos_side and entry>0:
             pct=(price-entry)/entry*100 if pos_side=='long' else (entry-price)/entry*100
-            pnl_pct=pct*LEVERAGE
 
-            # FADE MID - TP only, block with direction
             if in_mid_zone:
                 if pos_side=='long' and direction_up:
                     ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
-                    m=f"✅ FADE MID TP LONG mid {MID:.5f} UP {up_c}/5 +{pct:.1f}% @{price:.5f}"; send_telegram(m); return m
+                    m=f"✅ FADE MID TP LONG UP {up_c}/5 mid {MID:.5f} +{pct:.1f}%"; send_telegram(m); return m
                 if pos_side=='short' and not direction_up:
                     ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
-                    m=f"✅ FADE MID TP SHORT mid {MID:.5f} DOWN {5-up_c}/5 +{pct:.1f}% @{price:.5f}"; send_telegram(m); return m
+                    m=f"✅ FADE MID TP SHORT DOWN {5-up_c}/5 mid {MID:.5f} +{pct:.1f}%"; send_telegram(m); return m
 
-            # TP MID + AUTO SWITCH to most wick
             if pos_side=='long' and price>=MID*0.995:
                 ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
                 if wick_high_15>=RANGE_HIGH*0.99:
@@ -113,35 +103,29 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
                     m=f"✅ TP MID SHORT + 🔄 AUTO BUY BOTTOM MOST {RANGE_LOW:.5f} +{pct:.1f}%"; send_telegram(m); return m
                 m=f"✅ TP MID SHORT {RANGE_HIGH:.5f}->{MID:.5f} +{pct:.1f}%"; send_telegram(m); return m
 
-            # ADD at most wicks
             if pos_side=='long' and wick_low_15<=RANGE_LOW*1.01 and vr>1.2:
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.7))
-                m=f"➕ ADD LONG bottom most {RANGE_LOW:.5f}"; send_telegram(m); return m
+                return f"➕ ADD LONG bottom most {RANGE_LOW:.5f}"
             if pos_side=='short' and wick_high_15>=RANGE_HIGH*0.99 and vr>1.2:
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.7))
-                m=f"➕ ADD SHORT top most {RANGE_HIGH:.5f}"; send_telegram(m); return m
+                return f"➕ ADD SHORT top most {RANGE_HIGH:.5f}"
 
             if pct<=-SL_PCT:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
                 m=f"🛑 SL {pos_side.upper()} {pct:.1f}% DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"; send_telegram(m); return m
 
-            return f"HOLD {pos_side.upper()} {pct:.1f}% -> MID {MID:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} DIR {'UP' if direction_up else 'DOWN'}"
+            return f"HOLD {pos_side.upper()} {pct:.1f}% -> MID {MID:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} {'UP' if direction_up else 'DOWN'}"
 
-        # ENTRY - BLOCK MID with direction
         if in_mid_zone:
-            if direction_up:
-                return f"WAIT FADE MID UP {up_c}/5 mid {MID:.5f} BLOCK BUY price {price:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"
-            else:
-                return f"WAIT FADE MID DOWN {5-up_c}/5 mid {MID:.5f} BLOCK SELL price {price:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"
+            return f"WAIT FADE MID {'UP' if direction_up else 'DOWN'} {up_c}/5 mid {MID:.5f} BLOCK price {price:.5f} DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f}"
 
         if wick_low_15<=RANGE_LOW*1.01:
             set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
-            m=f"🟢 BUY BOTTOM MOST {RANGE_LOW:.5f} wick {wick_low_15:.5f} -> MID {MID:.5f} @{price:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
-
+            m=f"🟢 BUY BOTTOM MOST {RANGE_LOW:.5f} wick {wick_low_15:.5f} -> MID {MID:.5f} @{price:.5f}"; send_telegram(m); return m
         if wick_high_15>=RANGE_HIGH*0.99:
             set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
-            m=f"🔴 SELL TOP MOST {RANGE_HIGH:.5f} wick {wick_high_15:.5f} -> MID {MID:.5f} @{price:.5f} VOL {vr:.1f}x"; send_telegram(m); return m
+            m=f"🔴 SELL TOP MOST {RANGE_HIGH:.5f} wick {wick_high_15:.5f} -> MID {MID:.5f} @{price:.5f}"; send_telegram(m); return m
 
-        return f"WAIT DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID:.5f} price {price:.5f} DIR {'UP' if direction_up else 'DOWN'} RSI {rsi:.0f} VOL {vr:.1f}x"
+        return f"WAIT DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID:.5f} price {price:.5f} DIR {'UP' if direction_up else 'DOWN'}"
     except Exception as e:
         return f"ERR {e}"
