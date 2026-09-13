@@ -3,12 +3,12 @@ import os, json, time
 
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=11
-SIZE_PCT=0.5 # 50% compounding for faster growth
+SIZE_PCT=0.5
 SL_PCT=8.0
 MAX_HOLD_HOURS=6
 MAX_HOLD_LOSS=8.0
 PUMP_PAUSE=0.025
-MIN_NOTIONAL=7 # <-- your new $7
+MIN_NOTIONAL=7
 COMPOUND=True
 
 STATE_FILE="/tmp/koma_retest_state.json"
@@ -23,6 +23,20 @@ def save_state(s):
     except: pass
 
 def scalp_plan(ex, free_bal, send_telegram, can_send):
+    # --- ANTI-SPAM WRAPPER ---
+    def _safe_send(msg):
+        # ONLY important messages get telegram
+        IMPORTANT = ["💰 BIG CATCH", "🐋 RETEST", "🔥 REAL BREAK", "🛑 SL", "🎯 MID", "📅 NEW DAILY", "🕛 6H CUT"]
+        if not any(x in msg for x in IMPORTANT):
+            return # BLOCK HOLD/WAIT
+        # 15 min cooldown for all KOMA alerts
+        try:
+            if can_send("KOMA", msg[:20], 15):
+                send_telegram(msg)
+        except:
+            # if old lambda, still send but only important
+            send_telegram(msg)
+
     try:
         c5=ex.fetch_ohlcv(SYMBOL,'5m',limit=50)
         c15=ex.fetch_ohlcv(SYMBOL,'15m',limit=80)
@@ -70,7 +84,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
                 break
 
         def set_iso():
-            # FIXED - Force ISOLATED 11X on MEXC
             try: ex.set_margin_mode('ISOLATED', SYMBOL, {'leverage': LEVERAGE})
             except: pass
             try: ex.set_leverage(LEVERAGE, SYMBOL, {'marginMode': 'ISOLATED'})
@@ -84,20 +97,16 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         def get_qty(pct=1.0):
             try: bal=float(free_bal)
             except: bal=10.0
-            # COMPOUNDING FIX - $7 min
             if COMPOUND:
                 notional = bal * SIZE_PCT * pct
             else:
                 notional = MIN_NOTIONAL * pct
-
             if notional < MIN_NOTIONAL:
                 notional = MIN_NOTIONAL
             if notional > bal * 0.9:
                 notional = bal * 0.9
-            # if balance itself < $7, use 90%
             if bal < MIN_NOTIONAL:
                 notional = bal * 0.9
-
             q=notional/price
             return float(ex.amount_to_precision(SYMBOL,q))
 
@@ -107,7 +116,7 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         if state.get("day_id",0)!= day_id:
             state = {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": state.get("pos_time",0), "day_id": day_id}
             save_state(state)
-            if can_send(): send_telegram(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} old retest cleared")
+            _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} old retest cleared")
 
         is_cut_low = wick_low_15 < RANGE_LOW
         is_cut_high = wick_high_15 > RANGE_HIGH
@@ -145,51 +154,51 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             if held_hours >= MAX_HOLD_HOURS and pct <= -MAX_HOLD_LOSS:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
                 save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
-                m=f"🕛 6H CUT {pos_side.upper()} {pct:.1f}% {held_hours:.1f}h HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} WHALE SHOOT L:{shoot_out_low} H:{shoot_out_high}"; send_telegram(m); return m
+                m=f"🕛 6H CUT {pos_side.upper()} {pct:.1f}% {held_hours:.1f}h HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f}"; _safe_send(m); return m
 
             if pos_side=='short' and is_stop_hunt_high:
-                return f"🐋 STOP-HUNT HIGH {RANGE_HIGH:.5f}->{wick_high_15:.5f} reclaim {close_15:.5f} wick {wick_high_size:.5f} body {body_15:.5f} VOL {vr:.1f}x HOLD SHORT SHOOT:{shoot_out_high} MID at:{at_mid}"
+                return f"HOLD STOP-HUNT HIGH"
             if pos_side=='long' and is_stop_hunt_low:
-                return f"🐋 STOP-HUNT LOW {RANGE_LOW:.5f}->{wick_low_15:.5f} reclaim {close_15:.5f} wick {wick_low_size:.5f} body {body_15:.5f} VOL {vr:.1f}x HOLD LONG SHOOT:{shoot_out_low} MID at:{at_mid}"
+                return f"HOLD STOP-HUNT LOW"
 
             if pos_side=='short':
                 if is_cut_high and vr < 0.9 and not real_break_high:
-                    return f"HOLD SHORT FAKE HIGH {RANGE_HIGH:.5f}->{wick_high_15:.5f} VOL {vr:.1f}x WHALE H:{is_stop_hunt_high} REAL_H:{real_break_high} SHOOT:{shoot_out_high} MID:{at_mid} {held_hours:.1f}h"
+                    return f"HOLD SHORT FAKE HIGH"
                 if real_break_high or shoot_out_high and vr >= 1.1:
                     ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
                     set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
                     state["pos_time"]=now; save_state(state)
-                    m=f"🔥 REAL BREAK SHOOT HIGH {wick_high_15:.5f} close {close_15:.5f}>{RANGE_HIGH:.5f} VOL {vr:.1f}x FLIP LONG MID {MID_HOUSE:.5f}"; send_telegram(m); return m
+                    m=f"🔥 REAL BREAK SHOOT HIGH {wick_high_15:.5f} close {close_15:.5f}>{RANGE_HIGH:.5f} VOL {vr:.1f}x FLIP LONG"; _safe_send(m); return m
 
             if pos_side=='long':
                 if is_cut_low and vr < 0.9 and not real_break_low:
-                    return f"HOLD LONG FAKE LOW {RANGE_LOW:.5f}->{wick_low_15:.5f} VOL {vr:.1f}x WHALE L:{is_stop_hunt_low} REAL_L:{real_break_low} SHOOT:{shoot_out_low} MID:{at_mid} {held_hours:.1f}h"
+                    return f"HOLD LONG FAKE LOW"
                 if real_break_low or shoot_out_low and vr >= 1.1:
                     ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
                     set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
                     state["pos_time"]=now; save_state(state)
-                    m=f"🔥 REAL BREAK SHOOT LOW {wick_low_15:.5f} close {close_15:.5f}<{RANGE_LOW:.5f} VOL {vr:.1f}x FLIP SHORT MID {MID_HOUSE:.5f}"; send_telegram(m); return m
+                    m=f"🔥 REAL BREAK SHOOT LOW {wick_low_15:.5f} close {close_15:.5f}<{RANGE_LOW:.5f} VOL {vr:.1f}x FLIP SHORT"; _safe_send(m); return m
 
             if pos_side=='long' and at_top:
                 ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
                 save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
-                m=f"💰 BIG CATCH LONG {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} +{pct:.1f}% VOL {vr:.1f}x SHOOT_H:{shoot_out_high} MID {MID_HOUSE:.5f} -> SHORT"; send_telegram(m); return m
+                m=f"💰 BIG CATCH LONG {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} +{pct:.1f}% VOL {vr:.1f}x -> SHORT"; _safe_send(m); return m
 
             if pos_side=='short' and at_bottom:
                 ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
                 save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
-                m=f"💰 BIG CATCH SHORT {RANGE_HIGH:.5f}->{RANGE_LOW:.5f} +{pct:.1f}% VOL {vr:.1f}x SHOOT_L:{shoot_out_low} MID {MID_HOUSE:.5f} -> LONG"; send_telegram(m); return m
+                m=f"💰 BIG CATCH SHORT {RANGE_HIGH:.5f}->{RANGE_LOW:.5f} +{pct:.1f}% VOL {vr:.1f}x -> LONG"; _safe_send(m); return m
 
             if pct<=-SL_PCT and vr >= 1.1:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
                 save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id})
-                m=f"🛑 SL REAL {pos_side.upper()} {pct:.1f}% VOL {vr:.1f}x SHOOT L:{shoot_out_low} H:{shoot_out_high} MID {MID_HOUSE:.5f}"; send_telegram(m); return m
+                m=f"🛑 SL REAL {pos_side.upper()} {pct:.1f}% VOL {vr:.1f}x"; _safe_send(m); return m
             if pct<=-SL_PCT and vr < 0.9:
-                return f"HOLD {pos_side.upper()} {pct:.1f}% FAKE WICK IGNORE SL {held_hours:.1f}h WHALE L:{is_stop_hunt_low} H:{is_stop_hunt_high} MID at:{at_mid} BULL:{mid_bull_rev} BEAR:{mid_bear_rev}"
+                return f"HOLD {pos_side.upper()} {pct:.1f}% FAKE WICK IGNORE"
 
-            return f"HOLD BIG WICK {pos_side.upper()} {pct:.1f}% {held_hours:.1f}h HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} VOL {vr:.1f}x {vol_trend} WHALE L:{sweep_low_reclaim}/{is_stop_hunt_low} H:{sweep_high_reclaim}/{is_stop_hunt_high} REAL L:{real_break_low} H:{real_break_high} SHOOT L:{shoot_out_low} H:{shoot_out_high} BIGWICK L:{big_wick_low} H:{big_wick_high} MID at:{at_mid} BULL:{mid_bull_rev} BEAR:{mid_bear_rev} Wlow {wick_low_size:.5f} Whigh {wick_high_size:.5f} | Y-LIQ {near_y_liq} Y-MID {y_mid:.5f} | DAY {day_id} PUMP {pump*100:.2f}%"
+            return f"HOLD {pos_side.upper()} {pct:.1f}% {held_hours:.1f}h MID {MID_HOUSE:.5f} VOL {vr:.1f}x"
 
         if state.get("pos_time",0)!=0:
             state["pos_time"]=0; save_state(state)
@@ -198,45 +207,45 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             if mid_bull_rev:
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.5))
                 state["pos_time"]=now; state["first_low"]=False; state["first_high"]=False; save_state(state)
-                m=f"🎯 MID BULL REV 25% {MID_HOUSE:.5f} price {price:.5f} wick {wick_low_size:.5f} body {body_15:.5f} VOL {vr:.1f}x -> TO {RANGE_HIGH:.5f}"; send_telegram(m); return m
+                m=f"🎯 MID BULL REV 25% {MID_HOUSE:.5f} price {price:.5f} VOL {vr:.1f}x -> TO {RANGE_HIGH:.5f}"; _safe_send(m); return m
             if mid_bear_rev:
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.5))
                 state["pos_time"]=now; state["first_low"]=False; state["first_high"]=False; save_state(state)
-                m=f"🎯 MID BEAR REV 25% {MID_HOUSE:.5f} price {price:.5f} wick {wick_high_size:.5f} body {body_15:.5f} VOL {vr:.1f}x -> TO {RANGE_LOW:.5f}"; send_telegram(m); return m
+                m=f"🎯 MID BEAR REV 25% {MID_HOUSE:.5f} price {price:.5f} VOL {vr:.1f}x -> TO {RANGE_LOW:.5f}"; _safe_send(m); return m
 
             if is_cut_low or at_bottom or shoot_out_low:
                 if not state["first_low"]:
                     state["first_low"]=True; state["low_time"]=now; state["low_price"]=price; save_state(state)
-                    return f"👀 FIRST TOUCH LOW WICK {RANGE_LOW:.5f}->{wick_low_15:.5f} close {close_15:.5f} VOL {vr:.1f}x WHALE L:{sweep_low_reclaim}/{is_stop_hunt_low} BIGWICK:{big_wick_low} SHOOT:{shoot_out_low} REAL:{real_break_low} MID at:{at_mid} WAITING RETEST"
+                    return f"👀 FIRST TOUCH LOW WAITING RETEST"
                 else:
                     set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
                     state["pos_time"]=now; state["first_low"]=False; state["first_high"]=False; save_state(state)
-                    m=f"🐋 RETEST BUY LOW 2ND TOUCH {RANGE_LOW:.5f}->{wick_low_15:.5f} close {close_15:.5f} VOL {vr:.1f}x SHOOT:{shoot_out_low} MID {MID_HOUSE:.5f} -> TO {RANGE_HIGH:.5f}"; send_telegram(m); return m
+                    m=f"🐋 RETEST BUY LOW 2ND TOUCH {RANGE_LOW:.5f} VOL {vr:.1f}x MID {MID_HOUSE:.5f} -> TO {RANGE_HIGH:.5f}"; _safe_send(m); return m
 
             if is_cut_high or at_top or shoot_out_high:
                 if not state["first_high"]:
                     state["first_high"]=True; state["high_time"]=now; state["high_price"]=price; save_state(state)
-                    return f"👀 FIRST TOUCH HIGH WICK {RANGE_HIGH:.5f}->{wick_high_15:.5f} close {close_15:.5f} VOL {vr:.1f}x WHALE H:{sweep_high_reclaim}/{is_stop_hunt_high} BIGWICK:{big_wick_high} SHOOT:{shoot_out_high} REAL:{real_break_high} MID at:{at_mid} WAITING RETEST"
+                    return f"👀 FIRST TOUCH HIGH WAITING RETEST"
                 else:
                     set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
                     state["pos_time"]=now; state["first_low"]=False; state["first_high"]=False; save_state(state)
-                    m=f"🐋 RETEST SELL HIGH 2ND TOUCH {RANGE_HIGH:.5f}->{wick_high_15:.5f} close {close_15:.5f} VOL {vr:.1f}x SHOOT:{shoot_out_high} MID {MID_HOUSE:.5f} -> TO {RANGE_LOW:.5f}"; send_telegram(m); return m
+                    m=f"🐋 RETEST SELL HIGH 2ND TOUCH {RANGE_HIGH:.5f} VOL {vr:.1f}x MID {MID_HOUSE:.5f} -> TO {RANGE_LOW:.5f}"; _safe_send(m); return m
 
             if state["first_low"] and (now - state["low_time"]) > 7200 and vr >= 1.0:
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.4))
                 state["pos_time"]=now; state["first_low"]=False; state["first_high"]=False; save_state(state)
-                m=f"⏰ FALLBACK BUY LOW {RANGE_LOW:.5f} 2H no retest VOL {vr:.1f}x SHOOT:{shoot_out_low} MID {MID_HOUSE:.5f} 0.4"; send_telegram(m); return m
+                m=f"⏰ FALLBACK BUY LOW {RANGE_LOW:.5f} 2H no retest"; _safe_send(m); return m
 
             if state["first_high"] and (now - state["high_time"]) > 7200 and vr >= 1.0:
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.4))
                 state["pos_time"]=now; state["first_low"]=False; state["first_high"]=False; save_state(state)
-                m=f"⏰ FALLBACK SELL HIGH {RANGE_HIGH:.5f} 2H no retest VOL {vr:.1f}x SHOOT:{shoot_out_high} MID {MID_HOUSE:.5f} 0.4"; send_telegram(m); return m
+                m=f"⏰ FALLBACK SELL HIGH {RANGE_HIGH:.5f} 2H no retest"; _safe_send(m); return m
 
         if state["first_low"] and price > RANGE_LOW*1.03:
-            return f"WAIT RETEST LOW ready {RANGE_LOW:.5f} {(now-state['low_time'])/60:.0f}m ago price {price:.5f} VOL {vr:.1f}x MID {MID_HOUSE:.5f} at_mid:{at_mid} WHALE L:{sweep_low_reclaim}/{is_stop_hunt_low} H:{sweep_high_reclaim}/{is_stop_hunt_high} SHOOT L:{shoot_out_low} H:{shoot_out_high} MID-REV B:{mid_bull_rev}"
+            return f"WAIT RETEST LOW ready"
         if state["first_high"] and price < RANGE_HIGH*0.97:
-            return f"WAIT RETEST HIGH ready {RANGE_HIGH:.5f} {(now-state['high_time'])/60:.0f}m ago price {price:.5f} VOL {vr:.1f}x MID {MID_HOUSE:.5f} at_mid:{at_mid} WHALE L:{sweep_low_reclaim}/{is_stop_hunt_low} H:{sweep_high_reclaim}/{is_stop_hunt_high} SHOOT L:{shoot_out_low} H:{shoot_out_high} MID-REV B:{mid_bear_rev}"
+            return f"WAIT RETEST HIGH ready"
 
-        return f"WAIT RETEST WICK HOUSE DAILY {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} price {price:.5f} VOL {vr:.1f}x TREND {vol_trend} | WHALE SWEEP L:{sweep_low_reclaim} H:{sweep_high_reclaim} HUNT L:{is_stop_hunt_low} H:{is_stop_hunt_high} REAL L:{real_break_low} H:{real_break_high} SHOOT L:{shoot_out_low} H:{shoot_out_high} BIGWICK L:{big_wick_low} H:{big_wick_high} MID 25% at:{at_mid} BULL:{mid_bull_rev} BEAR:{mid_bear_rev} Wlow {wick_low_size:.5f} Whigh {wick_high_size:.5f} | Y-LIQ {near_y_liq} Y-MID {y_mid:.5f} | DAY {day_id} PUMP {pump*100:.2f}%"
+        return f"WAIT RETEST WICK HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} price {price:.5f} VOL {vr:.1f}x"
     except Exception as e:
         return f"ERR {e}"
