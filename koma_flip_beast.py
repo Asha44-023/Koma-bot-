@@ -2,12 +2,14 @@ import ccxt
 import os, json, time
 
 SYMBOL="KOMA/USDT:USDT"
-LEVERAGE=10
-SIZE_PCT=0.4
+LEVERAGE=11
+SIZE_PCT=0.5 # 50% compounding for faster growth
 SL_PCT=12.0
 MAX_HOLD_HOURS=6
 MAX_HOLD_LOSS=8.0
 PUMP_PAUSE=0.025
+MIN_NOTIONAL=7 # <-- your new $7
+COMPOUND=True
 
 STATE_FILE="/tmp/koma_retest_state.json"
 def load_state():
@@ -29,7 +31,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         if len(cD)<2: return "WAIT daily"
         price=cl5[-1]
 
-        # PUMP PAUSE - ALL ELEMENTS
         pump = abs(cl5[-1]-cl5[-2])/cl5[-2] if len(cl5)>2 else 0
         if pump > PUMP_PAUSE:
             return f"⏸️ PUMP PAUSE {pump*100:.2f}% > {PUMP_PAUSE*100}% - skip"
@@ -50,7 +51,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         open_15=c15[-1][1]
         body_15=abs(close_15-open_15) + 0.00001
 
-        # VOL - ALL ELEMENTS - NO 0.0x
         va=sum([float(x[5] or 0) for x in c5[-21:-1]])/20 if len(c5)>21 else float(c5[-1][5] or 1)
         if va < 1: va = float(c5[-1][5] or 1) or 1
         vr=float(c5[-1][5] or 0)/(va+0.001)
@@ -70,19 +70,34 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
                 break
 
         def set_iso():
-            try:
-                ex.set_leverage(LEVERAGE,SYMBOL)
-                ex.set_margin_mode('ISOLATED', SYMBOL, {'leverage': LEVERAGE})
+            # FIXED - Force ISOLATED 11X on MEXC
+            try: ex.set_margin_mode('ISOLATED', SYMBOL, {'leverage': LEVERAGE})
+            except: pass
+            try: ex.set_leverage(LEVERAGE, SYMBOL, {'marginMode': 'ISOLATED'})
             except:
-                try: ex.set_margin_mode('isolated', SYMBOL)
+                try: ex.set_leverage(LEVERAGE, SYMBOL)
                 except: pass
+            try: ex.set_margin_mode('isolated', SYMBOL)
+            except: pass
+            time.sleep(0.2)
 
         def get_qty(pct=1.0):
             try: bal=float(free_bal)
             except: bal=10.0
-            notional=bal*SIZE_PCT*pct
-            if notional<5: notional=5
-            if notional>bal*0.9: notional=bal*0.9
+            # COMPOUNDING FIX - $7 min
+            if COMPOUND:
+                notional = bal * SIZE_PCT * pct
+            else:
+                notional = MIN_NOTIONAL * pct
+
+            if notional < MIN_NOTIONAL:
+                notional = MIN_NOTIONAL
+            if notional > bal * 0.9:
+                notional = bal * 0.9
+            # if balance itself < $7, use 90%
+            if bal < MIN_NOTIONAL:
+                notional = bal * 0.9
+
             q=notional/price
             return float(ex.amount_to_precision(SYMBOL,q))
 
@@ -99,7 +114,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         at_bottom = wick_low_15 <= RANGE_LOW*1.01
         at_top = wick_high_15 >= RANGE_HIGH*0.99
 
-        # WHALE ALL ELEMENTS
         sweep_low_reclaim = wick_low_15 < RANGE_LOW and close_15 > RANGE_LOW
         sweep_high_reclaim = wick_high_15 > RANGE_HIGH and close_15 < RANGE_HIGH
         wick_low_size = min(open_15, close_15) - wick_low_15
@@ -113,7 +127,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         big_wick_low = wick_low_size > body_15*2.0
         big_wick_high = wick_high_size > body_15*2.0
 
-        # MID 25% - YOUR WISH - ALL ELEMENTS
         at_mid = abs(price - MID_HOUSE)/RANGE_SIZE < 0.25
         mid_bull_rev = wick_low_size > body_15*1.2 and close_15 > open_15 and at_mid and vr >= 0.7
         mid_bear_rev = wick_high_size > body_15*1.2 and close_15 < open_15 and at_mid and vr >= 0.7
