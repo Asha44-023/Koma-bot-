@@ -4,7 +4,7 @@ import os, json, time
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=11
 SIZE_PCT=0.5 # 50% compounding for faster growth
-SL_PCT=12.0
+SL_PCT=8.0
 MAX_HOLD_HOURS=6
 MAX_HOLD_LOSS=8.0
 PUMP_PAUSE=0.025
