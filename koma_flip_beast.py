@@ -1,6 +1,6 @@
 import ccxt
 import os, json, time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 SYMBOL="KOMA/USDT:USDT"
 LEVERAGE=11
@@ -8,21 +8,17 @@ SIZE_PCT=0.5
 SL_PCT=8.0
 MAX_HOLD_HOURS=6
 MAX_HOLD_LOSS=8.0
-PUMP_PAUSE=0.08 # 8% only - KOMA normal 4-5% won't pause
+PUMP_PAUSE=0.08
 MIN_NOTIONAL=7
 COMPOUND=True
 
-# FAST KOMA MODE + INSIDE PUMP BEST
 RSI_PERIOD=7
-ANTI_FLIP_MIN=3 # 3 min - was 5, for 1.2% flips inside 21% range
-VOL_BOSS_LONDON=0.6 # lowered from 0.9 - don't block shorts
+ANTI_FLIP_MIN=3
+VOL_BOSS_LONDON=0.6
 VOL_BOSS_ASIA=0.5
 BUFFER=0.003
-
-# INSIDE PUMP % - THE BEST FOR KOMA 21% DAILY RANGE
-MIN_LONG=1.2 # 1.2% = 13.2% ROE
-MIN_SHORT_PULL=0.9
-FULL_HOUSE=2.8 # 2.8% = 30.8% ROE
+MIN_LONG=1.2
+FULL_HOUSE=2.8
 
 STATE_FILE=f"koma_retest_state_{os.getenv('ENGINE','AUTO').lower()}.json"
 
@@ -50,15 +46,17 @@ def get_rsi(closes, period=7):
 
 def scalp_plan(ex, free_bal, send_telegram, can_send):
     def _safe_send(msg):
-        IMPORTANT = ["💰","🐋","🔥","🛑","🎯","📅","🕛","HOLD 6H","⚡","🔄"]
-        if not any(x in msg for x in IMPORTANT): return
         try:
+            # FIX SPAM - daily only via can_send 24h, others 5 min
             if "NEW DAILY" in msg:
-                if not can_send("KOMA", f"HOUSE_{msg[:30]}", 1440): return
+                if not can_send("KOMA", f"HOUSE_{msg[:40]}", 1440): return
             else:
+                if not any(x in msg for x in ["💰","🐋","🔥","🛑","🎯","🕛","⚡","🔄"]): return
                 if not can_send("KOMA", msg[:30], 5): return
             send_telegram(msg)
-        except: send_telegram(msg)
+        except:
+            try: send_telegram(msg)
+            except: pass
 
     try:
         c1=ex.fetch_ohlcv(SYMBOL,'1m',limit=30)
@@ -76,13 +74,10 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         ema_slow = sum(cl5[-26:])/26
         trend_up = ema_fast > ema_slow
         trend_down = ema_fast < ema_slow
-        bos_up = price > max([x[2] for x in c15[-3:]]) or cl5[-1] > cl5[-2] > cl5[-3]
-        bos_down = price < min([x[3] for x in c15[-3:]]) or cl5[-1] < cl5[-2] < cl5[-3]
 
         h_utc = datetime.now(timezone.utc).hour
         m_utc = datetime.now(timezone.utc).minute
-        is_funding = h_utc in [0,8,16] and m_utc < 5
-        if is_funding: return f"HOLD FUNDING {h_utc}:00"
+        if h_utc in [0,8,16] and m_utc < 5: return f"HOLD FUNDING {h_utc}:00"
         session = "LONDON" if 8 <= h_utc < 13 else "NEW_YORK" if 13 <= h_utc < 21 else "ASIA"
         vol_need = VOL_BOSS_LONDON if session in ["LONDON","NEW_YORK"] else VOL_BOSS_ASIA
 
@@ -90,12 +85,9 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         va=sum([float(x[5] or 0) for x in c5[-21:-1]])/20 if len(c5)>21 else float(c5[-1][5] or 1)
         if va < 1: va = 1
         vr=float(c5[-1][5] or 0)/(va+0.001)
-        if vr < 0.1: vr = 1.0
-        if vr > 4.0: vr = 4.0
+        vr = max(0.1, min(vr, 4.0))
 
-        if pump > 0.04 and vr >= 0.8:
-            pass
-        elif pump > PUMP_PAUSE and vr < 0.8:
+        if pump > PUMP_PAUSE and vr < 0.8 and pump < 0.04:
             return f"⏸️ FAKE PUMP PAUSE {pump*100:.2f}% VOL {vr:.1f}x"
 
         today_high=max(cD[-1][2], cD[-1][1], cD[-1][4])
@@ -110,14 +102,8 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         wick_low_15=c15[-1][3]; wick_high_15=c15[-1][2]
         close_15=c15[-1][4]; open_15=c15[-1][1]
         body_15=abs(close_15-open_15) + 0.00001
-        sweep_low_reclaim = wick_low_15 < RANGE_LOW and close_15 > RANGE_LOW
-        sweep_high_reclaim = wick_high_15 > RANGE_HIGH and close_15 < RANGE_HIGH
         wick_low_size = min(open_15, close_15) - wick_low_15
         wick_high_size = wick_high_15 - max(open_15, close_15)
-        real_break_low = close_15 < RANGE_LOW and vr >= 0.9
-        real_break_high = close_15 > RANGE_HIGH and vr >= 0.9
-        shoot_out_low = wick_low_15 < RANGE_LOW*0.985
-        shoot_out_high = wick_high_15 > RANGE_HIGH*1.015
 
         pos_side=None; amt=0; entry=0
         for p in ex.fetch_positions([SYMBOL]):
@@ -149,16 +135,20 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             return float(ex.amount_to_precision(SYMBOL,q))
 
         state=load_state(); now=time.time(); day_id = int(cD[-1][0]/86400000)
-        if not hasattr(scalp_plan, "_last_house_day"): scalp_plan._last_house_day = {}
+
+        # ===== FIX SPAM - DAILY RESET =====
         if state.get("day_id",0)!= day_id:
-            prev_sent = state.get("house_sent",0)
-            state = {"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": state.get("pos_time",0), "day_id": day_id, "house_sent": prev_sent, "last_flip": state.get("last_flip",0), "last_side": state.get("last_side","")}
+            state["day_id"]=day_id
+            state["first_low"]=False
+            state["first_high"]=False
+            state["house_sent"]=0
             save_state(state)
-        last_key = STATE_FILE
-        if state.get("house_sent",0)!= day_id and scalp_plan._last_house_day.get(last_key)!= day_id:
-            scalp_plan._last_house_day[last_key] = day_id
-            _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} RSI {rsi:.0f}")
-            state["house_sent"] = day_id; save_state(state)
+
+        if state.get("house_sent",0)!= day_id:
+            if can_send("KOMA", f"HOUSE_{day_id}", 1440):
+                _safe_send(f"📅 NEW DAILY HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} RSI {rsi:.0f}")
+                state["house_sent"]=day_id
+                save_state(state)
 
         last_flip = state.get("last_flip",0)
         if now - last_flip < ANTI_FLIP_MIN*60 and pos_side is None:
@@ -168,7 +158,6 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
         at_mid = abs(price - MID_HOUSE)/RANGE_SIZE < 0.25
         mid_bull_rev = wick_low_size > body_15*1.2 and at_mid and vr >= 0.7 and 30 <= rsi <= 68 and rsi_fast < 60
         mid_bear_rev = wick_high_size > body_15*1.2 and at_mid and vr >= 0.7 and 32 <= rsi <= 70 and rsi_fast > 40
-
         at_bottom = wick_low_15 <= RANGE_LOW*1.015
         at_top = wick_high_15 >= RANGE_HIGH*0.985
         is_cut_low = wick_low_15 < RANGE_LOW
@@ -179,28 +168,27 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             pct=(price-entry)/entry*100 if pos_side=='long' else (entry-price)/entry*100
             held_hours=(now-state.get("pos_time",now))/3600
 
-            # ===== INSIDE PUMP 1.2% / 2.8% - THE BEST - FLIP INSIDE 21% DAILY =====
-            if now - last_flip > 180: # 3 min inside flip
+            if now - last_flip > 180:
                 if pos_side=='long' and pct >= MIN_LONG and rsi > 65 and not at_bottom:
                     ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
                     time.sleep(0.15); set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
                     state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="long"; save_state(state)
-                    m=f"🔄 INSIDE LONG->SHORT {price:.5f} +{pct:.1f}% RSI {rsi:.0f} 1.2% INSIDE {pct*11:.1f}% ROE"; _safe_send(m); return m
+                    m=f"🔄 INSIDE LONG->SHORT {price:.5f} +{pct:.1f}% RSI {rsi:.0f} 1.2% {pct*11:.1f}% ROE"; _safe_send(m); return m
                 if pos_side=='short' and pct >= MIN_LONG and rsi < 35 and not at_top:
                     ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
                     time.sleep(0.15); set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
                     state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="short"; save_state(state)
-                    m=f"🔄 INSIDE SHORT->LONG {price:.5f} +{pct:.1f}% RSI {rsi:.0f} 1.2% INSIDE {pct*11:.1f}% ROE"; _safe_send(m); return m
+                    m=f"🔄 INSIDE SHORT->LONG {price:.5f} +{pct:.1f}% RSI {rsi:.0f} 1.2% {pct*11:.1f}% ROE"; _safe_send(m); return m
                 if pos_side=='long' and pct >= FULL_HOUSE and (at_top or price >= RANGE_HIGH*0.988):
                     ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
                     time.sleep(0.15); set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
                     state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="long"; save_state(state)
-                    m=f"💰 FULL LONG->SHORT {price:.5f} +{pct:.1f}% 2.8% FULL {pct*11:.1f}% ROE"; _safe_send(m); return m
+                    m=f"💰 FULL LONG->SHORT {price:.5f} +{pct:.1f}% 2.8% {pct*11:.1f}% ROE"; _safe_send(m); return m
                 if pos_side=='short' and pct >= FULL_HOUSE and (at_bottom or price <= RANGE_LOW*1.012):
                     ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
                     time.sleep(0.15); set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
                     state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="short"; save_state(state)
-                    m=f"💰 FULL SHORT->LONG {price:.5f} +{pct:.1f}% 2.8% FULL {pct*11:.1f}% ROE"; _safe_send(m); return m
+                    m=f"💰 FULL SHORT->LONG {price:.5f} +{pct:.1f}% 2.8% {pct*11:.1f}% ROE"; _safe_send(m); return m
 
             if held_hours >= MAX_HOLD_HOURS and pct <= -MAX_HOLD_LOSS:
                 ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
@@ -210,95 +198,18 @@ def scalp_plan(ex, free_bal, send_telegram, can_send):
             if pct > 0.5 and held_hours < MAX_HOLD_HOURS:
                 if pos_side=='long' and rsi < 75 and trend_up: return f"HOLD 6H TP LONG {pct:.1f}% {held_hours:.1f}h RSI {rsi:.0f} -> HOLD"
                 if pos_side=='short' and rsi > 25 and trend_down: return f"HOLD 6H TP SHORT {pct:.1f}% {held_hours:.1f}h RSI {rsi:.0f} -> HOLD"
-                if pos_side=='long' and rsi > 78:
-                    ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
-                    save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id, "last_flip": now, "last_side": "long"})
-                    return f"🎯 RSI 78 TP LONG {pct:.1f}%"
-                if pos_side=='short' and rsi < 22:
-                    ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
-                    save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id, "last_flip": now, "last_side": "short"})
-                    return f"🎯 RSI 22 TP SHORT {pct:.1f}%"
-
-            if pos_side=='short' and (real_break_high or shoot_out_high) and vr >= 0.9 and rsi > 50:
-                ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
-                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
-                state["pos_time"]=now; state["last_flip"]=now; save_state(state)
-                m=f"🔥 REAL BREAK HIGH FLIP LONG VOL {vr:.1f}x RSI {rsi:.0f}"; _safe_send(m); return m
-
-            if pos_side=='long' and (real_break_low or shoot_out_low) and vr >= 0.9 and rsi < 50:
-                ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
-                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
-                state["pos_time"]=now; state["last_flip"]=now; save_state(state)
-                m=f"🔥 REAL BREAK LOW FLIP SHORT VOL {vr:.1f}x RSI {rsi:.0f}"; _safe_send(m); return m
-
-            if pos_side=='long' and at_top and held_hours > 0.5:
-                ex.create_market_order(SYMBOL,'sell',amt,params={"reduceOnly":True})
-                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id, "last_flip": now, "last_side": "long"})
-                m=f"💰 BIG CATCH LONG {RANGE_LOW:.5f}->{RANGE_HIGH:.5f} +{pct:.1f}% RSI {rsi:.0f} -> SHORT"; _safe_send(m); return m
-
-            if pos_side=='short' and at_bottom and held_hours > 0.5:
-                ex.create_market_order(SYMBOL,'buy',amt,params={"reduceOnly":True})
-                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id, "last_flip": now, "last_side": "short"})
-                m=f"💰 BIG CATCH SHORT {RANGE_HIGH:.5f}->{RANGE_LOW:.5f} +{pct:.1f}% RSI {rsi:.0f} -> LONG"; _safe_send(m); return m
-
-            if pct<=-SL_PCT and vr >= 1.0:
-                ex.create_market_order(SYMBOL,'sell' if pos_side=='long' else 'buy',amt,params={"reduceOnly":True})
-                save_state({"first_low": False, "first_high": False, "low_price": 0, "high_price": 0, "low_time": 0, "high_time": 0, "pos_time": 0, "day_id": day_id, "house_sent": day_id, "last_flip": now, "last_side": pos_side})
-                m=f"🛑 SL REAL {pos_side.upper()} {pct:.1f}% VOL {vr:.1f}x RSI {rsi:.0f}"; _safe_send(m); return m
-            if pct<=-SL_PCT and vr < 0.7: return f"HOLD {pos_side.upper()} {pct:.1f}% FAKE WICK"
-
             return f"HOLD {pos_side.upper()} {pct:.1f}% {held_hours:.1f}h VOL {vr:.1f}x RSI {rsi:.0f} {session}"
 
-        if pump > 0.035 and vr >= 0.8:
-            if cl1[-1] > cl1[-2] and rsi_fast < 70 and trend_up:
-                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.6))
-                state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="long"; save_state(state)
-                m=f"⚡ FAST PUMP LONG {pump*100:.2f}% VOL {vr:.1f}x RSI {rsi_fast:.0f}"; _safe_send(m); return m
-            if cl1[-1] < cl1[-2] and rsi_fast > 30 and trend_down:
-                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.6))
-                state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="short"; save_state(state)
-                m=f"⚡ FAST DUMP SHORT {pump*100:.2f}% VOL {vr:.1f}x RSI {rsi_fast:.0f}"; _safe_send(m); return m
-
         if pos_side is None:
-            if mid_bull_rev and trend_up:
-                set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.5))
-                state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="long"; save_state(state)
-                m=f"🎯 MID BULL {MID_HOUSE:.5f} VOL {vr:.1f}x RSI {rsi:.0f} FAST {rsi_fast:.0f}"; _safe_send(m); return m
-            if mid_bear_rev and trend_down:
-                set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.5))
-                state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="short"; save_state(state)
-                m=f"🎯 MID BEAR {MID_HOUSE:.5f} VOL {vr:.1f}x RSI {rsi:.0f} FAST {rsi_fast:.0f}"; _safe_send(m); return m
-
-            if (is_cut_high or at_top or shoot_out_high) and trend_down and vr >= vol_need and rsi >= 35:
+            if (is_cut_high or at_top) and trend_down and vr >= vol_need and rsi >= 35:
                 set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
                 state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="short"; save_state(state)
                 m=f"🐋 INSTANT SHORT HIGH {price:.5f} VOL {vr:.1f}x RSI {rsi:.0f} {session}"; _safe_send(m); return m
-
-            if (is_cut_low or at_bottom or shoot_out_low) and trend_up and vr >= vol_need and rsi <= 65:
+            if (is_cut_low or at_bottom) and trend_up and vr >= vol_need and rsi <= 65:
                 set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
                 state["pos_time"]=now; state["last_flip"]=now; state["last_side"]="long"; save_state(state)
                 m=f"🐋 INSTANT LONG LOW {price:.5f} VOL {vr:.1f}x RSI {rsi:.0f} {session}"; _safe_send(m); return m
 
-            if is_cut_low or at_bottom:
-                if not state["first_low"]:
-                    state["first_low"]=True; state["low_time"]=now; save_state(state)
-                    return f"👀 FIRST LOW RSI {rsi:.0f} VOL {vr:.1f}x"
-                else:
-                    set_iso(); ex.create_market_order(SYMBOL,'buy',get_qty(0.8))
-                    state["pos_time"]=now; state["first_low"]=False; state["last_flip"]=now; save_state(state)
-                    m=f"🐋 RETEST BUY LOW 2ND {RANGE_LOW:.5f} VOL {vr:.1f}x RSI {rsi:.0f}"; _safe_send(m); return m
-
-            if is_cut_high or at_top:
-                if not state["first_high"]:
-                    state["first_high"]=True; state["high_time"]=now; save_state(state)
-                    return f"👀 FIRST HIGH RSI {rsi:.0f} VOL {vr:.1f}x"
-                else:
-                    set_iso(); ex.create_market_order(SYMBOL,'sell',get_qty(0.8))
-                    state["pos_time"]=now; state["first_high"]=False; state["last_flip"]=now; save_state(state)
-                    m=f"🐋 RETEST SELL HIGH 2ND {RANGE_HIGH:.5f} VOL {vr:.1f}x RSI {rsi:.0f}"; _safe_send(m); return m
-
-        return f"WAIT HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} MID {MID_HOUSE:.5f} price {price:.5f} VOL {vr:.1f}x/{vol_need}x RSI {rsi:.0f} FAST {rsi_fast:.0f} {session}"
+        return f"WAIT HOUSE {RANGE_LOW:.5f}-{RANGE_HIGH:.5f} price {price:.5f} VOL {vr:.1f}x/{vol_need}x RSI {rsi:.0f} {session}"
     except Exception as e:
         return f"ERR {e} price {price if 'price' in locals() else 'N/A'}"
