@@ -201,4 +201,4 @@ if __name__ == "__main__":
                     print(f"Err {sym} {e}")
         except Exception as e:
             print(f"Loop err {e}")
-        time.sleep(25)
+        time.sleep(900)
