@@ -13,12 +13,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install ccxt pandas requests
+      
+      - run: pip install ccxt pandas requests python-telegram-bot python-dotenv
+
       - name: Run Both Bots
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python main.py &
-          python koma_engine.py &
-          wait
+          set -e
+          echo "Starting..."
+          python main.py 2>&1 | tee main.log &
+          PID1=$!
+          python koma_engine.py 2>&1 | tee koma.log &
+          PID2=$!
+          
+          sleep 10
+          echo "--- LOGS ---"
+          cat main.log || true
+          cat koma.log || true
+          echo "--- LIVE ---"
+          tail -f main.log koma.log &
+          TAIL_PID=$!
+          
+          # This will make it turn RED immediately if any bot crashes
+          wait $PID1
+          wait $PID2
