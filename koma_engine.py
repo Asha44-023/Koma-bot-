@@ -87,26 +87,35 @@ def get_wick_levels(df5m):
 def check_koma(df5m,df15m,df1h):
     price=df5m['close'].iloc[-1]
     CEIL,FLOOR,MID,FLIP=get_wick_levels(df5m)
-    score=0; reasons=[]; buy=0
+    score=0; reasons=[]; buy=0; sell=0
     o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
     body=abs(c-o) or 0.0001
     up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
     if low_r>2.5:
         score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f} LONG 9/10"); buy+=3
-    if up_r>1.8 and price<CEIL:
-        score+=2; reasons.append(f"UP REJECT {up_r:.1f}x CEIL {CEIL:.5f}"); buy+=2
+    if up_r>2.5:
+        score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f} SHORT 9/10"); sell+=3
     if abs(price-FLIP)/FLIP<0.004:
-        score+=2; reasons.append(f"AT FLIP {FLIP:.5f}"); buy+=1
+        score+=2; reasons.append(f"AT FLIP {FLIP:.5f}"); buy+=1; sell+=1
     r5=rsi(df5m).iloc[-1]
     if r5<30:
-        score+=2; reasons.append(f"RSI OS {r5:.0f}"); buy+=2
-    elif 30<r5<65:
-        score+=1; reasons.append(f"RSI OK {r5:.0f}")
+        score+=2; reasons.append(f"RSI OS {r5:.0f} BUY"); buy+=2
+    elif r5>70:
+        score+=2; reasons.append(f"RSI OB {r5:.0f} SELL"); sell+=2
+    else:
+        score+=1; reasons.append(f"RSI {r5:.0f}")
     vol_r=df5m['volume'].iloc[-1]/(df5m['volume'].rolling(20).mean().iloc[-1] or 1)
     if vol_r>=1.2:
         score+=1; reasons.append(f"VOL UP x{vol_r:.1f} REAL")
     score=max(0,min(10,score))
-    decision="BUY NOW" if buy>=3 and score>=7 else ("WAIT" if score>=5 else "NO TRADE")
+    if buy>=2 and score>=6 and buy>=sell:
+        decision="BUY NOW"
+    elif sell>=2 and score>=6 and sell>buy:
+        decision="SELL NOW"
+    elif score>=4:
+        decision="WAIT"
+    else:
+        decision="NO TRADE"
     return decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r
 
 def detect_whale(df):
@@ -126,35 +135,16 @@ def check_other_coin(sym,df5m,df15m,df1h):
     score=0; reasons=[]; buy=0; sell=0
     whale_type,whale_msg=detect_whale(df5m)
     if whale_type=="BULL_LIQ_GRAB":
-        score+=3; reasons.append(f"🐋 {whale_msg} 9/10"); buy+=3
+        score+=3; reasons.append(f"WHALE {whale_msg} 9/10"); buy+=3
     if whale_type=="BEAR_LIQ_GRAB":
-        score+=3; reasons.append(f"🐋 {whale_msg} 9/10"); sell+=3
+        score+=3; reasons.append(f"WHALE {whale_msg} 9/10"); sell+=3
     vol_avg=df5m['volume'].rolling(20).mean().iloc[-1] or 1
-    vol_now=df5m['volume'].iloc[-1]
-    vol_r=vol_now/vol_avg
+    vol_r=df5m['volume'].iloc[-1]/vol_avg
     if vol_r>=1.5:
-        score+=2; reasons.append(f"VOL INCREASE x{vol_r:.1f} REAL BUY"); buy+=2
+        score+=2; reasons.append(f"VOL UP x{vol_r:.1f} REAL"); buy+=2
     elif vol_r>=1.2:
         score+=1; reasons.append(f"VOL UP x{vol_r:.1f}"); buy+=1
-    elif vol_r<=0.6:
-        score-=1; reasons.append(f"VOL DECREASE x{vol_r:.1f} SELL / fake"); sell+=1
-    vol15_avg=df15m['volume'].rolling(20).mean().iloc[-1] or 1
-    vol15_r=df15m['volume'].iloc[-1]/vol15_avg
-    if vol15_r>=1.2:
-        score+=1; reasons.append(f"15M VOL CONFIRM x{vol15_r:.1f}")
-    o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]
-    body=abs(c-o) or 0.0001
-    up_r=(h-max(o,c))/body
-    if len(df5m)>=2:
-        prev_up=(df5m['high'].iloc[-2]-max(df5m['open'].iloc[-2],df5m['close'].iloc[-2]))/(abs(df5m['close'].iloc[-2]-df5m['open'].iloc[-2]) or 0.0001)
-        if up_r>1.5 and prev_up>1.5:
-            score-=2; reasons.append("DOUBLE WICK FAKE top 2x - NO TRADE")
     c0,c1,c2=df5m['close'].iloc[-3:].values
-    mom5=((c0-c1)/c1*100) if c1>0 else 0
-    if c0>c1>c2 and mom5>0.1:
-        score+=1; reasons.append(f"5m 2UP {mom5:.2f}%"); buy+=1
-    if c0<c1<c2 and mom5<-0.1:
-        score+=1; reasons.append(f"5m 2DOWN {mom5:.2f}%"); sell+=1
     r5=rsi(df5m).iloc[-1]
     low_24=df1h['low'].tail(24).min(); high_24=df1h['high'].tail(24).max()
     loc=(price-low_24)/(high_24-low_24)*100 if high_24>low_24 else 50
@@ -162,14 +152,12 @@ def check_other_coin(sym,df5m,df15m,df1h):
         score+=2; reasons.append(f"BOTTOM {loc:.0f}% RSI {r5:.0f} LONG"); buy+=2
     elif loc>80 and r5>60:
         score+=2; reasons.append(f"TOP {loc:.0f}% RSI {r5:.0f} SHORT"); sell+=2
-    if vol_r>=2.5 and body < (h-df5m['low'].iloc[-1])*0.3:
-        score+=2; reasons.append(f"WHALE MANIPULATION vol {vol_r:.1f}x small body"); buy+=1
     score=max(0,min(10,score))
-    if buy>=3 and score>=7:
+    if buy>=2 and score>=6:
         decision="BUY NOW"
-    elif sell>=3 and score>=7:
+    elif sell>=2 and score>=6:
         decision="SELL NOW"
-    elif score>=5:
+    elif score>=4:
         decision="WAIT"
     else:
         decision="NO TRADE"
@@ -185,15 +173,16 @@ def scan_one_symbol(sym, ex):
         if "KOMA" in sym:
             decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r=check_koma(df5m,df15m,df1h)
             print(f"{sym} {session} {kalimoni}:00 | Price {price:.5f} Wick {FLOOR:.5f}-{CEIL:.5f} | {decision} {score}/10")
-            if score>=8 and "BUY" in decision:
+            if score>=6 and ("BUY" in decision or "SELL" in decision):
                 ok,sess=can_send_killzone(sym)
                 if ok:
-                    msg=f"🔥 *{sym} {decision} Score {score}/10 - {sess} PICK*\nPrice {price:.5f}\nWick Ceil {CEIL:.5f} Floor {FLOOR:.5f} Mid {MID:.5f} Flip {FLIP:.5f}\nUp {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n" + "\n".join([f"- {r}" for r in reasons])
+                    emoji="🟢" if "BUY" in decision else "🔴"
+                    msg=f"{emoji} *{sym} {decision} Score {score}/10 - {sess} PICK*\nPrice {price:.5f}\nWick Ceil {CEIL:.5f} Floor {FLOOR:.5f} Mid {MID:.5f} Flip {FLIP:.5f}\nUp {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n" + "\n".join([f"- {r}" for r in reasons])
                     send_telegram(msg); mark_sent(sym)
         else:
             decision,score,reasons,price,vol_r,whale_msg,loc=check_other_coin(sym,df5m,df15m,df1h)
             print(f"{sym} {session} | Price {price:.5f} Vol x{vol_r:.1f} Loc {loc:.0f}% | {decision} {score}/10 | {whale_msg}")
-            if score>=8 and ("BUY" in decision or "SELL" in decision):
+            if score>=6 and ("BUY" in decision or "SELL" in decision):
                 ok,sess=can_send_killzone(sym)
                 if ok:
                     emoji="🟢" if "BUY" in decision else "🔴"
