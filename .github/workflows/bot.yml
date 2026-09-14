@@ -2,41 +2,31 @@ name: KOMA Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    # PEAK HOURS - Every 10 min (High volatility)
+    - cron: '*/10 13-23 * * *'
+    # PEAK HOURS - Every 10 min (Midnight continuation)
+    - cron: '*/10 0-1 * * *'
+    # LOW HOURS - Every 1 hour (Save minutes)
+    - cron: '0 2-12 * * *'
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       
-      - run: pip install ccxt pandas requests python-telegram-bot python-dotenv
+      - name: Install
+        run: pip install ccxt pandas requests python-telegram-bot python-dotenv
 
-      - name: Run Both Bots
+      - name: Scan Market
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          set -e
-          echo "Starting..."
-          python main.py 2>&1 | tee main.log &
-          PID1=$!
-          python koma_engine.py 2>&1 | tee koma.log &
-          PID2=$!
-          
-          sleep 10
-          echo "--- LOGS ---"
-          cat main.log || true
-          cat koma.log || true
-          echo "--- LIVE ---"
-          tail -f main.log koma.log &
-          TAIL_PID=$!
-          
-          # This will make it turn RED immediately if any bot crashes
-          wait $PID1
-          wait $PID2
+          python main.py
+          python koma_engine.py
