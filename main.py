@@ -18,8 +18,8 @@ PICK_HOURS = {"ASIAN":[0,1,2,3],"LONDON":[8,9,10,11],"NEW YORK":[13,14,15,16]}
 SIGNAL_COOLDOWN_MIN = 45
 MAX_SIGNALS_PER_DAY = 6
 
-try: LAST_ALERT = json.load(open("cooldown.json"))
-except: LAST_ALERT = {"count_today":0,"date":datetime.now().strftime('%Y-%m-%d')}
+try: LAST_ALERT = json.load(open("cooldown_other.json"))
+except: LAST_ALERT = {"count_today":0,"date":datetime.now(timezone.utc).strftime('%Y-%m-%d')}
 
 def send_telegram(msg):
     try:
@@ -40,7 +40,7 @@ def can_send(sym, typ, mins):
     if LAST_ALERT.get("count_today",0)>=MAX_SIGNALS_PER_DAY: return False
     if now-LAST_ALERT.get(k,0)>mins*60:
         LAST_ALERT[k]=now; LAST_ALERT["count_today"]=LAST_ALERT.get("count_today",0)+1
-        try: json.dump(LAST_ALERT,open("cooldown.json","w"))
+        try: json.dump(LAST_ALERT,open("cooldown_other.json","w"))
         except: pass
         return True
     return False
@@ -97,9 +97,9 @@ def other_signal(df5m, df15m, df1h, df4h):
     if loc<20 and r5<40 and trend4h!="DOWN": score+=2; reasons.append(f"BOTTOM {loc:.0f}% RSI {r5:.0f}"); buy+=2
     if loc>80 and r5>60 and trend4h!="UP": score+=2; reasons.append(f"TOP {loc:.0f}% RSI {r5:.0f}"); sell+=2
     score=max(0,min(10,score))
-    if buy>=4 and score>=8 and trend4h!="DOWN" and trend1h!="DOWN": decision="BUY NOW"
-    elif sell>=4 and score>=8 and trend4h!="UP" and trend1h!="UP": decision="SELL NOW"
-    elif score>=5: decision="WAIT"
+    if buy>=3 and score>=6 and trend4h!="DOWN" and trend1h!="DOWN": decision="BUY NOW"
+    elif sell>=3 and score>=6 and trend4h!="UP" and trend1h!="UP": decision="SELL NOW"
+    elif score>=4: decision="WAIT"
     else: decision="NO TRADE"
     return decision,score,reasons,price,vol_r,whale_msg,loc,trend4h,trend1h
 
@@ -112,7 +112,7 @@ def scan_one(args):
         df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
         decision,score,reasons,price,vol_r,whale_msg,loc,trend4h,trend1h=other_signal(df5m,df15m,df1h,df4h)
         print(f"{sym} | 4H {trend4h} 1H {trend1h} Vol x{vol_r:.1f} | {decision} {score}/10")
-        if score>=8 and ("BUY" in decision or "SELL" in decision):
+        if score>=6 and ("BUY" in decision or "SELL" in decision):
             if is_pick and can_send(sym,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN):
                 emoji="🟢" if "BUY" in decision else "🔴"
                 msg=f"{emoji} *{sym} {decision} Score {score}/10 - {session} PICK*\n4H {trend4h} | 1H {trend1h}\nPrice {price:.5f} Vol x{vol_r:.1f} Loc {loc:.0f}%\n{whale_msg}\n\n" + "\n".join([f"- {r}" for r in reasons])
@@ -127,7 +127,6 @@ def scan():
     print(f"\n=== SCAN {datetime.now().strftime('%H:%M')} {session} UTC {hour_utc} / Kalimoni {kalimoni} Pick={is_pick} ===")
     if not is_pick:
         print("DEAD ZONE - still scanning but no alert will send")
-    # Fast parallel scan
     tasks = [(sym, ex, session, is_pick) for sym in MANUAL_WATCHLIST]
     with ThreadPoolExecutor(max_workers=5) as executor:
         executor.map(scan_one, tasks)
