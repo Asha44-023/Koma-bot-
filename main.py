@@ -142,4 +142,4 @@ def scan():
 if __name__=="__main__":
     while True:
         scan()
-        time.sleep(20)
+        time.sleep(900)
