@@ -65,7 +65,7 @@ def other_signal(df5m,df15m,df1h,df4h):
     body=abs(c-o) or 0.0001; up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
 
     # FIX: BOTH SIDES = TRAP
-    if low_r>=2.0 and up_r>=2.0:
+    if low_r>=2.5 and up_r>=2.5:
         return "WAIT",2,[f"⚠️ BOTH SIDES Up {up_r:.1f}x Low {low_r:.1f}x - NO TRADE"],price,0,"",50,"RANGE","RANGE",up_r,low_r
 
     trend4h=get_trend(df4h); trend1h=get_trend(df1h); trend15m=get_trend(df15m)
