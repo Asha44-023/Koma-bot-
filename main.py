@@ -15,8 +15,8 @@ TELEGRAM_CHAT=get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 
 MANUAL_WATCHLIST=["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","VELVET/USDT:USDT"]
 PICK_HOURS={"ASIAN":[0,1],"LONDON":[8,9,10,11,12],"NEW YORK":[13,14,15,16,17,18,19,20,21,22,23]}
-SIGNAL_COOLDOWN_MIN=30 # was 120 -> speed
-MAX_SIGNALS_PER_DAY=10 # was 2 -> 10 for 5 coins
+SIGNAL_COOLDOWN_MIN=30
+MAX_SIGNALS_PER_DAY=10
 EXTEND_PCT=0.04
 
 try: LAST_ALERT=json.load(open("cooldown_other.json"))
@@ -39,11 +39,9 @@ def can_send(sym,typ,mins,price):
     k=f"{sym}_{typ}"; now=time.time(); today=datetime.now(timezone.utc).strftime('%Y-%m-%d')
     if LAST_ALERT.get("date")!=today: LAST_ALERT["count_today"]=0; LAST_ALERT["date"]=today
     if LAST_ALERT.get("count_today",0)>=MAX_SIGNALS_PER_DAY: return False
-    # ANTI-SPAM 1% price move
     last_price_key=f"{sym}_{typ}_price"
     last_p=LAST_ALERT.get(last_price_key,0)
-    if last_p!=0 and abs(price-last_p)/price < 0.01:
-        return False
+    if last_p!=0 and abs(price-last_p)/price < 0.01: return False
     if now-LAST_ALERT.get(k,0)>mins*60:
         LAST_ALERT[k]=now; LAST_ALERT[last_price_key]=price; LAST_ALERT["count_today"]+=1
         try: json.dump(LAST_ALERT,open("cooldown_other.json","w"))
@@ -134,7 +132,7 @@ def scan_one(args):
         df15m=pd.DataFrame(ex.fetch_ohlcv(sym,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df1h=pd.DataFrame(ex.fetch_ohlcv(sym,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df4h=pd.DataFrame(ex.fetch_ohlcv(sym,'4h',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        df1d=pd.DataFrame(ex.fetch_ohlcv(sym,'1D',limit=100),columns=['timestamp','open','high','low','close','volume'])
+        df1d=pd.DataFrame(ex.fetch_ohlcv(sym,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
         decision,score,reasons,price,vol_r,_,loc,trend4h,trend1h,up_r,low_r,FLOOR,CEIL,BUY_ZONE_TOP,SELL_ZONE_BOTTOM=other_signal(df5m,df15m,df1h,df4h,df1d)
         print(f"{sym} {price:.5f} | 4H {trend4h} 1H {trend1h} Up {up_r:.1f} Low {low_r:.1f} | {decision} {score}/10 | Zones B {BUY_ZONE_TOP:.5f} S {SELL_ZONE_BOTTOM:.5f}")
         if score>=6 and ("BUY" in decision or "SELL" in decision):
@@ -147,7 +145,7 @@ def scan_one(args):
                 emoji="🟢" if "BUY" in decision else "🔴"
                 msg=f"{emoji} *{sym} {decision} {score}/10 - {session}*\nPrice {price:.5f}\nFloor {FLOOR:.5f} (Buy to {BUY_ZONE_TOP:.5f})\nCeil {CEIL:.5f} (Sell from {SELL_ZONE_BOTTOM:.5f})\nSL {sl:.5f} (-{risk:.2f}%)\nTP1 {tp1:.5f} (+{rew1:.2f}%) TP2 {tp2:.5f} (+{rew2:.2f}%)\n4H {trend4h} | Vol x{vol_r:.1f} | Up {up_r:.1f}x Low {low_r:.1f}x\n"+"\n".join([f"- {r}" for r in reasons])
                 send_telegram(msg)
-    except Exception as e: print(f"Err {sym} {e}")
+    except Exception as e: print(f"Err {sym} {e}"); import traceback; traceback.print_exc()
 
 def scan():
     ex=ccxt.mexc({'enableRateLimit':True})
