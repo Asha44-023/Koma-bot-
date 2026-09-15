@@ -1,6 +1,5 @@
 import os, ccxt, pandas as pd, requests, time, json
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
 
 def get_env_clean(*names):
     return None
@@ -15,11 +14,9 @@ SIGNAL_COOLDOWN_MIN=45
 BODY_EXIT_RATIO=0.55
 FLIP_BREAK_PCT=0.001
 NO_REENTRY_CANDLES=4
-EXTEND_PCT_OTHER=0.02
-EXTEND_PCT_KOMA=0.025
-SL_BUFFER=0.012 # 1.2% below wick - hunt proof you asked
+SL_BUFFER=0.012
 TP_BUFFER=0.006
-SWEEP_DIST_PCT=0.05 # 5% accuracy you asked - price must be within 5% of sweep wick
+SWEEP_DIST_PCT=0.05
 
 try: COOLDOWN_OTHER=json.load(open("cooldown_other.json"))
 except: COOLDOWN_OTHER={"count_today":0,"date":datetime.now(timezone.utc).strftime('%Y-%m-%d'),"flips":{},"exits":{}}
@@ -77,11 +74,17 @@ def scan_koma(ex_public, ex_private, session, is_pick):
     try:
         df5m=pd.DataFrame(ex_public.fetch_ohlcv(SYMBOL,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df1d=pd.DataFrame(ex_public.fetch_ohlcv(SYMBOL,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
+        if len(df5m)<25: return
         o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
-        body=abs(c-o) or 0.0001; body_ratio=body/((h-l) or 0.0001)
+        if h==l:
+            print(f"KOMA SKIP flat candle {c}")
+            return
+        body=abs(c-o) or ((h-l)*0.1) or 0.00001
+        body_ratio=body/((h-l) or 0.00001)
         up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
         price=c; CEIL=df1d['high'].tail(10).max(); FLOOR=df1d['low'].tail(10).min()
         vol=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1] or 1
+        if vol_avg==0: vol_avg=vol or 1
         recent_low=df5m['low'].tail(20).min(); recent_high=df5m['high'].tail(20).max()
         swept_low = l <= recent_low * 1.001; swept_high = h >= recent_high * 0.999
 
@@ -94,8 +97,8 @@ def scan_koma(ex_public, ex_private, session, is_pick):
                     reason=None
                     if side=='short' and c>o and body_ratio>=BODY_EXIT_RATIO: reason=f"BODY {body_ratio:.2f}"
                     if side=='long' and c<o and body_ratio>=BODY_EXIT_RATIO: reason=f"BODY {body_ratio:.2f}"
-                    if side=='short' and c>last_flip*(1+FLIP_BREAK_PCT): reason=f"FLIP BROKE"
-                    if side=='long' and c<last_flip*(1-FLIP_BREAK_PCT): reason=f"FLIP BROKE"
+                    if side=='short' and c > last_flip*(1+FLIP_BREAK_PCT): reason=f"FLIP BROKE"
+                    if side=='long' and c < last_flip*(1-FLIP_BREAK_PCT): reason=f"FLIP BROKE"
                     if up_r>=3.0 and low_r>=3.0: reason=f"BOTH WICKS"
                     if reason:
                         ex_private.create_order(SYMBOL,'market','buy' if side=='short' else 'sell', float(p.get('contracts',0)))
@@ -105,46 +108,51 @@ def scan_koma(ex_public, ex_private, session, is_pick):
                         return
             except Exception as e: print(f"KOMA exit {e}")
 
-        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x vol {vol/vol_avg:.2f}x")
+        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x vol {vol/vol_avg:.2f}x sweptL {swept_low}")
 
         if not is_pick: return
 
         if low_r>=1.2 and swept_low:
             if price > l * (1+SWEEP_DIST_PCT):
-                print(f"SKIP KOMA too far from sweep {l:.5f} -> {price:.5f} > {SWEEP_DIST_PCT*100}%")
+                print(f"SKIP KOMA too far {l:.5f}->{price:.5f}")
                 return
-            if vol < vol_avg*0.90:
-                print(f"SKIP KOMA low vol sweep")
+            if vol < vol_avg*0.25:
+                print(f"SKIP KOMA dead vol {vol/vol_avg:.2f}x")
                 return
             if can_send_koma():
                 COOLDOWN_KOMA.setdefault("flips",{})[SYMBOL]=FLOOR; save_koma()
                 sl=l*(1-SL_BUFFER); risk=price-sl
                 tp1=price+risk*1.5; tp2=price+risk*3.0; tp3=CEIL*(1-TP_BUFFER)
                 score=int(min(low_r/3,1)*50 + min(vol/vol_avg/1.5,1)*50)
-                send_telegram(f"🟢 *KOMA BUY SWEEP Low {low_r:.1f}x at {price:.5f}* SCORE {score} 5% sweep vol {vol/vol_avg:.2f}x\nSL {sl:.5f} below wick {l:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
+                send_telegram(f"🟢 *KOMA BUY SWEEP Low {low_r:.1f}x at {price:.5f}* SCORE {score} 5% dist vol {vol/vol_avg:.2f}x\nSL {sl:.5f} below wick {l:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
 
         if up_r>=1.2 and swept_high:
-            if price < h * (1-SWEEP_DIST_PCT):
-                print(f"SKIP KOMA too far from sweep high")
-                return
+            if price < h * (1-SWEEP_DIST_PCT): return
             if can_send_koma():
                 COOLDOWN_KOMA.setdefault("flips",{})[SYMBOL]=CEIL; save_koma()
                 sl=h*(1+SL_BUFFER); risk=sl-price
                 tp1=price-risk*1.5; tp2=price-risk*3.0; tp3=FLOOR*(1+TP_BUFFER)
                 score=int(min(up_r/3,1)*50 + min(vol/vol_avg/1.5,1)*50)
-                send_telegram(f"🔴 *KOMA SELL SWEEP High {up_r:.1f}x at {price:.5f}* SCORE {score} 5% sweep vol {vol/vol_avg:.2f}x\nSL {sl:.5f} above wick {h:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
-
+                send_telegram(f"🔴 *KOMA SELL SWEEP High {up_r:.1f}x at {price:.5f}* SCORE {score} 5% vol {vol/vol_avg:.2f}x\nSL {sl:.5f} above wick {h:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
     except Exception as e: print(f"KOMA err {e}")
 
 def scan_other_one(sym, ex_public, ex_private, session, is_pick):
     try:
         df5m=pd.DataFrame(ex_public.fetch_ohlcv(sym,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df1d=pd.DataFrame(ex_public.fetch_ohlcv(sym,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
+        if len(df5m)<25:
+            print(f"{sym} SKIP not enough candles")
+            return
         o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
-        body=abs(c-o) or 0.0001; body_ratio=body/((h-l) or 0.0001)
+        if h==l:
+            print(f"{sym} SKIP flat candle")
+            return
+        body=abs(c-o) or ((h-l)*0.1) or 0.00001
+        body_ratio=body/((h-l) or 0.00001)
         up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
         price=c; CEIL=df1d['high'].tail(10).max(); FLOOR=df1d['low'].tail(10).min()
         vol=df5m['volume'].iloc[-1]; vol_avg=df5m['volume'].rolling(20).mean().iloc[-1] or 1
+        if vol_avg==0: vol_avg=vol or 1
         recent_low=df5m['low'].tail(20).min(); recent_high=df5m['high'].tail(20).max()
         swept_low = l <= recent_low * 1.001; swept_high = h >= recent_high * 0.999
 
@@ -174,10 +182,10 @@ def scan_other_one(sym, ex_public, ex_private, session, is_pick):
 
         if low_r>=1.5 and swept_low:
             if price > l * (1+SWEEP_DIST_PCT):
-                print(f"SKIP {sym} too far from sweep {l:.5f} -> {price:.5f} >5%")
+                print(f"SKIP {sym} too far from sweep {l:.5f}->{price:.5f} >5%")
                 return
-            if vol < vol_avg*0.90:
-                print(f"SKIP {sym} low vol fake sweep")
+            if vol < vol_avg*0.25:
+                print(f"SKIP {sym} dead vol {vol/vol_avg:.2f}x no manipulation")
                 return
             if can_send_other(sym, price):
                 COOLDOWN_OTHER.setdefault("flips",{})[sym]=FLOOR; save_other()
@@ -185,11 +193,14 @@ def scan_other_one(sym, ex_public, ex_private, session, is_pick):
                 tp1=price+risk*1.5; tp2=price+risk*3.0; tp3=CEIL*(1-TP_BUFFER)
                 score=int(min(low_r/3,1)*50 + min(vol/vol_avg/1.5,1)*50)
                 dist_pct=(price-l)/l*100
-                send_telegram(f"🟢 *{sym} BUY SWEEP Low {low_r:.1f}x at {price:.5f}* SCORE {score} dist {dist_pct:.2f}% vol {vol/vol_avg:.2f}x\nSL {sl:.5f} below wick {l:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
+                send_telegram(f"🟢 *{sym} BUY SWEEP Low {low_r:.1f}x at {price:.5f}* SCORE {score} dist {dist_pct:.1f}% vol {vol/vol_avg:.2f}x 5% acc\nSL {sl:.5f} below wick {l:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
 
         if up_r>=1.5 and swept_high:
             if price < h * (1-SWEEP_DIST_PCT):
-                print(f"SKIP {sym} too far from sweep high >5%")
+                print(f"SKIP {sym} too far from high sweep >5%")
+                return
+            if vol < vol_avg*0.25:
+                print(f"SKIP {sym} dead vol high")
                 return
             if can_send_other(sym, price):
                 COOLDOWN_OTHER.setdefault("flips",{})[sym]=CEIL; save_other()
@@ -197,8 +208,7 @@ def scan_other_one(sym, ex_public, ex_private, session, is_pick):
                 tp1=price-risk*1.5; tp2=price-risk*3.0; tp3=FLOOR*(1+TP_BUFFER)
                 score=int(min(up_r/3,1)*50 + min(vol/vol_avg/1.5,1)*50)
                 dist_pct=(h-price)/h*100
-                send_telegram(f"🔴 *{sym} SELL SWEEP High {up_r:.1f}x at {price:.5f}* SCORE {score} dist {dist_pct:.2f}% vol {vol/vol_avg:.2f}x\nSL {sl:.5f} above wick {h:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
-
+                send_telegram(f"🔴 *{sym} SELL SWEEP High {up_r:.1f}x at {price:.5f}* SCORE {score} dist {dist_pct:.1f}% vol {vol/vol_avg:.2f}x 5% acc\nSL {sl:.5f} above wick {h:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
     except Exception as e: print(f"{sym} err {e}")
 
 def main():
@@ -206,9 +216,10 @@ def main():
     session,hour_utc,is_pick=get_killzone()
     print(f"\n=== 5% SWEEP SCAN {session} UTC {hour_utc} PICK={is_pick} ===")
     scan_koma(ex_public, ex_private, session, is_pick)
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        for s in OTHER_LIST:
-            pool.submit(scan_other_one, s, ex_public, ex_private, session, is_pick)
+    time.sleep(2)
+    for s in OTHER_LIST:
+        scan_other_one(s, ex_public, ex_private, session, is_pick)
+        time.sleep(3)
 
 if __name__=="__main__":
     for i in range(4):
