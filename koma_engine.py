@@ -17,6 +17,7 @@ PICK_HOURS={"ASIAN":[0,1],"LONDON":[8,9,10,11,12],"NEW YORK":[13,14,15,16,17,18,
 SIGNAL_COOLDOWN_MIN=30
 MAX_SIGNALS_PER_DAY=5
 EXTEND_PCT=0.05
+BODY_EXIT_RATIO=0.65
 
 try: LAST_ALERT=json.load(open("cooldown_koma.json"))
 except: LAST_ALERT={"count_today":0,"date":datetime.now(timezone.utc).strftime('%Y-%m-%d')}
@@ -72,11 +73,13 @@ def check_koma(df5m,df15m,df1h,df1d):
     score=0; reasons=[]; buy=0; sell=0
     o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
     body=abs(c-o) or 0.0001; up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
+    body_ratio=body/((h-l) or 0.0001)
     o1=df1d['open'].iloc[-1]; c1=df1d['close'].iloc[-1]; h1=df1d['high'].iloc[-1]; l1=df1d['low'].iloc[-1]
     body1=abs(c1-o1) or 0.0001; up_r_1d=(h1-max(o1,c1))/body1; low_r_1d=(min(o1,c1)-l1)/body1
 
+    # FIXED: Don't return WAIT on both sides, log it
     if low_r>=3.0 and up_r>=3.0:
-        return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM
+        reasons.append(f"⚠️ BOTH WICKS WHALE Up {up_r:.1f}x Low {low_r:.1f}x - Flip zone")
 
     if low_r>=1.2 and low_r_1d>=1.0: score+=4; reasons.append(f"FRACTAL LOW 1D {low_r_1d:.1f}x + 5m {low_r:.1f}x BUY"); buy+=4
     elif low_r>=1.2: score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f}"); buy+=3
@@ -107,7 +110,7 @@ def check_koma(df5m,df15m,df1h,df1d):
     elif sell>=4 and score>=6 and sell>buy: decision="SELL NOW"
     elif score>=4: decision="WAIT"
     else: decision="NO TRADE"
-    return decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM
+    return decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM,body_ratio
 
 def scan():
     ex=ccxt.mexc({'enableRateLimit':True})
@@ -118,15 +121,38 @@ def scan():
         df5m=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df15m=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df1h=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        # FIXED: 1d not 1D
         df1d=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM=check_koma(df5m,df15m,df1h,df1d)
-        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x | {decision} {score}/10 | BuyZone {BUY_ZONE_TOP:.5f} SellZone {SELL_ZONE_BOTTOM:.5f}")
+
+        # === POSITION EXIT GUARD - WICK + BODY ===
+        price_now=df5m['close'].iloc[-1]
+        o_now=df5m['open'].iloc[-1]; c_now=df5m['close'].iloc[-1]; h_now=df5m['high'].iloc[-1]; l_now=df5m['low'].iloc[-1]
+        body_now=abs(c_now-o_now) or 0.0001; range_now=(h_now-l_now) or 0.0001
+        body_ratio_now=body_now/range_now
+        try:
+            positions=ex.fetch_positions([SYMBOL])
+            for p in positions:
+                contracts=float(p.get('contracts',0) or 0)
+                if contracts==0: continue
+                side=p.get('side','').lower()
+                entry=float(p.get('entryPrice',0))
+                if side=='short' and c_now>o_now and body_ratio_now>=BODY_EXIT_RATIO:
+                    ex.create_order(SYMBOL,'market','buy',contracts)
+                    send_telegram(f"🔴 *KOMA AUTO EXIT SHORT* Body {body_ratio_now:.2f} at {price_now:.5f} | Entry {entry:.5f}")
+                    return
+                if side=='long' and c_now<o_now and body_ratio_now>=BODY_EXIT_RATIO:
+                    ex.create_order(SYMBOL,'market','sell',contracts)
+                    send_telegram(f"🟢 *KOMA AUTO EXIT LONG* Body {body_ratio_now:.2f} at {price_now:.5f} | Entry {entry:.5f}")
+                    return
+        except Exception as e:
+            print(f"KOMA pos check err {e}")
+
+        decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM,body_ratio=check_koma(df5m,df15m,df1h,df1d)
+        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x Body {body_ratio:.2f} | {decision} {score}/10 | BuyZone {BUY_ZONE_TOP:.5f} SellZone {SELL_ZONE_BOTTOM:.5f}")
         if score>=6 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN,price):
             if "BUY" in decision: sl_raw=FLOOR*0.995; sl=max(sl_raw,price*0.99); tp1=price*1.015; tp2=CEIL*0.98; emoji="🟢"
             else: sl_raw=CEIL*1.005; sl=min(sl_raw,price*1.01); tp1=price*0.985; tp2=FLOOR*1.02; emoji="🔴"
             risk_pct=abs(price-sl)/price*100; reward1=abs(tp1-price)/price*100; reward2=abs(tp2-price)/price*100
-            msg=(f"{emoji} *{SYMBOL} {decision} Score {score}/10 - {session} PICK*\nPrice {price:.5f}\nCeil {CEIL:.5f} (SellZone from {SELL_ZONE_BOTTOM:.5f})\nFloor {FLOOR:.5f} (BuyZone to {BUY_ZONE_TOP:.5f})\nFlip {FLIP:.5f} Up {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n*TRADE PLAN:*\nSL {sl:.5f} (-{risk_pct:.2f}%)\nTP1 {tp1:.5f} (+{reward1:.2f}%)\nTP2 {tp2:.5f} (+{reward2:.2f}%)\n\n"+"\n".join([f"- {r}" for r in reasons]))
+            msg=(f"{emoji} *{SYMBOL} {decision} Score {score}/10 - {session} PICK*\nPrice {price:.5f}\nCeil {CEIL:.5f} (SellZone from {SELL_ZONE_BOTTOM:.5f})\nFloor {FLOOR:.5f} (BuyZone to {BUY_ZONE_TOP:.5f})\nFlip {FLIP:.5f} Up {up_r:.1f}x Low {low_r:.1f}x Body {body_ratio:.2f} {kalimoni}:00 Kalimoni\n\n*TRADE PLAN:*\nSL {sl:.5f} (-{risk_pct:.2f}%)\nTP1 {tp1:.5f} (+{reward1:.2f}%)\nTP2 {tp2:.5f} (+{reward2:.2f}%)\n\n"+"\n".join([f"- {r}" for r in reasons]))
             send_telegram(msg)
     except Exception as e:
         print(f"Err KOMA {e}"); import traceback; traceback.print_exc()
