@@ -13,7 +13,6 @@ TELEGRAM_TOKEN=get_env_clean("TELEGRAM_BOT_TOKEN","BOT_TOKEN","TELEGRAM_TOKEN")
 TELEGRAM_CHAT=get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID","TELEGRAM_CHAT")
 
 SYMBOL="KOMA/USDT:USDT"
-# FIXED: NY now 13-23 to match your yaml 13-23 peak - 19 UTC = 3PM NY = LIVE
 PICK_HOURS={"ASIAN":[0,1],"LONDON":[8,9,10,11,12],"NEW YORK":[13,14,15,16,17,18,19,20,21,22,23]}
 SIGNAL_COOLDOWN_MIN=90
 MAX_SIGNALS_PER_DAY=3
@@ -72,7 +71,8 @@ def check_koma(df5m,df15m,df1h):
     body=abs(c-o) or 0.0001
     up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
 
-    if low_r>=2.0 and up_r>=2.0:
+    # PERP EXCEPTION: Only block if BOTH sides >2.5x (real trap)
+    if low_r>=2.5 and up_r>=2.5:
         return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x - NO TRADE"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r
 
     if low_r>=2.0:
@@ -97,9 +97,13 @@ def check_koma(df5m,df15m,df1h):
     if vol_r>=1.2: score+=2; reasons.append(f"VOL REAL x{vol_r:.1f}")
     elif vol_r>=1.0: score+=1; reasons.append(f"VOL x{vol_r:.1f}")
 
+    # MEXC PERP FIX: Big wick = valid even with low vol
+    if (low_r>=2.5 or up_r>=2.5) and vol_r<1.0:
+        reasons.append(f"PERP WICK EXCEPTION Vol {vol_r:.1f}x ignored"); score+=1
+
     score=max(0,min(10,score))
-    if buy>=4 and score>=7 and buy>sell: decision="BUY NOW"
-    elif sell>=4 and score>=7 and sell>buy: decision="SELL NOW"
+    if buy>=3 and score>=6 and buy>sell: decision="BUY NOW"
+    elif sell>=3 and score>=6 and sell>buy: decision="SELL NOW"
     elif score>=4: decision="WAIT"
     else: decision="NO TRADE"
     return decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r
@@ -116,14 +120,16 @@ def scan():
         decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r=check_koma(df5m,df15m,df1h)
         print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x | {decision} {score}/10")
 
-        if score>=7 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN):
+        if score>=6 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN):
             if "BUY" in decision:
-                sl = min(price*0.992, FLOOR*1.002)
+                sl_raw = FLOOR*0.999
+                sl = max(sl_raw, price*0.992) # cap -0.8%
                 tp1 = price*1.012
                 tp2 = FLIP if FLIP>price else price*1.025
                 emoji="🟢"
             else:
-                sl = max(price*1.008, CEIL*0.998)
+                sl_raw = CEIL*1.001
+                sl = min(sl_raw, price*1.008) # cap +0.8%
                 tp1 = price*0.988
                 tp2 = FLIP if FLIP<price else price*0.975
                 emoji="🔴"
