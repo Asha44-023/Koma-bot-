@@ -118,7 +118,8 @@ def scan():
         df5m=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df15m=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df1h=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        df1d=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1D',limit=100),columns=['timestamp','open','high','low','close','volume'])
+        # FIXED: 1d not 1D
+        df1d=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
         decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM=check_koma(df5m,df15m,df1h,df1d)
         print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x | {decision} {score}/10 | BuyZone {BUY_ZONE_TOP:.5f} SellZone {SELL_ZONE_BOTTOM:.5f}")
         if score>=6 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN,price):
