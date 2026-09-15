@@ -16,6 +16,7 @@ SYMBOL="KOMA/USDT:USDT"
 PICK_HOURS={"ASIAN":[0,1],"LONDON":[8,9,10,11,12],"NEW YORK":[13,14,15,16,17,18,19,20,21,22,23]}
 SIGNAL_COOLDOWN_MIN=90
 MAX_SIGNALS_PER_DAY=3
+EXTEND_PCT=0.04 # 4% zone to catch wick early - FIX FOR LATE
 
 try: LAST_ALERT=json.load(open("cooldown_koma.json"))
 except: LAST_ALERT={"count_today":0,"date":datetime.now(timezone.utc).strftime('%Y-%m-%d')}
@@ -50,43 +51,67 @@ def rsi(df,p=14):
         return 100-(100/(1+rs))
     except: return pd.Series([50]*len(df))
 
-def get_wick_levels(df5m):
+def get_wick_levels(df5m, df1d):
     try:
-        high_20=df5m['high'].tail(20).max()
-        low_20=df5m['low'].tail(20).min()
-        mid=(high_20+low_20)/2
-        ceil=high_20
-        floor=low_20
-        flip=df5m['close'].tail(20).median()
-        return ceil,floor,mid,flip
+        # 5m local
+        high_5m=df5m['high'].tail(100).max()
+        low_5m=df5m['low'].tail(100).min()
+        # 1D fractal target - what you said: 1D same as 5m
+        high_1d=df1d['high'].tail(10).max()
+        low_1d=df1d['low'].tail(10).min()
+        # USE 1D AS MAIN CEIL/FLOOR - 5m for flip
+        ceil=high_1d
+        floor=low_1d
+        mid=(ceil+floor)/2
+        flip=df5m['close'].tail(50).median()
+        return ceil,floor,mid,flip,high_5m,low_5m
     except:
         p=df5m['close'].iloc[-1]
-        return p*1.02,p*0.98,p,p
+        return p*1.03,p*0.97,p,p,p*1.02,p*0.98
 
-def check_koma(df5m,df15m,df1h):
+def check_koma(df5m,df15m,df1h,df1d):
     price=df5m['close'].iloc[-1]
-    CEIL,FLOOR,MID,FLIP=get_wick_levels(df5m)
+    CEIL,FLOOR,MID,FLIP,high_5m,low_5m=get_wick_levels(df5m,df1d)
+
+    # EXTENDED ZONE - fixes late entry
+    BUY_ZONE_TOP = FLOOR * (1 + EXTEND_PCT) # ex: 0.0167 -> 0.01736
+    SELL_ZONE_BOTTOM = CEIL * (1 - EXTEND_PCT) # ex: 0.0205 -> 0.01968
+
     score=0; reasons=[]; buy=0; sell=0
     o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
     body=abs(c-o) or 0.0001
     up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
 
-    # FIXED: Only block REAL trap >3.0x BOTH SIDES - was 2.0x (too high)
+    # FRACTAL CHECK - 1D same as 5m
+    o1=df1d['open'].iloc[-1]; c1=df1d['close'].iloc[-1]; h1=df1d['high'].iloc[-1]; l1=df1d['low'].iloc[-1]
+    body1=abs(c1-o1) or 0.0001
+    up_r_1d=(h1-max(o1,c1))/body1; low_r_1d=(min(o1,c1)-l1)/body1
+
     if low_r>=3.0 and up_r>=3.0:
-        return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x - NO TRADE"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r
+        return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM
 
-    # BOTH SIDES 1.2x - WILL CATCH 0.016575 and 0.018
-    if low_r>=1.2:
-        score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f} LONG"); buy+=3
+    # FRACTAL BUY/SELL - 7/10 if both align
+    if low_r>=1.2 and low_r_1d>=1.0:
+        score+=4; reasons.append(f"FRACTAL LOW 1D {low_r_1d:.1f}x + 5m {low_r:.1f}x BUY"); buy+=4
+    elif low_r>=1.2:
+        score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f}"); buy+=3
     elif low_r>=0.8:
-        score+=2; reasons.append(f"LOW WICK {low_r:.1f}x"); buy+=1
+        score+=1; reasons.append(f"LOW WICK {low_r:.1f}x"); buy+=1
 
-    if up_r>=1.2:
-        score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f} SHORT"); sell+=3
+    if up_r>=1.2 and up_r_1d>=1.0:
+        score+=4; reasons.append(f"FRACTAL HIGH 1D {up_r_1d:.1f}x + 5m {up_r:.1f}x SELL"); sell+=4
+    elif up_r>=1.2:
+        score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f}"); sell+=3
     elif up_r>=0.8:
-        score+=2; reasons.append(f"HIGH WICK {up_r:.1f}x"); sell+=1
+        score+=1; reasons.append(f"HIGH WICK {up_r:.1f}x"); sell+=1
 
-    if abs(price-FLIP)/FLIP<0.006:
+    # EXTENDED ZONE ENTRY - bot not late now
+    if price <= BUY_ZONE_TOP and price >= FLOOR*0.97:
+        score+=3; reasons.append(f"IN BUY ZONE {FLOOR:.5f} -> {BUY_ZONE_TOP:.5f} (4% ext)"); buy+=3
+    if price >= SELL_ZONE_BOTTOM and price <= CEIL*1.03:
+        score+=3; reasons.append(f"IN SELL ZONE {SELL_ZONE_BOTTOM:.5f} -> {CEIL:.5f} (4% ext)"); sell+=3
+
+    if abs(price-FLIP)/FLIP<0.008:
         score+=1; reasons.append(f"AT FLIP {FLIP:.5f}")
 
     r5=float(rsi(df5m).iloc[-1])
@@ -98,16 +123,15 @@ def check_koma(df5m,df15m,df1h):
     if vol_r>=1.2: score+=2; reasons.append(f"VOL REAL x{vol_r:.1f}")
     elif vol_r>=1.0: score+=1; reasons.append(f"VOL x{vol_r:.1f}")
 
-    # FIXED: PERP EXCEPTION for 1.2x BOTH SIDES - will ignore low vol at 0.016575 and 0.018
     if (low_r>=1.2 or up_r>=1.2) and vol_r<1.0:
         reasons.append(f"PERP WICK EXCEPTION Vol {vol_r:.1f}x ignored"); score+=1
 
     score=max(0,min(10,score))
-    if buy>=3 and score>=6 and buy>sell: decision="BUY NOW"
-    elif sell>=3 and score>=6 and sell>buy: decision="SELL NOW"
+    if buy>=4 and score>=6 and buy>sell: decision="BUY NOW"
+    elif sell>=4 and score>=6 and sell>buy: decision="SELL NOW"
     elif score>=4: decision="WAIT"
     else: decision="NO TRADE"
-    return decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r
+    return decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM
 
 def scan():
     ex=ccxt.mexc({'enableRateLimit':True})
@@ -118,21 +142,23 @@ def scan():
         df5m=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df15m=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'15m',limit=100),columns=['timestamp','open','high','low','close','volume'])
         df1h=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1h',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r=check_koma(df5m,df15m,df1h)
-        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x | {decision} {score}/10")
+        df1d=pd.DataFrame(ex.fetch_ohlcv(SYMBOL,'1D',limit=100),columns=['timestamp','open','high','low','close','volume'])
+
+        decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM=check_koma(df5m,df15m,df1h,df1d)
+        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x | {decision} {score}/10 | BuyZone {BUY_ZONE_TOP:.5f} SellZone {SELL_ZONE_BOTTOM:.5f}")
 
         if score>=6 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN):
             if "BUY" in decision:
-                sl_raw = FLOOR*0.999
-                sl = max(sl_raw, price*0.992)
-                tp1 = price*1.012
-                tp2 = FLIP if FLIP>price else price*1.025
+                sl_raw = FLOOR*0.995
+                sl = max(sl_raw, price*0.99)
+                tp1 = price*1.015
+                tp2 = CEIL*0.98
                 emoji="🟢"
             else:
-                sl_raw = CEIL*1.001
-                sl = min(sl_raw, price*1.008)
-                tp1 = price*0.988
-                tp2 = FLIP if FLIP<price else price*0.975
+                sl_raw = CEIL*1.005
+                sl = min(sl_raw, price*1.01)
+                tp1 = price*0.985
+                tp2 = FLOOR*1.02
                 emoji="🔴"
 
             risk_pct = abs(price-sl)/price*100
@@ -142,8 +168,9 @@ def scan():
             msg=(
                 f"{emoji} *{SYMBOL} {decision} Score {score}/10 - {session} PICK*\n"
                 f"Price {price:.5f}\n"
-                f"Ceil {CEIL:.5f} Floor {FLOOR:.5f} Flip {FLIP:.5f}\n"
-                f"Up {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n"
+                f"Ceil {CEIL:.5f} (SellZone from {SELL_ZONE_BOTTOM:.5f})\n"
+                f"Floor {FLOOR:.5f} (BuyZone to {BUY_ZONE_TOP:.5f})\n"
+                f"Flip {FLIP:.5f} Up {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n"
                 f"*TRADE PLAN:*\n"
                 f"SL {sl:.5f} (-{risk_pct:.2f}%)\n"
                 f"TP1 {tp1:.5f} (+{reward1:.2f}%)\n"
@@ -153,6 +180,7 @@ def scan():
             send_telegram(msg)
     except Exception as e:
         print(f"Err KOMA {e}")
+        import traceback; traceback.print_exc()
 
 if __name__=="__main__":
     scan()
