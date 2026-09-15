@@ -64,7 +64,7 @@ def other_signal(df5m,df15m,df1h,df4h):
     o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
     body=abs(c-o) or 0.0001; up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
 
-    # FIX: BOTH SIDES = TRAP
+    # FIX BOTH SIDES = TRAP - PERP
     if low_r>=2.5 and up_r>=2.5:
         return "WAIT",2,[f"⚠️ BOTH SIDES Up {up_r:.1f}x Low {low_r:.1f}x - NO TRADE"],price,0,"",50,"RANGE","RANGE",up_r,low_r
 
@@ -81,6 +81,11 @@ def other_signal(df5m,df15m,df1h,df4h):
         score+=1; reasons.append(f"High wick {up_r:.1f}x"); sell+=1
 
     vol_r=df5m['volume'].iloc[-1]/(df5m['volume'].rolling(20).mean().iloc[-1] or 1)
+    # PERP WICK EXCEPTION - BIG WICK IGNORES LOW VOL FOR BOTH BUY+SELL
+    if (low_r>=2.5 or up_r>=2.5) and vol_r<1.0:
+        vol_r=1.6
+        reasons.append(f"PERP WICK EXCEPTION vol->1.6x")
+
     if vol_r>=1.5: score+=2; reasons.append(f"VOL UP x{vol_r:.1f}"); buy+=2; sell+=2
 
     c0,c1,c2=df5m['close'].iloc[-3:].values
@@ -94,8 +99,9 @@ def other_signal(df5m,df15m,df1h,df4h):
     if loc>80 and r5>60 and trend4h!="UP": score+=2; reasons.append(f"TOP {loc:.0f}% RSI {r5:.0f}"); sell+=2
 
     score=max(0,min(10,score))
-    if buy>=4 and score>=7 and trend4h!="DOWN" and trend1h!="DOWN": decision="BUY NOW"
-    elif sell>=4 and score>=7 and trend4h!="UP" and trend1h!="UP": decision="SELL NOW"
+    # FIX: BOTH SIDES BUY>=3 SELL>=3 SCORE 7
+    if buy>=3 and score>=7 and trend4h!="DOWN" and trend1h!="DOWN": decision="BUY NOW"
+    elif sell>=3 and score>=7 and trend4h!="UP" and trend1h!="UP": decision="SELL NOW"
     elif score>=4: decision="WAIT"
     else: decision="NO TRADE"
     return decision,score,reasons,price,vol_r,"",loc,trend4h,trend1h,up_r,low_r
@@ -124,7 +130,7 @@ def scan_one(args):
 def scan():
     ex=ccxt.mexc({'enableRateLimit':True})
     session,hour_utc,is_pick=get_killzone()
-    print(f"\n=== OTHER SCAN {session} UTC {hour_utc} Pick={is_pick} ===")
+    print(f"\n=== OTHER PERP SCAN {session} UTC {hour_utc} Pick={is_pick} ===")
     tasks=[(s,ex,session,is_pick) for s in MANUAL_WATCHLIST]
     with ThreadPoolExecutor(max_workers=5) as ex2: ex2.map(scan_one,tasks)
 
