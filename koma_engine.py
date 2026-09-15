@@ -71,16 +71,16 @@ def check_koma(df5m,df15m,df1h):
     body=abs(c-o) or 0.0001
     up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
 
-    # PERP EXCEPTION: Only block if BOTH sides >2.5x (real trap)
-    if low_r>=2.5 and up_r>=2.5:
+    # PERP EXCEPTION: Only block if BOTH sides >2.0x (real trap)
+    if low_r>=2.0 and up_r>=2.0:
         return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x - NO TRADE"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r
 
-    if low_r>=2.5:
+    if low_r>=2.0:
         score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f} LONG"); buy+=3
     elif low_r>=1.2:
         score+=2; reasons.append(f"LOW WICK {low_r:.1f}x"); buy+=1
 
-    if up_r>=2.5:
+    if up_r>=2.0:
         score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f} SHORT"); sell+=3
     elif up_r>=1.2:
         score+=2; reasons.append(f"HIGH WICK {up_r:.1f}x"); sell+=1
