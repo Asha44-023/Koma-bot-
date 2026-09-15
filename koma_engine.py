@@ -71,18 +71,19 @@ def check_koma(df5m,df15m,df1h):
     body=abs(c-o) or 0.0001
     up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
 
-    # PERP EXCEPTION: Only block if BOTH sides >2.0x (real trap)
-    if low_r>=2.0 and up_r>=2.0:
+    # FIXED: Only block REAL trap >3.0x BOTH SIDES - was 2.0x (too high)
+    if low_r>=3.0 and up_r>=3.0:
         return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x - NO TRADE"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r
 
-    if low_r>=2.0:
+    # BOTH SIDES 1.2x - WILL CATCH 0.016575 and 0.018
+    if low_r>=1.2:
         score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f} LONG"); buy+=3
-    elif low_r>=1.2:
+    elif low_r>=0.8:
         score+=2; reasons.append(f"LOW WICK {low_r:.1f}x"); buy+=1
 
-    if up_r>=2.0:
+    if up_r>=1.2:
         score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f} SHORT"); sell+=3
-    elif up_r>=1.2:
+    elif up_r>=0.8:
         score+=2; reasons.append(f"HIGH WICK {up_r:.1f}x"); sell+=1
 
     if abs(price-FLIP)/FLIP<0.006:
@@ -97,8 +98,8 @@ def check_koma(df5m,df15m,df1h):
     if vol_r>=1.2: score+=2; reasons.append(f"VOL REAL x{vol_r:.1f}")
     elif vol_r>=1.0: score+=1; reasons.append(f"VOL x{vol_r:.1f}")
 
-    # MEXC PERP FIX: Big wick = valid even with low vol
-    if (low_r>=2.5 or up_r>=2.5) and vol_r<1.0:
+    # FIXED: PERP EXCEPTION for 1.2x BOTH SIDES - will ignore low vol at 0.016575 and 0.018
+    if (low_r>=1.2 or up_r>=1.2) and vol_r<1.0:
         reasons.append(f"PERP WICK EXCEPTION Vol {vol_r:.1f}x ignored"); score+=1
 
     score=max(0,min(10,score))
@@ -123,13 +124,13 @@ def scan():
         if score>=6 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN):
             if "BUY" in decision:
                 sl_raw = FLOOR*0.999
-                sl = max(sl_raw, price*0.992) # cap -0.8%
+                sl = max(sl_raw, price*0.992)
                 tp1 = price*1.012
                 tp2 = FLIP if FLIP>price else price*1.025
                 emoji="🟢"
             else:
                 sl_raw = CEIL*1.001
-                sl = min(sl_raw, price*1.008) # cap +0.8%
+                sl = min(sl_raw, price*1.008)
                 tp1 = price*0.988
                 tp2 = FLIP if FLIP<price else price*0.975
                 emoji="🔴"
