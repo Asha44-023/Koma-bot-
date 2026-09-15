@@ -157,10 +157,6 @@ def scan():
     with ThreadPoolExecutor(max_workers=5) as ex2: ex2.map(scan_one,tasks)
 
 if __name__=="__main__":
-    while True:
-        session,hour_utc,is_pick=get_killzone()
+    for i in range(4):
         scan()
-        if is_pick:
-            time.sleep(60) # 1 min PICK = speed
-        else:
-            time.sleep(300) # 5 min DEAD = no spam
+        if i<3: time.sleep(60)
