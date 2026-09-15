@@ -38,11 +38,9 @@ def can_send(sym,typ,mins,price):
     k=f"{sym}_{typ}"; now=time.time(); today=datetime.now(timezone.utc).strftime('%Y-%m-%d')
     if LAST_ALERT.get("date")!=today: LAST_ALERT["count_today"]=0; LAST_ALERT["date"]=today
     if LAST_ALERT.get("count_today",0)>=MAX_SIGNALS_PER_DAY: return False
-    # ANTI-SPAM: same price within 1% = ignore
     last_price_key=f"{sym}_{typ}_price"
     last_p=LAST_ALERT.get(last_price_key,0)
-    if last_p!=0 and abs(price-last_p)/price < 0.01:
-        return False
+    if last_p!=0 and abs(price-last_p)/price < 0.01: return False
     if now-LAST_ALERT.get(k,0)>mins*60:
         LAST_ALERT[k]=now; LAST_ALERT[last_price_key]=price; LAST_ALERT["count_today"]+=1
         try: json.dump(LAST_ALERT,open("cooldown_koma.json","w"))
@@ -58,10 +56,8 @@ def rsi(df,p=14):
 
 def get_wick_levels(df5m, df1d):
     try:
-        high_5m=df5m['high'].tail(100).max()
-        low_5m=df5m['low'].tail(100).min()
-        high_1d=df1d['high'].tail(10).max()
-        low_1d=df1d['low'].tail(10).min()
+        high_5m=df5m['high'].tail(100).max(); low_5m=df5m['low'].tail(100).min()
+        high_1d=df1d['high'].tail(10).max(); low_1d=df1d['low'].tail(10).min()
         ceil=high_1d; floor=low_1d; mid=(ceil+floor)/2; flip=df5m['close'].tail(50).median()
         return ceil,floor,mid,flip,high_5m,low_5m
     except:
@@ -75,36 +71,24 @@ def check_koma(df5m,df15m,df1h,df1d):
     SELL_ZONE_BOTTOM = CEIL * (1 - EXTEND_PCT)
     score=0; reasons=[]; buy=0; sell=0
     o=df5m['open'].iloc[-1]; c=df5m['close'].iloc[-1]; h=df5m['high'].iloc[-1]; l=df5m['low'].iloc[-1]
-    body=abs(c-o) or 0.0001
-    up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
+    body=abs(c-o) or 0.0001; up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
     o1=df1d['open'].iloc[-1]; c1=df1d['close'].iloc[-1]; h1=df1d['high'].iloc[-1]; l1=df1d['low'].iloc[-1]
-    body1=abs(c1-o1) or 0.0001
-    up_r_1d=(h1-max(o1,c1))/body1; low_r_1d=(min(o1,c1)-l1)/body1
+    body1=abs(c1-o1) or 0.0001; up_r_1d=(h1-max(o1,c1))/body1; low_r_1d=(min(o1,c1)-l1)/body1
 
     if low_r>=3.0 and up_r>=3.0:
         return "WAIT",2,[f"⚠️ BOTH SIDES WHALE Up {up_r:.1f}x Low {low_r:.1f}x"],CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM
 
-    if low_r>=1.2 and low_r_1d>=1.0:
-        score+=4; reasons.append(f"FRACTAL LOW 1D {low_r_1d:.1f}x + 5m {low_r:.1f}x BUY"); buy+=4
-    elif low_r>=1.2:
-        score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f}"); buy+=3
-    elif low_r>=0.8:
-        score+=1; reasons.append(f"LOW WICK {low_r:.1f}x"); buy+=1
+    if low_r>=1.2 and low_r_1d>=1.0: score+=4; reasons.append(f"FRACTAL LOW 1D {low_r_1d:.1f}x + 5m {low_r:.1f}x BUY"); buy+=4
+    elif low_r>=1.2: score+=3; reasons.append(f"LOW GRAB {low_r:.1f}x FLOOR {FLOOR:.5f}"); buy+=3
+    elif low_r>=0.8: score+=1; reasons.append(f"LOW WICK {low_r:.1f}x"); buy+=1
+    if up_r>=1.2 and up_r_1d>=1.0: score+=4; reasons.append(f"FRACTAL HIGH 1D {up_r_1d:.1f}x + 5m {up_r:.1f}x SELL"); sell+=4
+    elif up_r>=1.2: score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f}"); sell+=3
+    elif up_r>=0.8: score+=1; reasons.append(f"HIGH WICK {up_r:.1f}x"); sell+=1
 
-    if up_r>=1.2 and up_r_1d>=1.0:
-        score+=4; reasons.append(f"FRACTAL HIGH 1D {up_r_1d:.1f}x + 5m {up_r:.1f}x SELL"); sell+=4
-    elif up_r>=1.2:
-        score+=3; reasons.append(f"HIGH GRAB {up_r:.1f}x CEIL {CEIL:.5f}"); sell+=3
-    elif up_r>=0.8:
-        score+=1; reasons.append(f"HIGH WICK {up_r:.1f}x"); sell+=1
+    if price <= BUY_ZONE_TOP and price >= FLOOR*0.97: score+=3; reasons.append(f"IN BUY ZONE {FLOOR:.5f} -> {BUY_ZONE_TOP:.5f} (5% ext)"); buy+=3
+    if price >= SELL_ZONE_BOTTOM and price <= CEIL*1.03: score+=3; reasons.append(f"IN SELL ZONE {SELL_ZONE_BOTTOM:.5f} -> {CEIL:.5f} (5% ext)"); sell+=3
 
-    if price <= BUY_ZONE_TOP and price >= FLOOR*0.97:
-        score+=3; reasons.append(f"IN BUY ZONE {FLOOR:.5f} -> {BUY_ZONE_TOP:.5f} (5% ext)"); buy+=3
-    if price >= SELL_ZONE_BOTTOM and price <= CEIL*1.03:
-        score+=3; reasons.append(f"IN SELL ZONE {SELL_ZONE_BOTTOM:.5f} -> {CEIL:.5f} (5% ext)"); sell+=3
-
-    if abs(price-FLIP)/FLIP<0.008:
-        score+=1; reasons.append(f"AT FLIP {FLIP:.5f}")
+    if abs(price-FLIP)/FLIP<0.008: score+=1; reasons.append(f"AT FLIP {FLIP:.5f}")
 
     r5=float(rsi(df5m).iloc[-1])
     if r5<35: score+=2; reasons.append(f"RSI OS {r5:.0f} BUY"); buy+=2
@@ -138,33 +122,15 @@ def scan():
         decision,score,reasons,CEIL,FLOOR,MID,FLIP,price,up_r,low_r,BUY_ZONE_TOP,SELL_ZONE_BOTTOM=check_koma(df5m,df15m,df1h,df1d)
         print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x | {decision} {score}/10 | BuyZone {BUY_ZONE_TOP:.5f} SellZone {SELL_ZONE_BOTTOM:.5f}")
         if score>=6 and ("BUY" in decision or "SELL" in decision) and is_pick and can_send(SYMBOL,f"{decision}_{session}",SIGNAL_COOLDOWN_MIN,price):
-            if "BUY" in decision:
-                sl_raw = FLOOR*0.995; sl = max(sl_raw, price*0.99); tp1 = price*1.015; tp2 = CEIL*0.98; emoji="🟢"
-            else:
-                sl_raw = CEIL*1.005; sl = min(sl_raw, price*1.01); tp1 = price*0.985; tp2 = FLOOR*1.02; emoji="🔴"
-            risk_pct = abs(price-sl)/price*100; reward1 = abs(tp1-price)/price*100; reward2 = abs(tp2-price)/price*100
-            msg=(
-                f"{emoji} *{SYMBOL} {decision} Score {score}/10 - {session} PICK*\n"
-                f"Price {price:.5f}\n"
-                f"Ceil {CEIL:.5f} (SellZone from {SELL_ZONE_BOTTOM:.5f})\n"
-                f"Floor {FLOOR:.5f} (BuyZone to {BUY_ZONE_TOP:.5f})\n"
-                f"Flip {FLIP:.5f} Up {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n"
-                f"*TRADE PLAN:*\n"
-                f"SL {sl:.5f} (-{risk_pct:.2f}%)\n"
-                f"TP1 {tp1:.5f} (+{reward1:.2f}%)\n"
-                f"TP2 {tp2:.5f} (+{reward2:.2f}%)\n\n"
-                +"\n".join([f"- {r}" for r in reasons])
-            )
+            if "BUY" in decision: sl_raw=FLOOR*0.995; sl=max(sl_raw,price*0.99); tp1=price*1.015; tp2=CEIL*0.98; emoji="🟢"
+            else: sl_raw=CEIL*1.005; sl=min(sl_raw,price*1.01); tp1=price*0.985; tp2=FLOOR*1.02; emoji="🔴"
+            risk_pct=abs(price-sl)/price*100; reward1=abs(tp1-price)/price*100; reward2=abs(tp2-price)/price*100
+            msg=(f"{emoji} *{SYMBOL} {decision} Score {score}/10 - {session} PICK*\nPrice {price:.5f}\nCeil {CEIL:.5f} (SellZone from {SELL_ZONE_BOTTOM:.5f})\nFloor {FLOOR:.5f} (BuyZone to {BUY_ZONE_TOP:.5f})\nFlip {FLIP:.5f} Up {up_r:.1f}x Low {low_r:.1f}x {kalimoni}:00 Kalimoni\n\n*TRADE PLAN:*\nSL {sl:.5f} (-{risk_pct:.2f}%)\nTP1 {tp1:.5f} (+{reward1:.2f}%)\nTP2 {tp2:.5f} (+{reward2:.2f}%)\n\n"+"\n".join([f"- {r}" for r in reasons]))
             send_telegram(msg)
     except Exception as e:
-        print(f"Err KOMA {e}")
-        import traceback; traceback.print_exc()
+        print(f"Err KOMA {e}"); import traceback; traceback.print_exc()
 
 if __name__=="__main__":
-    while True:
-        session, hour_utc, is_pick = get_killzone()
+    for i in range(4):
         scan()
-        if is_pick:
-            time.sleep(60)
-        else:
-            time.sleep(300)
+        if i<3: time.sleep(60)
