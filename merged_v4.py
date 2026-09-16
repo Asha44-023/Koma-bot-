@@ -1,9 +1,9 @@
-import time, json, os, requests
+import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
-SIGNAL_COOLDOWN_MIN = 30
+SIGNAL_COOLDOWN_MIN = 120 # ANTI-SPAM 2 HOURS
 VOL_OVERALL_MIN = 1.2
 ACCUM_RANGE_PCT = 0.8
 VOL_POOL_BREAK_PCT = 45
@@ -43,7 +43,6 @@ def get_data(sym):
         up_r = (highs[-1] - max(opens[-1],closes[-1])) / body
         swept_low = lows[-1] < min(lows[-10:-1]); swept_high = highs[-1] > max(highs[-10:-1])
         bullish = closes[-1] > opens[-1]; bearish = not bullish
-
         accum_hours = 0; accum_start_idx = len(r)-1
         for i in range(len(r)-1, 10, -1):
             window = r[max(0,i-24):i]
@@ -52,14 +51,12 @@ def get_data(sym):
             range_pct = (wh-wl)/wp*100 if wp else 100
             if range_pct > ACCUM_RANGE_PCT: break
             accum_hours += 5/60; accum_start_idx = i
-
         recent_vols = vols[max(0,accum_start_idx):] if accum_hours>=0.5 else vols[-36:]
         pool_vol = sum(recent_vols) if recent_vols else 1
         vol_pool_pct = (vols[-1]/pool_vol*100) if pool_vol else 0
         recent_range_pct = (max(highs[-36:])-min(lows[-36:]))/price*100 if len(highs)>=36 else 100
         accum_high = max(highs[accum_start_idx:]) if accum_hours>=0.5 else max(highs[-36:])
         accum_low = min(lows[accum_start_idx:]) if accum_hours>=0.5 else min(lows[-36:])
-
         try:
             rd = requests.get("https://api.mexc.com/api/v3/klines",
                               params={"symbol":sym,"interval":"1d","limit":3}, timeout=10).json()
@@ -67,7 +64,6 @@ def get_data(sym):
             prev_low = float(rd[-2][3]) if len(rd)>=2 else min(lows[-20:])
         except:
             prev_high = max(highs[-20:]); prev_low = min(lows[-20:])
-
         return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"bullish":bullish,"bearish":bearish,"swept_low":swept_low,"swept_high":swept_high,"accum_hours":accum_hours,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"avg_body":avg_body,"last_body":body,"vol_x_avg":v1t}
     except Exception as e:
         print(f"{sym} err {e}", flush=True); return None
@@ -75,8 +71,6 @@ def get_data(sym):
 def scan(sym):
     d = get_data(sym)
     if not d: return
-
-    # V9 FINAL - HARD BLOCK YOUR 9%/10% + 0.0h
     if d["accum_hours"] < 0.5: return
     if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: return
     if d["recent_range_pct"] < 0.3: return
@@ -86,16 +80,16 @@ def scan(sym):
     def can_send(side):
         now=time.time()
         last = COOLDOWN.get("signals",{}).get(sym)
-        if last and now-last < SIGNAL_COOLDOWN_MIN*60: return False
         last_side = COOLDOWN.get("last_side",{}).get(sym)
-        if last_side == side and last and now-last < 300: return False
+        # ANTI-SPAM: same coin 2 hours, same side 2h, opposite side 30min
+        if last and now-last < SIGNAL_COOLDOWN_MIN*60: return False
+        if last_side == side and last and now-last < 7200: return False
+        if last_side!= side and last and now-last < 1800: return False
         COOLDOWN["signals"][sym]=now; COOLDOWN["last_side"][sym]=side; save_cooldown(); return True
 
     price = d["price"]
-
     is_pin_long = (d["low_r"]>=1.5 and d["swept_low"]) or (d["v1t"]>=1.2 and d["low_r"]>=1.8 and d["bullish"])
     is_vol_break_long = d["accum_hours"]>=2.0 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"]
-
     if is_pin_long or is_vol_break_long:
         if can_send("BUY"):
             sl = min(d["accum_low"], d["prev_low"]) * 0.998
@@ -107,7 +101,6 @@ def scan(sym):
 
     is_pin_short = (d["up_r"]>=1.5 and d["swept_high"]) or (d["v1t"]>=1.2 and d["up_r"]>=1.8 and d["bearish"])
     is_vol_break_short = d["accum_hours"]>=2.0 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price < d["accum_low"]
-
     if is_pin_short or is_vol_break_short:
         if can_send("SELL"):
             sl = max(d["accum_high"], d["prev_high"]) * 1.002
@@ -116,14 +109,17 @@ def scan(sym):
             typ = "VOL BREAK" if is_vol_break_short else "PIN BAR"
             send_telegram(f"🔴 {sym} SELL {typ}\nEntry: {price:.6f} NOW\nAccum: {d['accum_hours']:.1f}h Vol {d['vol_pool_pct']:.0f}% pool Range {d['recent_range_pct']:.2f}%\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
-print(f"=== BOT V9 FINAL - NO 0.0h NO 10% ===", flush=True)
-print(f"Symbols: {SYMBOLS}", flush=True)
+ONCE = "--once" in sys.argv
+print(f"=== BOT V9.2 BEST - ANTI-SPAM 2H ===", flush=True)
 
-while True:
+if ONCE:
     for sym in SYMBOLS:
         try: scan(sym)
         except Exception as e: print(e, flush=True)
-    now = datetime.now(ZoneInfo("Africa/Nairobi"))
-    wait = 300 - (now.minute % 5 * 60 + now.second)
-    if wait < 10: wait += 300
-    time.sleep(wait)
+    print("Done scan.", flush=True)
+else:
+    while True:
+        for sym in SYMBOLS:
+            try: scan(sym)
+            except Exception as e: print(e, flush=True)
+        time.sleep(300)
