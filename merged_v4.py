@@ -2,14 +2,16 @@ import time, json, os, requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-SYMBOLS = ["KOMAUSDT","VINEUSDT","BANKUSDT","NCTUSDT","AITECHUSDT","ALCHUSDT"]
+# GRASS etc list - using MEXC spot format for this logic
+SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
 SIGNAL_COOLDOWN_MIN = 30
 NO_REENTRY_CANDLES = 4
 WHALE_WICK = 2.0
 VOL_OVERALL_MIN = 1.2
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN","")
-TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT","")
+# Supports BOTH your old and new telegram env names
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
 COOLDOWN_FILE = "cooldown.json"
 COOLDOWN = {"signals":{}, "exits":{}, "last_side":{}}
 if os.path.exists(COOLDOWN_FILE):
@@ -20,12 +22,15 @@ def save_cooldown():
     with open(COOLDOWN_FILE,"w") as f: json.dump(COOLDOWN,f)
 
 def send_telegram(msg):
-    print(msg)
-    if not TELEGRAM_TOKEN: return
+    print(msg, flush=True)
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+        print(f"Telegram env missing - token:{bool(TELEGRAM_TOKEN)} chat:{bool(TELEGRAM_CHAT)}", flush=True)
+        return
     try:
         requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                      params={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=10)
-    except: pass
+    except Exception as e:
+        print(f"Telegram err {e}", flush=True)
 
 def get_data(sym):
     try:
@@ -63,7 +68,6 @@ def get_data(sym):
         mid = (FLOOR+CEIL)/2
         is_middle = abs(price-mid)/mid < 0.02
 
-        # Pick session - 10am-10pm Nairobi
         nairobi_h = datetime.now(ZoneInfo("Africa/Nairobi")).hour
         is_pick = 10 <= nairobi_h <= 22
         session = "PICK" if is_pick else "OFF"
@@ -77,7 +81,7 @@ def get_data(sym):
             "session":session,"is_pick":is_pick,"is_middle":is_middle
         }
     except Exception as e:
-        print(f"{sym} err {e}")
+        print(f"{sym} err {e}", flush=True)
         return None
 
 def scan(sym):
@@ -122,13 +126,29 @@ def scan(sym):
         tp = price - (sl-price)*2.0
         send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}]")
 
+# FIXED LOOP
+START_TIME = time.time()
+MAX_RUNTIME = 60 * 60
+
+print(f"=== BOT STARTED GRASS LIST + MESSED LOGIC ===", flush=True)
+print(f"Nairobi: {datetime.now(ZoneInfo('Africa/Nairobi'))} | Max 60 min", flush=True)
+print(f"Symbols: {SYMBOLS}", flush=True)
+print(f"Telegram token set: {bool(TELEGRAM_TOKEN)} chat set: {bool(TELEGRAM_CHAT)}", flush=True)
+
 while True:
+    elapsed = time.time() - START_TIME
+    if elapsed > MAX_RUNTIME:
+        print(f"60 min reached - stopping", flush=True)
+        break
+
     nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
     if 0 <= nairobi.hour < 9:
-        print(f"Sleep mode 0-9am - Nairobi {nairobi.strftime('%H:%M:%S')} - waiting till 9am", flush=True)
+        print(f"[{nairobi.strftime('%H:%M:%S')}] Sleep 0-9am | {elapsed/60:.1f}m", flush=True)
         time.sleep(60)
         continue
+
+    print(f"[{nairobi.strftime('%H:%M:%S')}] Scanning... {elapsed/60:.1f}m/60m", flush=True)
     for sym in SYMBOLS:
         try: scan(sym)
-        except Exception as e: print(e)
+        except Exception as e: print(e, flush=True)
     time.sleep(30)
