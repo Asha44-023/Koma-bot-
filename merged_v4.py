@@ -3,13 +3,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
-SCAN_ALL_USDT = True # True = scan all USDTs, False = only 6 above
 SIGNAL_COOLDOWN_MIN = 30
 WHALE_WICK = 1.8
 VOL_OVERALL_MIN = 1.2
-ACCUM_RANGE_PCT = 0.8 # flat like VELVET 0.0511-0.0516
+ACCUM_RANGE_PCT = 0.8
 ACCUM_MIN_HOURS = 2.0
-VOL_POOL_BREAK_PCT = 45 # need 45% of pool in 1 candle
+VOL_POOL_BREAK_PCT = 45
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
@@ -31,13 +30,6 @@ def send_telegram(msg):
                      params={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=10)
     except: pass
 
-def get_all_usdt_symbols():
-    try:
-        r = requests.get("https://api.mexc.com/api/v3/exchangeInfo", timeout=10).json()
-        return [s["symbol"] for s in r["symbols"] if s["quoteAsset"]=="USDT" and s["status"]=="ENABLED"]
-    except:
-        return SYMBOLS
-
 def get_data(sym):
     try:
         r = requests.get("https://api.mexc.com/api/v3/klines",
@@ -45,13 +37,11 @@ def get_data(sym):
         if not r or len(r)<50: return None
         closes = [float(x[4]) for x in r]; highs = [float(x[2]) for x in r]; lows = [float(x[3]) for x in r]; opens = [float(x[1]) for x in r]; vols = [float(x[5]) for x in r]
         price = closes[-1]; avg_50 = sum(vols)/len(vols) if vols else 1
-        v1t = vols[-1]/avg_50 if avg_50 else 1; v5t = sum(vols[-5:])/5/avg_50 if avg_50 else 1
+        v1t = vols[-1]/avg_50 if avg_50 else 1
         body = abs(closes[-1]-opens[-1]) + 0.000001
         avg_body = sum([abs(closes[i]-opens[i]) for i in range(-20,-1)])/20 + 0.000001
         low_r = (min(opens[-1],closes[-1]) - lows[-1]) / body
         up_r = (highs[-1] - max(opens[-1],closes[-1])) / body
-        FLOOR = min(lows[-20:]); CEIL = max(highs[-20:]); LOCAL_FLOOR = min(lows[-5:]); LOCAL_CEIL = max(highs[-5:])
-        near_floor = price < FLOOR*1.02; near_ceiling = price > CEIL*0.98
         swept_low = lows[-1] < min(lows[-10:-1]); swept_high = highs[-1] > max(highs[-10:-1])
         bullish = closes[-1] > opens[-1]
 
@@ -71,16 +61,15 @@ def get_data(sym):
         accum_high = max(highs[accum_start_idx:]) if accum_hours>=0.5 else max(highs[-36:])
         accum_low = min(lows[accum_start_idx:]) if accum_hours>=0.5 else min(lows[-36:])
 
-        # FIXED: mexc uses 1d not 1D
         try:
             rd = requests.get("https://api.mexc.com/api/v3/klines",
                               params={"symbol":sym,"interval":"1d","limit":3}, timeout=10).json()
-            prev_high = float(rd[-2][2]) if len(rd)>=2 else CEIL
-            prev_low = float(rd[-2][3]) if len(rd)>=2 else FLOOR
+            prev_high = float(rd[-2][2]) if len(rd)>=2 else max(highs[-20:])
+            prev_low = float(rd[-2][3]) if len(rd)>=2 else min(lows[-20:])
         except:
-            prev_high = CEIL; prev_low = FLOOR
+            prev_high = max(highs[-20:]); prev_low = min(lows[-20:])
 
-        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"v5t":v5t,"vol_x_avg":v1t,"volumes":vols,"avg_50":avg_50,"bullish":bullish,"bearish":not bullish,"swept_low":swept_low,"swept_high":swept_high,"FLOOR":FLOOR,"CEIL":CEIL,"accum_hours":accum_hours,"pool_vol":pool_vol,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"avg_body":avg_body,"last_body":body}
+        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"vol_x_avg":v1t,"volumes":vols,"avg_50":avg_50,"bullish":bullish,"bearish":not bullish,"swept_low":swept_low,"swept_high":swept_high,"accum_hours":accum_hours,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"avg_body":avg_body,"last_body":body}
     except Exception as e:
         print(f"{sym} err {e}", flush=True); return None
 
@@ -91,13 +80,11 @@ def scan(sym):
     if d["accum_hours"] >= ACCUM_MIN_HOURS and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT: return
     if d["last_body"] < d["avg_body"]*1.8 and d["accum_hours"]>=1: return
     if d["vol_x_avg"] < VOL_OVERALL_MIN: return
-
     def can_send(side):
         now=time.time()
         last = COOLDOWN.get("signals",{}).get(sym)
         if last and now-last < SIGNAL_COOLDOWN_MIN*60: return False
         COOLDOWN["signals"][sym]=now; COOLDOWN["last_side"][sym]=side; save_cooldown(); return True
-
     price = d["price"]
     if (d["v1t"]>=1.2 and d["low_r"]>=1.8 and d["bullish"]) or (d["low_r"]>=1.5 and d["swept_low"]):
         if can_send("BUY"):
@@ -105,20 +92,19 @@ def scan(sym):
             tp1 = d["accum_high"]; tp2 = d["prev_high"]
             if tp2 <= price: tp2 = price + (d["accum_high"]-d["accum_low"])*1.5
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            send_telegram(f"🟢 {sym} BUY\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h | Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev day low {d['prev_low']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
-
+            send_telegram(f"🟢 {sym} BUY\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev low {d['prev_low']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
     if (d["v1t"]>=1.2 and d["up_r"]>=1.8 and d["bearish"]) or (d["up_r"]>=1.5 and d["swept_high"]):
         if can_send("SELL"):
             sl = max(d["accum_high"], d["prev_high"]) * 1.002
             tp1 = d["prev_low"]; tp2 = price - (d["accum_high"]-d["accum_low"])*1.5
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            send_telegram(f"🔴 {sym} SELL\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h | Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev day high {d['prev_high']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
+            send_telegram(f"🔴 {sym} SELL\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev high {d['prev_high']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
-active_symbols = get_all_usdt_symbols() if SCAN_ALL_USDT else SYMBOLS
-print(f"=== BOT V6 FIXED 1d + VOL ACCUM {len(active_symbols)} USDT ===", flush=True)
+print(f"=== BOT V6 FIXED 1d + VOL ACCUM {len(SYMBOLS)} coins ===", flush=True)
+print(f"Symbols: {SYMBOLS}", flush=True)
 
 while True:
-    for sym in active_symbols:
+    for sym in SYMBOLS:
         try: scan(sym)
         except Exception as e: print(e, flush=True)
     now = datetime.now(ZoneInfo("Africa/Nairobi"))
