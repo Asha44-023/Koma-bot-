@@ -1,14 +1,15 @@
 import time, json, os, requests
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 
-# --- CONFIG ---
 SYMBOLS = ["KOMAUSDT","VINEUSDT","BANKUSDT","NCTUSDT","AITECHUSDT","ALCHUSDT"]
 SIGNAL_COOLDOWN_MIN = 30
 NO_REENTRY_CANDLES = 4
 WHALE_WICK = 2.0
 VOL_OVERALL_MIN = 1.2
 
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN","")
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT","")
 COOLDOWN_FILE = "cooldown.json"
 COOLDOWN = {"signals":{}, "exits":{}, "last_side":{}}
 if os.path.exists(COOLDOWN_FILE):
@@ -16,44 +17,80 @@ if os.path.exists(COOLDOWN_FILE):
     except: pass
 
 def save_cooldown():
-    json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
+    with open(COOLDOWN_FILE,"w") as f: json.dump(COOLDOWN,f)
 
 def send_telegram(msg):
-    # your telegram code here
     print(msg)
-    # requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT}&text={msg}")
+    if not TELEGRAM_TOKEN: return
+    try:
+        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                     params={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=10)
+    except: pass
 
 def get_data(sym):
-    # your mexc fetch - return dict with price, volumes list, wicks etc
-    # Mock structure you already have:
-    # return {price, low_r, up_r, v1t, v5t, vol_x_avg, volumes, avg_50, bullish, bearish, swept_low, swept_high, near_floor, near_ceiling, FLOOR, CEIL, LOCAL_FLOOR, LOCAL_CEIL, session, is_pick}
-    pass
+    try:
+        r = requests.get("https://api.mexc.com/api/v3/klines",
+                         params={"symbol":sym,"interval":"5m","limit":50}, timeout=10).json()
+        if not r or len(r)<20: return None
+        closes = [float(x[4]) for x in r]
+        highs = [float(x[2]) for x in r]
+        lows = [float(x[3]) for x in r]
+        opens = [float(x[1]) for x in r]
+        vols = [float(x[5]) for x in r]
+
+        price = closes[-1]
+        avg_50 = sum(vols)/len(vols) if vols else 1
+        v1t = vols[-1]/avg_50 if avg_50 else 1
+        v5t = sum(vols[-5:])/5/avg_50 if avg_50 else 1
+        vol_x_avg = v1t
+
+        body = abs(closes[-1]-opens[-1]) + 0.000001
+        low_r = (min(opens[-1],closes[-1]) - lows[-1]) / body
+        up_r = (highs[-1] - max(opens[-1],closes[-1])) / body
+
+        FLOOR = min(lows[-20:])
+        CEIL = max(highs[-20:])
+        LOCAL_FLOOR = min(lows[-5:])
+        LOCAL_CEIL = max(highs[-5:])
+
+        near_floor = price < FLOOR*1.02
+        near_ceiling = price > CEIL*0.98
+        swept_low = lows[-1] < min(lows[-10:-1])
+        swept_high = highs[-1] > max(highs[-10:-1])
+
+        bullish = closes[-1] > opens[-1]
+        bearish = not bullish
+        mid = (FLOOR+CEIL)/2
+        is_middle = abs(price-mid)/mid < 0.02
+
+        # Pick session - 10am-10pm Nairobi
+        nairobi_h = datetime.now(ZoneInfo("Africa/Nairobi")).hour
+        is_pick = 10 <= nairobi_h <= 22
+        session = "PICK" if is_pick else "OFF"
+
+        return {
+            "price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"v5t":v5t,
+            "vol_x_avg":vol_x_avg,"volumes":vols,"avg_50":avg_50,
+            "bullish":bullish,"bearish":bearish,"swept_low":swept_low,
+            "swept_high":swept_high,"near_floor":near_floor,"near_ceiling":near_ceiling,
+            "FLOOR":FLOOR,"CEIL":CEIL,"LOCAL_FLOOR":LOCAL_FLOOR,"LOCAL_CEIL":LOCAL_CEIL,
+            "session":session,"is_pick":is_pick,"is_middle":is_middle
+        }
+    except Exception as e:
+        print(f"{sym} err {e}")
+        return None
 
 def scan(sym):
     d = get_data(sym)
     if not d: return
-    price = d["price"]
-    low_r = d["low_r"]
-    up_r = d["up_r"]
-    v1t = d["v1t"]
-    v5t = d["v5t"]
-    vol_x_avg = d["vol_x_avg"]
-    volumes = d["volumes"]
-    avg_50 = d["avg_50"]
+    price = d["price"]; low_r=d["low_r"]; up_r=d["up_r"]; v1t=d["v1t"]; vol_x_avg=d["vol_x_avg"]; volumes=d["volumes"]; avg_50=d["avg_50"]
 
-    # --- NEW: 1 min vs 15 min for your 5-15 entries ---
-    v15t = sum(volumes[-15:]) / 15 / avg_50 if len(volumes)>=15 else v5t
+    v15t = sum(volumes[-15:])/15/avg_50 if len(volumes)>=15 and avg_50 else d["v5t"]
     short_increase = v1t > v15t * 1.3
-    short_decrease = v1t < v15t * 0.8
-
     overall_increase = vol_x_avg >= 1.5
-    overall_decrease = vol_x_avg < 1.0
 
     is_whale = low_r >= WHALE_WICK or up_r >= WHALE_WICK
-    is_middle = d["is_middle"]
-
-    # --- FILTERS ---
-    if is_middle and vol_x_avg < 2.0: return
+    if d["is_middle"] and vol_x_avg < 2.0: return
     if not d["is_pick"]: return
     if vol_x_avg < VOL_OVERALL_MIN: return
 
@@ -61,50 +98,32 @@ def scan(sym):
         now=time.time()
         last = COOLDOWN.get("signals",{}).get(sym)
         last_side = COOLDOWN.get("last_side",{}).get(sym)
-
-        # REVERSAL LOGIC
         if last and last_side!= side:
-            # Real reversal = whale + overall UP + short UP
             if is_whale and overall_increase and short_increase:
-                COOLDOWN["signals"][sym]=now
-                COOLDOWN["last_side"][sym]=side
-                save_cooldown()
-                return True
-            else:
-                # Fake = volume decreasing = manipulation
-                return False
-
-        # Normal cooldown
-        if now - COOLDOWN.get("exits",{}).get(sym,0) < NO_REENTRY_CANDLES*5*60:
-            return False
+                COOLDOWN["signals"][sym]=now; COOLDOWN["last_side"][sym]=side; save_cooldown(); return True
+            else: return False
+        if now - COOLDOWN.get("exits",{}).get(sym,0) < NO_REENTRY_CANDLES*5*60: return False
         if last is None or now-last > SIGNAL_COOLDOWN_MIN*60:
-            COOLDOWN["signals"][sym]=now
-            COOLDOWN["last_side"][sym]=side
-            save_cooldown()
-            return True
+            COOLDOWN["signals"][sym]=now; COOLDOWN["last_side"][sym]=side; save_cooldown(); return True
         return False
 
-    # --- SIGNALS ---
     whale_flash_buy = v1t>=2.0 and low_r>=1.8 and d["bullish"]
     buy_wick = low_r>=1.5 and d["swept_low"]
-
     whale_flash_sell = v1t>=2.0 and up_r>=1.8 and d["bearish"]
     sell_wick = up_r>=1.5 and d["swept_high"]
 
     if (whale_flash_buy or buy_wick) and can_send("BUY"):
         sl = d["FLOOR"]*0.988 if d["near_floor"] else d["LOCAL_FLOOR"]*0.988
         tp = price + (price-sl)*2.0
-        send_telegram(f"🟢 {sym} BUY {low_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f} TP {tp:.5f}")
+        send_telegram(f"🟢 {sym} BUY {low_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f}")
 
     if (whale_flash_sell or sell_wick) and can_send("SELL"):
         sl = d["CEIL"]*1.012 if d["near_ceiling"] else d["LOCAL_CEIL"]*1.012
         tp = price - (sl-price)*2.0
-        send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f} TP {tp:.5f}")
+        send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}]")
 
-# --- MAIN LOOP ---
 while True:
-    nairobi = datetime.now(pytz.timezone("Africa/Nairobi"))
-    # Dead zone sleep 12am-8:59am Kenya
+    nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
     if 0 <= nairobi.hour < 9:
         time.sleep(60)
         continue
