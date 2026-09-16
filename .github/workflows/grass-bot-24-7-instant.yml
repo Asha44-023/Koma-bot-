@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: grass-bot-single
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -15,24 +15,27 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      
+      - name: Restore cooldown
+        uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v1
-          restore-keys: |
-            cooldown-
-      - run: pip install requests pytz
-      - name: Run V9.2 ANTI-SPAM 5MIN
+          key: cooldown-v9-4
+          
+      - run: pip install requests
+
+      - name: Run V9.4 PUMP 15MIN CD
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== V9.2 ANTI-SPAM ==="
-          head -n 5 merged_v4.py
+          echo "=== V9.4 PUMP 15MIN BOTH SIDES ==="
           python -u merged_v4.py --once
-      - uses: actions/cache/save@v4
+
+      - name: Save cooldown
+        uses: actions/cache/save@v4
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v1-${{ github.run_id }}
+          key: cooldown-v9-4
