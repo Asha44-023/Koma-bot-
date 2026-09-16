@@ -4,17 +4,17 @@ from zoneinfo import ZoneInfo
 
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
 SIGNAL_COOLDOWN_MIN = 30
-WHALE_WICK = 1.8
 VOL_OVERALL_MIN = 1.2
 ACCUM_RANGE_PCT = 0.8
 ACCUM_MIN_HOURS = 2.0
 VOL_POOL_BREAK_PCT = 45
+VOL_ABSOLUTE_MIN = 20 # kills 9% and 10% from your screenshot
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
 
 COOLDOWN_FILE = "cooldown.json"
-COOLDOWN = {"signals":{}, "exits":{}, "last_side":{}}
+COOLDOWN = {"signals":{}, "last_side":{}}
 if os.path.exists(COOLDOWN_FILE):
     try: COOLDOWN = json.load(open(COOLDOWN_FILE))
     except: pass
@@ -69,22 +69,36 @@ def get_data(sym):
         except:
             prev_high = max(highs[-20:]); prev_low = min(lows[-20:])
 
-        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"vol_x_avg":v1t,"volumes":vols,"avg_50":avg_50,"bullish":bullish,"bearish":not bullish,"swept_low":swept_low,"swept_high":swept_high,"accum_hours":accum_hours,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"avg_body":avg_body,"last_body":body}
+        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"vol_x_avg":v1t,"bullish":bullish,"bearish":not bullish,"swept_low":swept_low,"swept_high":swept_high,"accum_hours":accum_hours,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"avg_body":avg_body,"last_body":body}
     except Exception as e:
         print(f"{sym} err {e}", flush=True); return None
 
 def scan(sym):
     d = get_data(sym)
     if not d: return
-    if d["recent_range_pct"] < 0.3: return
-    if d["accum_hours"] >= ACCUM_MIN_HOURS and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT: return
-    if d["last_body"] < d["avg_body"]*1.8 and d["accum_hours"]>=1: return
-    if d["vol_x_avg"] < VOL_OVERALL_MIN: return
+
+    # === FIX FOR YOUR SCREENSHOT ===
+    if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: # blocks 9% and 10%
+        return
+    if d["accum_hours"] >= 0.5 and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT:
+        return
+    if d["recent_range_pct"] < 0.3:
+        return
+    if d["last_body"] < d["avg_body"]*1.8 and d["accum_hours"]>=1:
+        return
+    if d["vol_x_avg"] < VOL_OVERALL_MIN:
+        return
+
     def can_send(side):
         now=time.time()
         last = COOLDOWN.get("signals",{}).get(sym)
-        if last and now-last < SIGNAL_COOLDOWN_MIN*60: return False
+        if last and now-last < SIGNAL_COOLDOWN_MIN*60:
+            return False
+        last_side = COOLDOWN.get("last_side",{}).get(sym)
+        if last_side == side and last and now-last < 300: # blocks duplicate 2:18 PM x2
+            return False
         COOLDOWN["signals"][sym]=now; COOLDOWN["last_side"][sym]=side; save_cooldown(); return True
+
     price = d["price"]
     if (d["v1t"]>=1.2 and d["low_r"]>=1.8 and d["bullish"]) or (d["low_r"]>=1.5 and d["swept_low"]):
         if can_send("BUY"):
@@ -93,6 +107,7 @@ def scan(sym):
             if tp2 <= price: tp2 = price + (d["accum_high"]-d["accum_low"])*1.5
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
             send_telegram(f"🟢 {sym} BUY\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev low {d['prev_low']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
+
     if (d["v1t"]>=1.2 and d["up_r"]>=1.8 and d["bearish"]) or (d["up_r"]>=1.5 and d["swept_high"]):
         if can_send("SELL"):
             sl = max(d["accum_high"], d["prev_high"]) * 1.002
@@ -100,7 +115,7 @@ def scan(sym):
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
             send_telegram(f"🔴 {sym} SELL\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev high {d['prev_high']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
-print(f"=== BOT V6 FIXED 1d + VOL ACCUM {len(SYMBOLS)} coins ===", flush=True)
+print(f"=== BOT V7 FIXED 6 coins - blocks 9% pool fakes ===", flush=True)
 print(f"Symbols: {SYMBOLS}", flush=True)
 
 while True:
