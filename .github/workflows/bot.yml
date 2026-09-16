@@ -3,6 +3,10 @@ on:
   push:
   workflow_dispatch:
 
+concurrency:
+  group: grass-bot
+  cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
