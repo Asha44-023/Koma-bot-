@@ -4,14 +4,13 @@ from zoneinfo import ZoneInfo
 
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
 SYMBOLS_PERP = [s.replace("USDT","_USDT") for s in SYMBOLS]
-SIGNAL_COOLDOWN_MIN = 15
-VOL_ABSOLUTE_MIN = 8
-VOL_POOL_BREAK_PCT = 25
-ACCUM_RANGE_PCT = 1.5
+SIGNAL_COOLDOWN_MIN = 10
+VOL_ABSOLUTE_MIN = 5
+VOL_POOL_BREAK_PCT = 12
+ACCUM_RANGE_PCT = 1.8
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
-
 COOLDOWN_FILE = "cooldown.json"
 COOLDOWN = {"signals":{}}
 if os.path.exists(COOLDOWN_FILE):
@@ -38,8 +37,10 @@ def get_data(sym_spot, sym_perp):
         vols = [float(x) for x in data.get("vol",[])]
         if len(closes)<50: return None
         closes=closes[-100:]; highs=highs[-100:]; lows=lows[-100:]; opens=opens[-100:]; vols=vols[-100:]
-        price = closes[-1]; avg_50 = sum(vols)/len(vols) if vols else 1
-        v1t = vols[-1]/avg_50 if avg_50 else 1
+        price = closes[-1]
+        avg_vol = sum(vols[-36:])/36 if len(vols)>=36 else sum(vols)/len(vols)
+        v1t = vols[-1]/avg_vol if avg_vol else 1
+        vol_pool_pct = v1t*10 # FIXED: convert to % logic, now 1.0x = 10%, 2.5x = 25%
         body = abs(closes[-1]-opens[-1]) + 0.000001
         avg_body = sum([abs(closes[i]-opens[i]) for i in range(-20,-1)])/20 + 0.000001
         low_r = (min(opens[-1],closes[-1]) - lows[-1]) / body
@@ -48,14 +49,11 @@ def get_data(sym_spot, sym_perp):
         bullish = closes[-1] > opens[-1]; bearish = not bullish
         accum_hours = 0; accum_start_idx = len(closes)-1
         for i in range(len(closes)-1, 10, -1):
-            wh = max(highs[max(0,i-24):i]); wl = min(lows[max(0,i-24):i])
+            wh = max(highs[max(0,i-12):i]); wl = min(lows[max(0,i-12):i])
             wp = closes[i-1]
             range_pct = (wh-wl)/wp*100 if wp else 100
             if range_pct > ACCUM_RANGE_PCT: break
             accum_hours += 5/60; accum_start_idx = i
-        recent_vols = vols[max(0,accum_start_idx):] if accum_hours>=0.1 else vols[-36:]
-        pool_vol = sum(recent_vols) if recent_vols else 1
-        vol_pool_pct = (vols[-1]/pool_vol*100) if pool_vol else 0
         recent_range_pct = (max(highs[-36:])-min(lows[-36:]))/price*100 if len(highs)>=36 else 100
         accum_high = max(highs[accum_start_idx:]) if accum_hours>=0.1 else max(highs[-36:])
         accum_low = min(lows[accum_start_idx:]) if accum_hours>=0.1 else min(lows[-36:])
@@ -76,8 +74,6 @@ def scan(sym_spot, sym_perp):
     if not d: print(f"{sym_spot} NO PERP DATA", flush=True); return
     print(f"{sym_spot} flat {d['accum_hours']:.1f}h vol {d['vol_pool_pct']:.0f}% range {d['recent_range_pct']:.2f}% trend {d['trend_1h']:.2f}% v1t {d['v1t']:.1f}x", flush=True)
     if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: return
-    if d["recent_range_pct"] < 0.2: return
-    if d["last_body"] < d["avg_body"]*1.2 and d["vol_pool_pct"] < 35: return
 
     def can_send():
         now=time.time()
@@ -86,9 +82,9 @@ def scan(sym_spot, sym_perp):
         COOLDOWN["signals"][sym_spot]=now; save_cooldown(); return True
 
     price = d["price"]
-    is_pin_long = (d["low_r"]>=1.2 and d["swept_low"]) or (d["v1t"]>=1.1 and d["low_r"]>=1.5 and d["bullish"])
-    is_vol_break_long = d["accum_hours"]>=0.5 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"]
-    is_momentum_long = d["trend_1h"] > 1.5 and d["v1t"] > 1.3 and d["bullish"] and d["vol_pool_pct"] > 15
+    is_pin_long = (d["low_r"]>=1.0 and d["swept_low"]) or (d["v1t"]>=1.0 and d["low_r"]>=1.2 and d["bullish"])
+    is_vol_break_long = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"]
+    is_momentum_long = abs(d["trend_1h"]) > 0.8 and d["v1t"] > 1.0 and d["bullish"] and d["vol_pool_pct"] > 8
     if is_pin_long or is_vol_break_long or is_momentum_long:
         if can_send():
             sl = min(d["accum_low"], d["prev_low"]) * 0.998; tp1 = d["accum_high"]; tp2 = d["prev_high"]
@@ -97,9 +93,9 @@ def scan(sym_spot, sym_perp):
             typ = "MOMENTUM PUMP" if is_momentum_long else "VOL BREAK" if is_vol_break_long else "PIN BAR"
             send_telegram(f"🟢 {sym_spot} BUY {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:.1f}% Vol {d['vol_pool_pct']:.0f}% Flat {d['accum_hours']:.1f}h\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
             return
-    is_pin_short = (d["up_r"]>=1.2 and d["swept_high"]) or (d["v1t"]>=1.1 and d["up_r"]>=1.5 and d["bearish"])
-    is_vol_break_short = d["accum_hours"]>=0.5 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price < d["accum_low"]
-    is_momentum_short = d["trend_1h"] < -1.5 and d["v1t"] > 1.3 and d["bearish"] and d["vol_pool_pct"] > 15
+    is_pin_short = (d["up_r"]>=1.0 and d["swept_high"]) or (d["v1t"]>=1.0 and d["up_r"]>=1.2 and d["bearish"])
+    is_vol_break_short = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price < d["accum_low"]
+    is_momentum_short = abs(d["trend_1h"]) > 0.8 and d["v1t"] > 1.0 and d["bearish"] and d["vol_pool_pct"] > 8
     if is_pin_short or is_vol_break_short or is_momentum_short:
         if can_send():
             sl = max(d["accum_high"], d["prev_high"]) * 1.002; tp1 = d["prev_low"]; tp2 = price - (d["accum_high"]-d["accum_low"])*1.5
@@ -108,7 +104,7 @@ def scan(sym_spot, sym_perp):
             send_telegram(f"🔴 {sym_spot} SELL {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:.1f}% Vol {d['vol_pool_pct']:.0f}% Flat {d['accum_hours']:.1f}h\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
 ONCE = "--once" in sys.argv
-print(f"=== BOT V9.4 FINAL 15MIN BOTH SIDES ===", flush=True)
+print(f"=== BOT V9.7 FIXED VOL ===", flush=True)
 if ONCE:
     for s,p in zip(SYMBOLS, SYMBOLS_PERP):
         try: scan(s,p)
