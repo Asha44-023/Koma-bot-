@@ -3,8 +3,8 @@ name: KOMA + OTHER Bots V4 WHALE+RETAIL
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/1 13-23 * * *'  # NY active 9am-7pm EST - 1m flash
-    - cron: '*/1 0-1 * * *'    # NY evening - 1m flash
+    - cron: '*/1 13-23 * * *'  # NY active 9am-7pm EST
+    - cron: '*/1 0-1 * * *'    # NY evening
     - cron: '*/30 2-12 * * *'  # US sleeps slow
 
 jobs:
@@ -18,23 +18,23 @@ jobs:
           python-version: '3.11'
 
       - name: Install
-        run: pip install ccxt pandas requests
+        run: pip install requests
 
       - name: Restore cooldown cache
         uses: actions/cache@v4
         with:
           path: |
             cooldown.json
-            cooldown_koma.json
-            cooldown_other.json
           key: cooldown-${{ github.run_id }}
           restore-keys: |
             cooldown-
 
-      - name: Scan V4 RETAIL+WHALE 1m+3m+5m+15m - ALERT ONLY
+      - name: Scan GRASS LIST + MESSED LOGIC
         env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python merged_v4.py
+          python main.py
