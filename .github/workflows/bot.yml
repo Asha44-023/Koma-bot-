@@ -1,40 +1,29 @@
-name: KOMA + OTHER Bots V4 WHALE+RETAIL
-
+name: grass-bot-24-7-instant
 on:
+  push:
   workflow_dispatch:
-  schedule:
-    - cron: '*/1 13-23 * * *'  # NY active 9am-7pm EST
-    - cron: '*/1 0-1 * * *'    # NY evening
-    - cron: '*/30 2-12 * * *'  # US sleeps slow
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install
-        run: pip install requests
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Restore cooldown cache
         uses: actions/cache@v4
         with:
-          path: |
-            cooldown.json
-          key: cooldown-${{ github.run_id }}
+          path: cooldown.json
+          key: cooldown-v1
           restore-keys: |
             cooldown-
 
-      - name: Scan GRASS LIST + MESSED LOGIC
+      - name: Install requests
+        run: pip install requests pytz
+
+      - name: Run bot 24/7 instant
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python merged_v4.py
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          PYTHONUNBUFFERED: 1
+        run: python -u merged_v4.py
