@@ -76,16 +76,12 @@ def scan(sym):
     d = get_data(sym)
     if not d: return
 
-    # BLOCK FAKES - your SIREN 9% / 10%
+    # V9 FINAL - HARD BLOCK YOUR 9%/10% + 0.0h
+    if d["accum_hours"] < 0.5: return
     if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: return
-    if d["accum_hours"] >= 0.5 and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT and d["recent_range_pct"] < 1.0:
-        # if in long accumulation, require big volume, but allow pin bars to pass
-        pass # handled below
     if d["recent_range_pct"] < 0.3: return
-    if d["last_body"] < d["avg_body"]*1.8 and d["accum_hours"]>=1 and d["vol_pool_pct"] < 60:
-        return
-    if d["vol_x_avg"] < VOL_OVERALL_MIN and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT:
-        return
+    if d["last_body"] < d["avg_body"]*1.8 and d["vol_pool_pct"] < 60: return
+    if d["vol_x_avg"] < VOL_OVERALL_MIN and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT: return
 
     def can_send(side):
         now=time.time()
@@ -97,7 +93,6 @@ def scan(sym):
 
     price = d["price"]
 
-    # NEW V8 LOGIC
     is_pin_long = (d["low_r"]>=1.5 and d["swept_low"]) or (d["v1t"]>=1.2 and d["low_r"]>=1.8 and d["bullish"])
     is_vol_break_long = d["accum_hours"]>=2.0 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"]
 
@@ -121,7 +116,7 @@ def scan(sym):
             typ = "VOL BREAK" if is_vol_break_short else "PIN BAR"
             send_telegram(f"🔴 {sym} SELL {typ}\nEntry: {price:.6f} NOW\nAccum: {d['accum_hours']:.1f}h Vol {d['vol_pool_pct']:.0f}% pool Range {d['recent_range_pct']:.2f}%\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
-print(f"=== BOT V8 GRASS FIX - body break + pin bar ===", flush=True)
+print(f"=== BOT V9 FINAL - NO 0.0h NO 10% ===", flush=True)
 print(f"Symbols: {SYMBOLS}", flush=True)
 
 while True:
