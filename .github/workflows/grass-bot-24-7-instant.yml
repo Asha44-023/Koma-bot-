@@ -1,0 +1,36 @@
+name: grass-bot-24-7-instant
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: grass-bot-single
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: cooldown.json
+          key: cooldown-v1
+          restore-keys: |
+            cooldown-
+      - run: pip install requests pytz
+      - name: Run V9 FINAL
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUNBUFFERED: 1
+        run: |
+          echo "=== CHECKING FILE VERSION ==="
+          head -n 5 merged_v4.py
+          python -u merged_v4.py
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: cooldown.json
+          key: cooldown-v1-${{ github.run_id }}
