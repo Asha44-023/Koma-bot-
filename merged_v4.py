@@ -23,12 +23,12 @@ def save_cooldown():
 
 def send_telegram(msg):
     print(msg, flush=True)
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        print(f"Telegram env missing - token:{bool(TELEGRAM_TOKEN)} chat:{bool(TELEGRAM_CHAT)}", flush=True)
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print(f"Telegram env missing - token:{bool(TELEGRAM_BOT_TOKEN)} chat:{bool(TELEGRAM_CHAT_ID)}", flush=True)
         return
     try:
-        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                     params={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=10)
+        requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                     params={"chat_id":TELEGRAM_CHAT_ID,"text":msg}, timeout=10)
     except Exception as e:
         print(f"Telegram err {e}", flush=True)
 
@@ -134,7 +134,7 @@ def scan(sym):
 print(f"=== BOT STARTED GRASS LIST 24/7 INSTANT ===", flush=True)
 print(f"Nairobi: {datetime.now(ZoneInfo('Africa/Nairobi'))}", flush=True)
 print(f"Symbols: {SYMBOLS}", flush=True)
-print(f"Telegram token set: {bool(TELEGRAM_TOKEN)} chat set: {bool(TELEGRAM_CHAT)}", flush=True)
+print(f"Telegram token set: {bool(TELEGRAM_BOT_TOKEN)} chat set: {bool(TELEGRAM_CHAT_ID)}", flush=True)
 
 while True:
     nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
