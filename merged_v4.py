@@ -40,7 +40,7 @@ def get_data(sym_spot, sym_perp):
         price = closes[-1]
         avg_vol = sum(vols[-36:])/36 if len(vols)>=36 else sum(vols)/len(vols)
         v1t = vols[-1]/avg_vol if avg_vol else 1
-        vol_pool_pct = v1t*10 # FIXED: convert to % logic, now 1.0x = 10%, 2.5x = 25%
+        vol_pool_pct = v1t*10
         body = abs(closes[-1]-opens[-1]) + 0.000001
         avg_body = sum([abs(closes[i]-opens[i]) for i in range(-20,-1)])/20 + 0.000001
         low_r = (min(opens[-1],closes[-1]) - lows[-1]) / body
@@ -72,7 +72,7 @@ def get_data(sym_spot, sym_perp):
 def scan(sym_spot, sym_perp):
     d = get_data(sym_spot, sym_perp)
     if not d: print(f"{sym_spot} NO PERP DATA", flush=True); return
-    print(f"{sym_spot} flat {d['accum_hours']:.1f}h vol {d['vol_pool_pct']:.0f}% range {d['recent_range_pct']:.2f}% trend {d['trend_1h']:.2f}% v1t {d['v1t']:.1f}x", flush=True)
+    print(f"{sym_spot} flat {d['accum_hours']:.1f}h vol {d['vol_pool_pct']:.0f}% range {d['recent_range_pct']:.2f}% trend {d['trend_1h']:+.2f}% v1t {d['v1t']:.1f}x", flush=True)
     if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: return
 
     def can_send():
@@ -84,27 +84,29 @@ def scan(sym_spot, sym_perp):
     price = d["price"]
     is_pin_long = (d["low_r"]>=1.0 and d["swept_low"]) or (d["v1t"]>=1.0 and d["low_r"]>=1.2 and d["bullish"])
     is_vol_break_long = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"]
-    is_momentum_long = abs(d["trend_1h"]) > 0.8 and d["v1t"] > 1.0 and d["bullish"] and d["vol_pool_pct"] > 8
+    # FIXED V9.8 - trend direction matters
+    is_momentum_long = d["trend_1h"] > 0.8 and d["v1t"] > 1.0 and d["bullish"] and d["vol_pool_pct"] > 8
     if is_pin_long or is_vol_break_long or is_momentum_long:
         if can_send():
             sl = min(d["accum_low"], d["prev_low"]) * 0.998; tp1 = d["accum_high"]; tp2 = d["prev_high"]
             if tp2 <= price: tp2 = price + (d["accum_high"]-d["accum_low"])*1.5
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
             typ = "MOMENTUM PUMP" if is_momentum_long else "VOL BREAK" if is_vol_break_long else "PIN BAR"
-            send_telegram(f"🟢 {sym_spot} BUY {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:.1f}% Vol {d['vol_pool_pct']:.0f}% Flat {d['accum_hours']:.1f}h\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
+            send_telegram(f"🟢 {sym_spot} BUY {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:+.1f}% Vol {d['vol_pool_pct']:.0f}% Flat {d['accum_hours']:.1f}h\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
             return
     is_pin_short = (d["up_r"]>=1.0 and d["swept_high"]) or (d["v1t"]>=1.0 and d["up_r"]>=1.2 and d["bearish"])
     is_vol_break_short = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price < d["accum_low"]
-    is_momentum_short = abs(d["trend_1h"]) > 0.8 and d["v1t"] > 1.0 and d["bearish"] and d["vol_pool_pct"] > 8
+    # FIXED V9.8 - trend direction matters
+    is_momentum_short = d["trend_1h"] < -0.8 and d["v1t"] > 1.0 and d["bearish"] and d["vol_pool_pct"] > 8
     if is_pin_short or is_vol_break_short or is_momentum_short:
         if can_send():
             sl = max(d["accum_high"], d["prev_high"]) * 1.002; tp1 = d["prev_low"]; tp2 = price - (d["accum_high"]-d["accum_low"])*1.5
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
             typ = "MOMENTUM DUMP" if is_momentum_short else "VOL BREAK" if is_vol_break_short else "PIN BAR"
-            send_telegram(f"🔴 {sym_spot} SELL {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:.1f}% Vol {d['vol_pool_pct']:.0f}% Flat {d['accum_hours']:.1f}h\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
+            send_telegram(f"🔴 {sym_spot} SELL {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:+.1f}% Vol {d['vol_pool_pct']:.0f}% Flat {d['accum_hours']:.1f}h\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
 ONCE = "--once" in sys.argv
-print(f"=== BOT V9.7 FIXED VOL ===", flush=True)
+print(f"=== BOT V9.8 FIXED TREND DIRECTION ===", flush=True)
 if ONCE:
     for s,p in zip(SYMBOLS, SYMBOLS_PERP):
         try: scan(s,p)
