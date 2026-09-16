@@ -6,6 +6,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,6 +25,16 @@ jobs:
       - name: Run bot 24/7 instant
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT }}
           PYTHONUNBUFFERED: 1
         run: python -u merged_v4.py
+
+      - name: Save cooldown cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cooldown.json
+          key: cooldown-v1-${{ github.run_id }}
