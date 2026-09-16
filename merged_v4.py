@@ -86,21 +86,21 @@ def get_data(sym):
 
 def scan(sym):
     d = get_data(sym)
-    if not d: return
+    if not d:
+        print(f"{sym} no data", flush=True)
+        return
     price = d["price"]; low_r=d["low_r"]; up_r=d["up_r"]; v1t=d["v1t"]; vol_x_avg=d["vol_x_avg"]; volumes=d["volumes"]; avg_50=d["avg_50"]
 
     v15t = sum(volumes[-15:])/15/avg_50 if len(volumes)>=15 and avg_50 else d["v5t"]
     short_increase = v1t > v15t * 1.3
     overall_increase = vol_x_avg >= 1.5
-
     is_whale = low_r >= WHALE_WICK or up_r >= WHALE_WICK
 
-    # --- REMOVED TIME FILTER FOR 24/7 ---
-    # Original had: if d["is_middle"] and vol_x_avg < 2.0: return
-    # Original had: if not d["is_pick"]: return
-    # Now we leave only volume filter
+    # DEBUG LINE - instant on page
+    print(f"{sym} price {price:.5f} vol {vol_x_avg:.2f}x wick L{low_r:.1f} U{up_r:.1f} sweep L{d['swept_low']} H{d['swept_high']} whale {is_whale}", flush=True)
 
-    if vol_x_avg < VOL_OVERALL_MIN: return
+    if vol_x_avg < VOL_OVERALL_MIN:
+        return
 
     def can_send(side):
         now=time.time()
@@ -130,16 +130,16 @@ def scan(sym):
         tp = price - (sl-price)*2.0
         send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f} TP {tp:.5f}")
 
-# FIXED LOOP - 24/7
-print(f"=== BOT STARTED GRASS LIST + MESSED LOGIC 24/7 ===", flush=True)
+# FIXED LOOP - 24/7 INSTANT
+print(f"=== BOT STARTED GRASS LIST 24/7 INSTANT ===", flush=True)
 print(f"Nairobi: {datetime.now(ZoneInfo('Africa/Nairobi'))}", flush=True)
 print(f"Symbols: {SYMBOLS}", flush=True)
 print(f"Telegram token set: {bool(TELEGRAM_TOKEN)} chat set: {bool(TELEGRAM_CHAT)}", flush=True)
 
 while True:
     nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
-    print(f"[{nairobi.strftime('%H:%M:%S')}] Scanning... ", flush=True)
+    print(f"--- [{nairobi.strftime('%H:%M:%S')}] Scanning ---", flush=True)
     for sym in SYMBOLS:
         try: scan(sym)
         except Exception as e: print(e, flush=True)
-    time.sleep(30)
+    time.sleep(5) # INSTANT - was 30
