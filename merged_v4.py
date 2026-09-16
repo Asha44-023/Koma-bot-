@@ -125,6 +125,7 @@ def scan(sym):
 while True:
     nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
     if 0 <= nairobi.hour < 9:
+        print(f"Sleep mode 0-9am - Nairobi {nairobi.strftime('%H:%M:%S')} - waiting till 9am", flush=True)
         time.sleep(60)
         continue
     for sym in SYMBOLS:
