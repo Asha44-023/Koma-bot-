@@ -3,12 +3,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
+SCAN_ALL_USDT = True # True = scan all USDTs, False = only 6 above
 SIGNAL_COOLDOWN_MIN = 30
-NO_REENTRY_CANDLES = 4
 WHALE_WICK = 1.8
 VOL_OVERALL_MIN = 1.2
+ACCUM_RANGE_PCT = 0.8 # flat like VELVET 0.0511-0.0516
+ACCUM_MIN_HOURS = 2.0
+VOL_POOL_BREAK_PCT = 45 # need 45% of pool in 1 candle
 
-# Supports all secret names
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
 
@@ -23,76 +25,103 @@ def save_cooldown():
 
 def send_telegram(msg):
     print(msg, flush=True)
-    # FIXED NAMES HERE
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        print(f"Telegram env missing - token:{bool(TELEGRAM_TOKEN)} chat:{bool(TELEGRAM_CHAT)}", flush=True)
-        return
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT: return
     try:
         requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                      params={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=10)
-        print("Telegram sent", flush=True)
-    except Exception as e:
-        print(f"Telegram err {e}", flush=True)
+    except: pass
+
+def get_all_usdt_symbols():
+    try:
+        r = requests.get("https://api.mexc.com/api/v3/exchangeInfo", timeout=10).json()
+        return [s["symbol"] for s in r["symbols"] if s["quoteAsset"]=="USDT" and s["status"]=="ENABLED"]
+    except:
+        return SYMBOLS
 
 def get_data(sym):
     try:
         r = requests.get("https://api.mexc.com/api/v3/klines",
-                         params={"symbol":sym,"interval":"5m","limit":50}, timeout=10).json()
-        if not r or len(r)<20: return None
+                         params={"symbol":sym,"interval":"5m","limit":100}, timeout=10).json()
+        if not r or len(r)<50: return None
         closes = [float(x[4]) for x in r]; highs = [float(x[2]) for x in r]; lows = [float(x[3]) for x in r]; opens = [float(x[1]) for x in r]; vols = [float(x[5]) for x in r]
         price = closes[-1]; avg_50 = sum(vols)/len(vols) if vols else 1
         v1t = vols[-1]/avg_50 if avg_50 else 1; v5t = sum(vols[-5:])/5/avg_50 if avg_50 else 1
-        vol_x_avg = v1t
         body = abs(closes[-1]-opens[-1]) + 0.000001
+        avg_body = sum([abs(closes[i]-opens[i]) for i in range(-20,-1)])/20 + 0.000001
         low_r = (min(opens[-1],closes[-1]) - lows[-1]) / body
         up_r = (highs[-1] - max(opens[-1],closes[-1])) / body
         FLOOR = min(lows[-20:]); CEIL = max(highs[-20:]); LOCAL_FLOOR = min(lows[-5:]); LOCAL_CEIL = max(highs[-5:])
         near_floor = price < FLOOR*1.02; near_ceiling = price > CEIL*0.98
         swept_low = lows[-1] < min(lows[-10:-1]); swept_high = highs[-1] > max(highs[-10:-1])
         bullish = closes[-1] > opens[-1]
-        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"v5t":v5t,"vol_x_avg":vol_x_avg,"volumes":vols,"avg_50":avg_50,"bullish":bullish,"bearish":not bullish,"swept_low":swept_low,"swept_high":swept_high,"near_floor":near_floor,"near_ceiling":near_ceiling,"FLOOR":FLOOR,"CEIL":CEIL,"LOCAL_FLOOR":LOCAL_FLOOR,"LOCAL_CEIL":LOCAL_CEIL}
+
+        accum_hours = 0; accum_start_idx = len(r)-1
+        for i in range(len(r)-1, 10, -1):
+            window = r[max(0,i-24):i]
+            wh = max([float(x[2]) for x in window]); wl = min([float(x[3]) for x in window])
+            wp = float(window[-1][4])
+            range_pct = (wh-wl)/wp*100 if wp else 100
+            if range_pct > ACCUM_RANGE_PCT: break
+            accum_hours += 5/60; accum_start_idx = i
+
+        recent_vols = vols[max(0,accum_start_idx):] if accum_hours>=0.5 else vols[-36:]
+        pool_vol = sum(recent_vols) if recent_vols else 1
+        vol_pool_pct = (vols[-1]/pool_vol*100) if pool_vol else 0
+        recent_range_pct = (max(highs[-36:])-min(lows[-36:]))/price*100 if len(highs)>=36 else 100
+        accum_high = max(highs[accum_start_idx:]) if accum_hours>=0.5 else max(highs[-36:])
+        accum_low = min(lows[accum_start_idx:]) if accum_hours>=0.5 else min(lows[-36:])
+
+        # FIXED: mexc uses 1d not 1D
+        try:
+            rd = requests.get("https://api.mexc.com/api/v3/klines",
+                              params={"symbol":sym,"interval":"1d","limit":3}, timeout=10).json()
+            prev_high = float(rd[-2][2]) if len(rd)>=2 else CEIL
+            prev_low = float(rd[-2][3]) if len(rd)>=2 else FLOOR
+        except:
+            prev_high = CEIL; prev_low = FLOOR
+
+        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"v5t":v5t,"vol_x_avg":v1t,"volumes":vols,"avg_50":avg_50,"bullish":bullish,"bearish":not bullish,"swept_low":swept_low,"swept_high":swept_high,"FLOOR":FLOOR,"CEIL":CEIL,"accum_hours":accum_hours,"pool_vol":pool_vol,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"avg_body":avg_body,"last_body":body}
     except Exception as e:
         print(f"{sym} err {e}", flush=True); return None
 
 def scan(sym):
     d = get_data(sym)
     if not d: return
-    price=d["price"]; low_r=d["low_r"]; up_r=d["up_r"]; v1t=d["v1t"]; vol_x_avg=d["vol_x_avg"]; volumes=d["volumes"]; avg_50=d["avg_50"]
-    v15t = sum(volumes[-15:])/15/avg_50 if len(volumes)>=15 and avg_50 else d["v5t"]
-    # FIXED WHALE - needs vol too
-    is_whale = (low_r >= WHALE_WICK or up_r >= WHALE_WICK) and vol_x_avg >= VOL_OVERALL_MIN
-    print(f"{sym} price {price:.5f} vol {vol_x_avg:.2f}x wick L{low_r:.1f} U{up_r:.1f} sweep L{d['swept_low']} H{d['swept_high']} whale {is_whale}", flush=True)
-    if vol_x_avg < VOL_OVERALL_MIN: return
+    if d["recent_range_pct"] < 0.3: return
+    if d["accum_hours"] >= ACCUM_MIN_HOURS and d["vol_pool_pct"] < VOL_POOL_BREAK_PCT: return
+    if d["last_body"] < d["avg_body"]*1.8 and d["accum_hours"]>=1: return
+    if d["vol_x_avg"] < VOL_OVERALL_MIN: return
+
     def can_send(side):
         now=time.time()
         last = COOLDOWN.get("signals",{}).get(sym)
         if last and now-last < SIGNAL_COOLDOWN_MIN*60: return False
         COOLDOWN["signals"][sym]=now; COOLDOWN["last_side"][sym]=side; save_cooldown(); return True
-    if (v1t>=1.2 and low_r>=1.8 and d["bullish"]) or (low_r>=1.5 and d["swept_low"]):
-        if can_send("BUY"):
-            sl = d["FLOOR"]*0.988 if d["near_floor"] else d["LOCAL_FLOOR"]*0.988
-            nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            send_telegram(f"🟢 {sym} BUY {low_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{nairobi}] SL {sl:.5f}")
-    if (v1t>=1.2 and up_r>=1.8 and d["bearish"]) or (up_r>=1.5 and d["swept_high"]):
-        if can_send("SELL"):
-            sl = d["CEIL"]*1.012 if d["near_ceiling"] else d["LOCAL_CEIL"]*1.012
-            nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{nairobi}] SL {sl:.5f}")
 
-print(f"=== BOT STARTED GRASS LIST 24/7 INSTANT ===", flush=True)
-print(f"Nairobi: {datetime.now(ZoneInfo('Africa/Nairobi'))}", flush=True)
-print(f"Symbols: {SYMBOLS}", flush=True)
-# FIXED LINE 137 - USES CORRECT NAMES
-print(f"Telegram token set: {bool(TELEGRAM_TOKEN)} chat set: {bool(TELEGRAM_CHAT)}", flush=True)
+    price = d["price"]
+    if (d["v1t"]>=1.2 and d["low_r"]>=1.8 and d["bullish"]) or (d["low_r"]>=1.5 and d["swept_low"]):
+        if can_send("BUY"):
+            sl = min(d["accum_low"], d["prev_low"]) * 0.998
+            tp1 = d["accum_high"]; tp2 = d["prev_high"]
+            if tp2 <= price: tp2 = price + (d["accum_high"]-d["accum_low"])*1.5
+            nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
+            send_telegram(f"🟢 {sym} BUY\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h | Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev day low {d['prev_low']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
+
+    if (d["v1t"]>=1.2 and d["up_r"]>=1.8 and d["bearish"]) or (d["up_r"]>=1.5 and d["swept_high"]):
+        if can_send("SELL"):
+            sl = max(d["accum_high"], d["prev_high"]) * 1.002
+            tp1 = d["prev_low"]; tp2 = price - (d["accum_high"]-d["accum_low"])*1.5
+            nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
+            send_telegram(f"🔴 {sym} SELL\nEntry: {price:.6f} (NOW)\nAccum: {d['accum_hours']:.1f}h | Vol {d['vol_pool_pct']:.0f}% pool\nSL: {sl:.6f} (prev day high {d['prev_high']:.6f})\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
+
+active_symbols = get_all_usdt_symbols() if SCAN_ALL_USDT else SYMBOLS
+print(f"=== BOT V6 FIXED 1d + VOL ACCUM {len(active_symbols)} USDT ===", flush=True)
 
 while True:
-    nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
-    print(f"--- [{nairobi.strftime('%H:%M:%S')}] Scanning ---", flush=True)
-    for sym in SYMBOLS:
+    for sym in active_symbols:
         try: scan(sym)
         except Exception as e: print(e, flush=True)
     now = datetime.now(ZoneInfo("Africa/Nairobi"))
     wait = 300 - (now.minute % 5 * 60 + now.second)
     if wait < 10: wait += 300
-    print(f"Next scan in {wait//60}m {wait%60}s", flush=True)
     time.sleep(wait)
