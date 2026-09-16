@@ -142,4 +142,10 @@ while True:
     for sym in SYMBOLS:
         try: scan(sym)
         except Exception as e: print(e, flush=True)
-    time.sleep(5) # INSTANT - was 30
+    
+    # wait until next 5 minute mark
+    now = datetime.now(ZoneInfo("Africa/Nairobi"))
+    wait = 300 - (now.minute % 5 * 60 + now.second)
+    if wait < 10: wait += 300
+    print(f"Next scan in {wait//60}m {wait%60}s", flush=True)
+    time.sleep(wait)
