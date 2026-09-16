@@ -2,14 +2,14 @@ import time, json, os, requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# GRASS etc list - using MEXC spot format for this logic
+# GRASS etc list
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
 SIGNAL_COOLDOWN_MIN = 30
 NO_REENTRY_CANDLES = 4
 WHALE_WICK = 2.0
 VOL_OVERALL_MIN = 1.2
 
-# Supports BOTH your old and new telegram env names
+# Telegram - supports both names
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
 COOLDOWN_FILE = "cooldown.json"
@@ -94,8 +94,12 @@ def scan(sym):
     overall_increase = vol_x_avg >= 1.5
 
     is_whale = low_r >= WHALE_WICK or up_r >= WHALE_WICK
-    if d["is_middle"] and vol_x_avg < 2.0: return
-    if not d["is_pick"]: return
+
+    # --- REMOVED TIME FILTER FOR 24/7 ---
+    # Original had: if d["is_middle"] and vol_x_avg < 2.0: return
+    # Original had: if not d["is_pick"]: return
+    # Now we leave only volume filter
+
     if vol_x_avg < VOL_OVERALL_MIN: return
 
     def can_send(side):
@@ -119,35 +123,22 @@ def scan(sym):
     if (whale_flash_buy or buy_wick) and can_send("BUY"):
         sl = d["FLOOR"]*0.988 if d["near_floor"] else d["LOCAL_FLOOR"]*0.988
         tp = price + (price-sl)*2.0
-        send_telegram(f"🟢 {sym} BUY {low_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f}")
+        send_telegram(f"🟢 {sym} BUY {low_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f} TP {tp:.5f}")
 
     if (whale_flash_sell or sell_wick) and can_send("SELL"):
         sl = d["CEIL"]*1.012 if d["near_ceiling"] else d["LOCAL_CEIL"]*1.012
         tp = price - (sl-price)*2.0
-        send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}]")
+        send_telegram(f"🔴 {sym} SELL {up_r:.1f}x vol{vol_x_avg:.1f}x 1m{v1t:.1f} 15m{v15t:.1f} [{d['session']}] SL {sl:.5f} TP {tp:.5f}")
 
-# FIXED LOOP
-START_TIME = time.time()
-MAX_RUNTIME = 60 * 60
-
-print(f"=== BOT STARTED GRASS LIST + MESSED LOGIC ===", flush=True)
-print(f"Nairobi: {datetime.now(ZoneInfo('Africa/Nairobi'))} | Max 60 min", flush=True)
+# FIXED LOOP - 24/7
+print(f"=== BOT STARTED GRASS LIST + MESSED LOGIC 24/7 ===", flush=True)
+print(f"Nairobi: {datetime.now(ZoneInfo('Africa/Nairobi'))}", flush=True)
 print(f"Symbols: {SYMBOLS}", flush=True)
 print(f"Telegram token set: {bool(TELEGRAM_TOKEN)} chat set: {bool(TELEGRAM_CHAT)}", flush=True)
 
 while True:
-    elapsed = time.time() - START_TIME
-    if elapsed > MAX_RUNTIME:
-        print(f"60 min reached - stopping", flush=True)
-        break
-
     nairobi = datetime.now(ZoneInfo("Africa/Nairobi"))
-    if 0 <= nairobi.hour < 9:
-        print(f"[{nairobi.strftime('%H:%M:%S')}] Sleep 0-9am | {elapsed/60:.1f}m", flush=True)
-        time.sleep(60)
-        continue
-
-    print(f"[{nairobi.strftime('%H:%M:%S')}] Scanning... {elapsed/60:.1f}m/60m", flush=True)
+    print(f"[{nairobi.strftime('%H:%M:%S')}] Scanning... ", flush=True)
     for sym in SYMBOLS:
         try: scan(sym)
         except Exception as e: print(e, flush=True)
