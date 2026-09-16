@@ -1,165 +1,132 @@
-import os, ccxt, pandas as pd, requests, time, json
+import ccxt, pandas as pd, time, json
 from datetime import datetime, timezone
 
-def get_env_clean(*names): return None
-TELEGRAM_TOKEN=get_env_clean("TELEGRAM_BOT_TOKEN","BOT_TOKEN")
-TELEGRAM_CHAT=get_env_clean("TELEGRAM_CHAT_ID","CHAT_ID")
+SYMBOLS=["KOMA/USDT:USDT","GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","VELVET/USDT:USDT"]
 
-KOMA_SYMBOL="KOMA/USDT:USDT"
-OTHER_LIST=["GRASS/USDT:USDT","HEI/USDT:USDT","LAB/USDT:USDT","SIREN/USDT:USDT","VELVET/USDT:USDT"]
-PICK_HOURS={"ASIAN":[0,1],"LONDON":[8,9,10,11,12],"NEW YORK":[13,14,15,16,17,18,19,20,21,22,23]}
+PICK_HOURS={"ASIAN":[23,0,1],"FRANKFURT":[6,7,8],"LONDON":[8,9,10,11,12],"NEW YORK":[13,14,15,16,17,18,19,20,21,22,23]}
+PURE_PICK={"ASIAN":[23,0,1],"FRANKFURT":[6,7],"LONDON":[8,9],"NEW YORK":[13,14]}
 SIGNAL_COOLDOWN_MIN=45
-BODY_EXIT_RATIO=0.55
-FLIP_BREAK_PCT=0.001
 NO_REENTRY_CANDLES=4
 SL_BUFFER=0.012
 TP_BUFFER=0.006
 SWEEP_DIST_PCT=0.05
+WHALE_VOL=2.5
 
-try: COOLDOWN_OTHER=json.load(open("cooldown_other.json"))
-except: COOLDOWN_OTHER={"count_today":0,"date":datetime.now(timezone.utc).strftime('%Y-%m-%d'),"flips":{},"exits":{}}
-try: COOLDOWN_KOMA=json.load(open("cooldown_koma.json"))
-except: COOLDOWN_KOMA={"count_today":0,"date":datetime.now(timezone.utc).strftime('%Y-%m-%d'),"flips":{},"exits":{}}
+try: COOLDOWN=json.load(open("cooldown.json"))
+except: COOLDOWN={"signals":{},"exits":{}}
 
-def save_other():
-    try: json.dump(COOLDOWN_OTHER,open("cooldown_other.json","w"))
-    except: pass
-def save_koma():
-    try: json.dump(COOLDOWN_KOMA,open("cooldown_koma.json","w"))
-    except: pass
-
-def send_telegram(msg):
-    try:
-        if TELEGRAM_TOKEN and TELEGRAM_CHAT:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=15)
-    except: pass
-    print(msg)
+def save_cooldown(): json.dump(COOLDOWN,open("cooldown.json","w"))
+def send_telegram(msg): print(msg)
 
 def get_killzone():
     h=datetime.now(timezone.utc).hour
-    for sess,hours in PICK_HOURS.items():
-        if h in hours: return sess,h,True
+    for sess,hrs in PURE_PICK.items():
+        if h in hrs: return f"{sess} PICK",h,True
+    for sess,hrs in PICK_HOURS.items():
+        if h in hrs: return sess,h,False
     return "DEAD ZONE",h,False
 
-def get_exchanges():
-    api_key = os.getenv("MEXC_API_KEY") or ""
-    secret = os.getenv("MEXC_SECRET") or ""
-    api_key=api_key.strip().replace('"','').replace("'","")
-    secret=secret.strip().replace('"','').replace("'","")
-    ex_public=ccxt.mexc({'enableRateLimit':True})
-    if len(api_key)>10 and len(secret)>10:
-        ex_private=ccxt.mexc({'apiKey':api_key,'secret':secret,'enableRateLimit':True,'options':{'defaultType':'swap'}})
-        return ex_public, ex_private
-    return ex_public, None
-
-def can_send_other(sym, price):
+def can_send(sym):
     now=time.time()
-    if now-COOLDOWN_OTHER.get("exits",{}).get(sym,0) < NO_REENTRY_CANDLES*5*60: return False
-    if now-COOLDOWN_OTHER.get(sym,0) > SIGNAL_COOLDOWN_MIN*60:
-        COOLDOWN_OTHER[sym]=now; save_other(); return True
+    if now-COOLDOWN.get("exits",{}).get(sym,0) < NO_REENTRY_CANDLES*5*60: return False
+    last=COOLDOWN.get("signals",{}).get(sym,0)
+    if now-last > SIGNAL_COOLDOWN_MIN*60 or sym not in COOLDOWN.get("signals",{}):
+        COOLDOWN["signals"][sym]=now; save_cooldown(); return True
     return False
 
-def can_send_koma():
-    now=time.time()
-    k=f"{KOMA_SYMBOL}_SCAN"
-    if now-COOLDOWN_KOMA.get("exits",{}).get(KOMA_SYMBOL,0) < NO_REENTRY_CANDLES*5*60: return False
-    if now-COOLDOWN_KOMA.get(k,0) > SIGNAL_COOLDOWN_MIN*60:
-        COOLDOWN_KOMA[k]=now; save_koma(); return True
-    return False
-
-def scan_koma(ex_public, ex_private, session, is_pick):
+def get_vol_trends(ex, sym):
     try:
-        df5m=pd.DataFrame(ex_public.fetch_ohlcv(KOMA_SYMBOL,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        df1d=pd.DataFrame(ex_public.fetch_ohlcv(KOMA_SYMBOL,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        if len(df5m)<30: return
-        i=-2 # CLOSED CANDLE FIX - your bug was -1
-        o,c,h,l = df5m['open'].iloc[i], df5m['close'].iloc[i], df5m['high'].iloc[i], df5m['low'].iloc[i]
-        if h==l: return
-        body=abs(c-o)
-        if body < (h-l)*0.2: body=(h-l)*0.2 # FIX 0.0x bug - min 20% of range
-        up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
-        price=c; CEIL=df1d['high'].tail(10).max(); FLOOR=df1d['low'].tail(10).min()
-        vol=df5m['volume'].iloc[i]; vol_prev=df5m['volume'].iloc[i-1]
-        vol_avg=df5m['volume'].iloc[-26:-2].mean() or 1
-        vol_trend=vol/vol_prev if vol_prev>0 else 1.0
-        recent_low=df5m['low'].iloc[-22:-2].min(); recent_high=df5m['high'].iloc[-22:-2].max()
-        swept_low = (l <= recent_low*1.002) or (low_r>=2.2)
-        swept_high = (h >= recent_high*0.998) or (up_r>=2.2)
-        print(f"KOMA {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x vol {vol/vol_avg:.2f}x trend {vol_trend:.2f}x {'INC' if vol>vol_prev else 'DEC'} sweptL {swept_low} sweptH {swept_high} CLOSED {i}")
+        df1=pd.DataFrame(ex.fetch_ohlcv(sym,'1m',limit=10),columns=['t','o','h','l','c','v'])
+        df3=pd.DataFrame(ex.fetch_ohlcv(sym,'3m',limit=10),columns=['t','o','h','l','c','v'])
+        df5=pd.DataFrame(ex.fetch_ohlcv(sym,'5m',limit=30),columns=['t','o','h','l','c','v'])
+        df15=pd.DataFrame(ex.fetch_ohlcv(sym,'15m',limit=20),columns=['t','o','h','l','c','v'])
+        v1t=df1['v'].iloc[-2]/df1['v'].iloc[-3] if df1['v'].iloc[-3]>0 else 1.0
+        v3t=df3['v'].iloc[-2]/df3['v'].iloc[-3] if df3['v'].iloc[-3]>0 else 1.0
+        v5t=df5['v'].iloc[-2]/df5['v'].iloc[-3] if df5['v'].iloc[-3]>0 else 1.0
+        v15t=df15['v'].iloc[-2]/df15['v'].iloc[-3] if df15['v'].iloc[-3]>0 else 1.0
+        v5_avg=df5['v'].iloc[-22:-2].mean() or 1
+        v5_3trend=df5['v'].iloc[-4:-1].mean()/(df5['v'].iloc[-7:-4].mean() or 1)
+        return v1t,v3t,v5t,v15t,df5['v'].iloc[-2]/v5_avg,v5_3trend,df5
+    except:
+        return 1.0,1.0,1.0,1.0,1.0,1.0,None
 
-        if not is_pick: return
-        if up_r>=3.0 and low_r>=3.0: return # both wicks = indecision
-
-        if low_r>=1.2 and swept_low:
-            if price > l*(1+SWEEP_DIST_PCT): return
-            if low_r < 5.0 and vol < vol_avg*0.15: return
-            if low_r < 5.0 and vol_trend < 0.75:
-                print(f"SKIP KOMA BUY need INC trend {vol_trend:.2f}x"); return
-            if can_send_koma():
-                sl=l*(1-SL_BUFFER); risk=price-sl
-                send_telegram(f"🟢 *KOMA BUY SWEEP Low {low_r:.1f}x at {price:.5f}* VOL INC {vol_trend:.2f}x vol {vol/vol_avg:.2f}x\nSL {sl:.5f} TP {price+risk*1.5:.5f}/{price+risk*3:.5f}")
-
-        if up_r>=1.2 and swept_high:
-            if price < h*(1-SWEEP_DIST_PCT): return
-            if up_r < 5.0 and vol < vol_avg*0.15: return
-            if up_r < 5.0 and vol_trend > 1.9:
-                print(f"SKIP KOMA SELL need DEC trend {vol_trend:.2f}x"); return
-            if can_send_koma():
-                sl=h*(1+SL_BUFFER); risk=sl-price
-                send_telegram(f"🔴 *KOMA SELL SWEEP High {up_r:.1f}x at {price:.5f}* VOL {'INC' if vol>vol_prev else 'DEC'} {vol_trend:.2f}x vol {vol/vol_avg:.2f}x\nSL {sl:.5f} TP {price-risk*1.5:.5f}/{price-risk*3:.5f}")
-    except Exception as e: print(f"KOMA err {e}")
-
-def scan_other_one(sym, ex_public, ex_private, session, is_pick):
+def scan(sym, ex, session, is_pick):
     try:
-        df5m=pd.DataFrame(ex_public.fetch_ohlcv(sym,'5m',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        df1d=pd.DataFrame(ex_public.fetch_ohlcv(sym,'1d',limit=100),columns=['timestamp','open','high','low','close','volume'])
-        if len(df5m)<30: return
+        v1t,v3t,v5t,v15t,vol_x_avg,v5_3trend,df5m = get_vol_trends(ex,sym)
+        df1d=pd.DataFrame(ex.fetch_ohlcv(sym,'1d',limit=20),columns=['t','o','h','l','c','v'])
+        if df5m is None or len(df5m)<25: return
         i=-2
-        o,c,h,l = df5m['open'].iloc[i], df5m['close'].iloc[i], df5m['high'].iloc[i], df5m['low'].iloc[i]
-        if h==l: return
-        body=abs(c-o)
-        if body < (h-l)*0.2: body=(h-l)*0.2
+        o,c,h,l=df5m['o'].iloc[i],df5m['c'].iloc[i],df5m['h'].iloc[i],df5m['l'].iloc[i]
+        body=abs(c-o) or (h-l)*0.2
         up_r=(h-max(o,c))/body; low_r=(min(o,c)-l)/body
-        price=c; CEIL=df1d['high'].tail(10).max(); FLOOR=df1d['low'].tail(10).min()
-        vol=df5m['volume'].iloc[i]; vol_prev=df5m['volume'].iloc[i-1]
-        vol_avg=df5m['volume'].iloc[-26:-2].mean() or 1
-        vol_trend=vol/vol_prev if vol_prev>0 else 1.0
-        recent_low=df5m['low'].iloc[-22:-2].min(); recent_high=df5m['high'].iloc[-22:-2].max()
-        swept_low = (l <= recent_low*1.002) or (low_r>=2.2)
-        swept_high = (h >= recent_high*0.998) or (up_r>=2.2)
-        print(f"{sym} {price:.5f} Up {up_r:.1f}x Low {low_r:.1f}x vol {vol/vol_avg:.2f}x trend {vol_trend:.2f}x {'INC' if vol>vol_prev else 'DEC'} sweptL {swept_low} sweptH {swept_high} CLOSED {i}")
+        price=c; bullish=c>o; bearish=c<o
+
+        CEIL=df1d['h'].tail(10).max(); FLOOR=df1d['l'].tail(10).min()
+        LOCAL_CEIL=df5m['h'].iloc[-22:-2].max(); LOCAL_FLOOR=df5m['l'].iloc[-22:-2].min()
+        recent_low=df5m['l'].iloc[-22:-2].min(); recent_high=df5m['h'].iloc[-22:-2].max()
+        swept_low=(l<=recent_low*1.002) or (low_r>=2.2)
+        swept_high=(h>=recent_high*0.998) or (up_r>=2.2)
+        near_ceiling=price>=CEIL*0.998; near_floor=price<=FLOOR*1.002
+        is_middle=not near_ceiling and not near_floor
+        whale_vol=vol_x_avg>=WHALE_VOL
+
+        print(f"{sym} {price:.5f} L{low_r:.1f} H{up_r:.1f} 1m{v1t:.1f}x 3m{v3t:.1f}x 5m{v5t:.1f}x 15m{v15t:.1f}x [{session}]")
 
         if not is_pick: return
         if up_r>=3.0 and low_r>=3.0: return
 
-        if low_r>=1.5 and swept_low:
-            if price > l*(1+SWEEP_DIST_PCT): return
-            if low_r < 5.0 and vol < vol_avg*0.15: return
-            if low_r < 5.0 and vol_trend < 0.75: return
-            if can_send_other(sym, price):
-                sl=l*(1-SL_BUFFER); risk=price-sl
-                send_telegram(f"🟢 *{sym} BUY SWEEP Low {low_r:.1f}x at {price:.5f}* SCORE VOL INC {vol_trend:.2f}x dist {(price-l)/l*100:.1f}% vol {vol/vol_avg:.2f}x\nSL {sl:.5f} TP1 {price+risk*1.5:.5f} TP2 {price+risk*3:.5f}")
+        # === 4 TYPES ===
+        retail_slow_buy = v1t>=1.3 and v3t>=1.2 and v5t>=1.1 and v15t>=1.0 and bullish and low_r<1.5
+        retail_slow_sell = v1t>=1.3 and v3t>=1.2 and v5t>=1.1 and v15t>=1.0 and bearish and up_r<1.5
+        whale_flash_buy = v1t>=2.5 and low_r>=2.0 and bullish
+        whale_flash_sell = v1t>=2.5 and up_r>=2.0 and bearish
 
-        if up_r>=1.5 and swept_high:
-            if price < h*(1-SWEEP_DIST_PCT): return
-            if up_r < 5.0 and vol < vol_avg*0.15: return
-            if up_r < 5.0 and vol_trend > 1.9: return
-            if can_send_other(sym, price):
-                sl=h*(1+SL_BUFFER); risk=sl-price
-                send_telegram(f"🔴 *{sym} SELL SWEEP High {up_r:.1f}x at {price:.5f}* VOL {'INC' if vol>vol_prev else 'DEC'} {vol_trend:.2f}x dist {(h-price)/h*100:.1f}% vol {vol/vol_avg:.2f}x\nSL {sl:.5f} TP1 {price-risk*1.5:.5f} TP2 {price-risk*3:.5f}")
+        # Old wick + middle
+        buy_wick = low_r>=1.2 and swept_low and v5t>=0.75
+        buy_vol_middle = v5t>=1.25 and bullish and v5_3trend>=1.15 and is_middle
+        sell_wick = up_r>=1.2 and swept_high and v5t<=1.9
+        sell_vol_middle = v5t<=0.80 and bearish and v5_3trend<=0.90 and is_middle
+
+        # BUY
+        if (retail_slow_buy or whale_flash_buy or buy_wick or buy_vol_middle) and can_send(sym):
+            sl = FLOOR*0.988 if near_floor else LOCAL_FLOOR*0.988 if is_middle else l*0.988
+            risk=price-sl
+            if risk>0:
+                tp1=price+risk*1.5; tp2=price+risk*3.0
+                tp3=CEIL*0.994 if near_floor else LOCAL_CEIL*0.994
+                tag=""
+                if retail_slow_buy: tag+=" RETAIL SLOW BUY→15m/1H"
+                if retail_slow_sell: tag+=""
+                if whale_flash_buy: tag+=" WHALE FLASH BUY⚡"
+                if buy_vol_middle: tag+=" VOL🔼 MIDDLE"
+                if buy_wick: tag+=" WICK"
+                if whale_vol: tag+=" WHALE"
+                if is_middle: tag+=" MIDDLE"
+                send_telegram(f"🟢 {sym} BUY {low_r:.1f}x{tag} at {price:.5f} 1m{v1t:.1f}x 3m{v3t:.1f}x 5m{v5t:.1f}x [{session}] SL {sl:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
+
+        # SELL
+        if (retail_slow_sell or whale_flash_sell or sell_wick or sell_vol_middle) and can_send(sym):
+            sl = CEIL*1.012 if near_ceiling else LOCAL_CEIL*1.012 if is_middle else h*1.012
+            risk=sl-price
+            if risk>0:
+                tp1=price-risk*1.5; tp2=price-risk*3.0
+                tp3=FLOOR*1.006 if near_ceiling else LOCAL_FLOOR*1.006
+                tag=""
+                if retail_slow_sell: tag+=" RETAIL SLOW SELL→15m/1H"
+                if whale_flash_sell: tag+=" WHALE FLASH SELL⚡"
+                if sell_vol_middle: tag+=" VOL🔽 MIDDLE"
+                if sell_wick: tag+=" WICK"
+                if is_middle: tag+=" MIDDLE"
+                send_telegram(f"🔴 {sym} SELL {up_r:.1f}x{tag} at {price:.5f} 1m{v1t:.1f}x 3m{v3t:.1f}x 5m{v5t:.1f}x [{session}] SL {sl:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} TP3 {tp3:.5f}")
+
     except Exception as e: print(f"{sym} err {e}")
 
 def main():
-    ex_public, ex_private = get_exchanges()
+    ex=ccxt.mexc({'enableRateLimit':True})
     session,hour_utc,is_pick=get_killzone()
-    print(f"\n=== 5% WICK=SWEEP + VOL TREND SCAN {session} UTC {hour_utc} PICK={is_pick} ===")
-    scan_koma(ex_public, ex_private, session, is_pick)
-    time.sleep(1)
-    for s in OTHER_LIST:
-        scan_other_one(s, ex_public, ex_private, session, is_pick)
-        time.sleep(2)
+    print(f"\n=== FINAL V4 RETAIL+WHALE 1m+3m+5m+15m {session} UTC {hour_utc} ===")
+    for s in SYMBOLS:
+        scan(s,ex,session,is_pick); time.sleep(1.5)
 
 if __name__=="__main__":
-    for i in range(3):
-        main()
-        if i<2: time.sleep(30)
+    main()
