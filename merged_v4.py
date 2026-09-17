@@ -3,152 +3,113 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOLS = ["KOMAUSDT","GRASSUSDT","HEIUSDT","LABUSDT","SIRENUSDT","VELVETUSDT"]
-SYMBOLS_PERP = [s.replace("USDT","_USDT") for s in SYMBOLS]
-SIGNAL_COOLDOWN_MIN = 60
-VOL_ABSOLUTE_MIN = 5
-VOL_POOL_BREAK_PCT = 12
-ACCUM_RANGE_PCT = 1.8
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
-TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or ""
-COOLDOWN_FILE = "cooldown.json"
-COOLDOWN = {"signals":{}}
+PERPS = [s.replace("USDT","_USDT") for s in SYMBOLS]
+COOLDOWN_FILE="cooldown.json"
+COOLDOWN={"signals":{}}
 if os.path.exists(COOLDOWN_FILE):
-    try: COOLDOWN = json.load(open(COOLDOWN_FILE))
+    try: COOLDOWN=json.load(open(COOLDOWN_FILE))
     except: pass
-
-def save_cooldown():
-    with open(COOLDOWN_FILE,"w") as f: json.dump(COOLDOWN,f)
-
-def send_telegram(msg):
+def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
+def tg(msg):
     print(msg, flush=True)
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT: return
-    try: requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", params={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=10)
-    except: pass
+    t=os.getenv("TELEGRAM_TOKEN") or ""; c=os.getenv("TELEGRAM_CHAT") or ""
+    if t and c:
+        try: requests.get(f"https://api.telegram.org/bot{t}/sendMessage",params={"chat_id":c,"text":msg},timeout=10)
+        except: pass
 
-def dir_vol(closes, opens, highs, lows, vols, n=3):
-    bv = sv = 0.0
-    for c,o,h,l,v in zip(closes[-n:], opens[-n:], highs[-n:], lows[-n:], vols[-n:]):
-        rng = (h-l) + 1e-9
-        pressure = (c-o)/rng
-        if pressure > 0: bv += v*pressure
-        else: sv += v*abs(pressure)
-    return bv, sv
+def kl(sym, interval):
+    r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}",params={"interval":interval},timeout=10).json()
+    if not r.get("success"): return None
+    d=r.get("data",{})
+    return {"o":[float(x) for x in d.get("open",[])],"h":[float(x) for x in d.get("high",[])],
+            "l":[float(x) for x in d.get("low",[])],"c":[float(x) for x in d.get("close",[])],
+            "v":[float(x) for x in d.get("vol",[])]}
 
-def get_data(sym_spot, sym_perp):
-    try:
-        url = f"https://contract.mexc.com/api/v1/contract/kline/{sym_perp}"
-        r = requests.get(url, params={"interval":"Min5"}, timeout=10).json()
-        if not r.get("success"): return None
-        data = r.get("data",{})
-        closes = [float(x) for x in data.get("close",[])]; highs = [float(x) for x in data.get("high",[])]
-        lows = [float(x) for x in data.get("low",[])]; opens = [float(x) for x in data.get("open",[])]
-        vols = [float(x) for x in data.get("vol",[])]
-        if len(closes)<50: return None
-        closes=closes[-100:]; highs=highs[-100:]; lows=lows[-100:]; opens=opens[-100:]; vols=vols[-100:]
-        price = closes[-1]
-        avg_vol = sum(vols[-36:])/36 if len(vols)>=36 else sum(vols)/len(vols)
-        v1t = vols[-1]/avg_vol if avg_vol else 1
-        vol_pool_pct = v1t*10
-        body = abs(closes[-1]-opens[-1]) + 0.000001
-        low_r = (min(opens[-1],closes[-1]) - lows[-1]) / body
-        up_r = (highs[-1] - max(opens[-1],closes[-1])) / body
-        swept_low = lows[-1] < min(lows[-10:-1]); swept_high = highs[-1] > max(highs[-10:-1])
-        bullish = closes[-1] > opens[-1]; bearish = not bullish
-        bv, sv = dir_vol(closes, opens, highs, lows, vols, 3)
-        accum_hours = 0; accum_start_idx = len(closes)-1
-        for i in range(len(closes)-1, 10, -1):
-            wh = max(highs[max(0,i-12):i]); wl = min(lows[max(0,i-12):i])
-            wp = closes[i-1]
-            range_pct = (wh-wl)/wp*100 if wp else 100
-            if range_pct > ACCUM_RANGE_PCT: break
-            accum_hours += 5/60; accum_start_idx = i
-        recent_range_pct = (max(highs[-36:])-min(lows[-36:]))/price*100 if len(highs)>=36 else 100
-        accum_high = max(highs[accum_start_idx:]) if accum_hours>=0.1 else max(highs[-36:])
-        accum_low = min(lows[accum_start_idx:]) if accum_hours>=0.1 else min(lows[-36:])
-        trend_1h = (closes[-1]/closes[-12]-1)*100 if len(closes)>=12 else 0
+def pattern(h,l):
+    tops=[];bots=[]
+    for i in range(2,len(h)-2):
+        if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i+1] and h[i]>h[i+2]: tops.append(h[i])
+        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i+1] and l[i]<l[i+2]: bots.append(l[i])
+    tops=tops[-3:];bots=bots[-3:]
+    if len(tops)>=3 and max(tops)-min(tops)<sum(tops)/3*0.008: return "triple_top"
+    if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008: return "double_top"
+    if len(bots)>=3 and max(bots)-min(bots)<sum(bots)/3*0.008: return "triple_bottom"
+    if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008: return "double_bottom"
+    return "none"
+
+def full_scan(s,p):
+    d15=kl(p,"Min15"); h1=kl(p,"Min60"); m1=kl(p,"Min1")
+    if not d15 or not h1: return
+    c,o,h,l,v=d15["c"][-60:],d15["o"][-60:],d15["h"][-60:],d15["l"][-60:],d15["v"][-60:]
+    price=c[-1]
+    v15=v[-1]/(sum(v[-20:])/20+1e-9)
+    hv=h1["v"]; v1h=hv[-1]/(sum(hv[-20:])/20+1e-9) if len(hv)>=20 else 1
+    # RSI
+    g=[max(c[-i]-c[-i-1],0) for i in range(1,15)]; lo=[max(c[-i-1]-c[-i],0) for i in range(1,15)]
+    rsi=100-100/(1+(sum(g)/14)/(sum(lo)/14+1e-9))
+    body=abs(c[-1]-o[-1])+1e-9
+    bull_sw=(min(o[-1],c[-1])-l[-1])>2*body and c[-1]>o[-1] and v15>1.5
+    bear_sw=(h[-1]-max(o[-1],c[-1]))>2*body and c[-1]<o[-1] and v15>1.5
+    pat=pattern(h,l)
+    trend=(h1["c"][-1]/h1["c"][-4]-1)*100 if len(h1["c"])>=4 else 0
+    rng=(max(h[-12:])-min(l[-12:]))/price*100
+    jun="none"
+    if rng<1.8:
+        jun="continual buying" if v1h>1.5 and price>sum(c[-12:])/12 else "continual selling" if v1h>1.5 and price<sum(c[-12:])/12 else "indecision - wait"
+    dd=kl(p,"Day1")
+    ph,pl=(dd["h"][-2],dd["l"][-2]) if dd and len(dd["h"])>=2 else (max(h[-20:]),min(l[-20:]))
+
+    sig=None; is_buy=False
+    if v15>=2.0:
+        if c[-1]>o[-1] and rsi>55: sig="VOL BOSS BUY"; is_buy=True
+        elif c[-1]<o[-1] and rsi<45: sig="VOL BOSS SELL"; is_buy=False
+    if bull_sw and rsi>50: sig="SWEEP BUY"; is_buy=True
+    if bear_sw and rsi<50: sig="SWEEP SELL"; is_buy=False
+    if pat in ("double_bottom","triple_bottom") and v15>1.5: sig=f"{pat.upper()} BUY"; is_buy=True
+    if pat in ("double_top","triple_top") and v15>1.5: sig=f"{pat.upper()} SELL"; is_buy=False
+    if not sig: return
+
+    now=time.time(); prev=COOLDOWN["signals"].get(s,{})
+    is_flip=prev.get("dir") is not None and prev.get("dir")!=is_buy
+    # SMART COOLDOWN - volume is boss
+    if v15>=3.0: pass # bypass all
+    elif is_flip:
+        if now-prev.get("t",0)<60*60: return
+    else:
+        if prev.get("dir")==is_buy: return
+        if now-prev.get("t",0)<240*60: return
+
+    sl=min(l[-1],pl)*0.997 if is_buy else max(h[-1],ph)*1.003
+    tp1=price+(ph-price)*0.5 if is_buy else price-(price-pl)*0.5
+    tp2=ph*1.005 if is_buy else pl*0.995
+    COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
+    nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f} [{nai}]")
+
+def volume_radar():
+    # 1m spike detector - understands seconds/minutes
+    for s,p in zip(SYMBOLS,PERPS):
         try:
-            rd = requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym_perp}", params={"interval":"Day1"}, timeout=10).json()
-            ddata = rd.get("data",{})
-            dh = [float(x) for x in ddata.get("high",[])]; dl = [float(x) for x in ddata.get("low",[])]
-            prev_high = dh[-2] if len(dh)>=2 else max(highs[-20:]); prev_low = dl[-2] if len(dl)>=2 else min(lows[-20:])
-        except:
-            prev_high = max(highs[-20:]); prev_low = min(lows[-20:])
-        return {"price":price,"low_r":low_r,"up_r":up_r,"v1t":v1t,"bullish":bullish,"bearish":bearish,"swept_low":swept_low,"swept_high":swept_high,"accum_hours":accum_hours,"vol_pool_pct":vol_pool_pct,"recent_range_pct":recent_range_pct,"accum_high":accum_high,"accum_low":accum_low,"prev_high":prev_high,"prev_low":prev_low,"trend_1h":trend_1h,"bv":bv,"sv":sv}
-    except Exception as e:
-        print(f"{sym_spot} err {e}", flush=True); return None
+            m1=kl(p,"Min1")
+            if not m1 or len(m1["v"])<21: continue
+            v=m1["v"]; spike=v[-1]/(sum(v[-21:-1])/20+1e-9)
+            if spike>=3.0:
+                print(f"⚡ 1m SPIKE {s} {spike:.1f}x - instant scan",flush=True)
+                full_scan(s,p)
+        except Exception as e: print(e,flush=True)
 
-def scan(sym_spot, sym_perp):
-    d = get_data(sym_spot, sym_perp)
-    if not d: return
-    print(f"{sym_spot} flat {d['accum_hours']:.1f}h vol {d['vol_pool_pct']:.0f}% trend {d['trend_1h']:+.2f}% bv/sv {d['bv']:.0f}/{d['sv']:.0f}", flush=True)
-    if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: return
-    bv, sv = d["bv"], d["sv"]
-    vol_conf_long = bv > sv*1.2
-    vol_conf_short = sv > bv*1.2
-
-    def can_send(setup_key, is_buy):
-        now=time.time()
-        sig = COOLDOWN.get("signals",{}).get(sym_spot, {})
-        last_t = sig.get("t", 0) if isinstance(sig, dict) else sig
-        if isinstance(sig, dict) and sig.get("setup")==setup_key and sig.get("dir")==is_buy:
-            return False
-        if now-last_t < SIGNAL_COOLDOWN_MIN*60: return False
-        COOLDOWN["signals"][sym_spot]={"t":now,"setup":setup_key,"dir":is_buy}
-        save_cooldown(); return True
-
-    price = d["price"]
-    is_pin_long = ((d["low_r"]>=1.0 and d["swept_low"]) or (d["v1t"]>=1.0 and d["low_r"]>=1.2 and d["bullish"])) and d["trend_1h"] > 0.2 and vol_conf_long
-    is_vol_break_long = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"] and vol_conf_long and d["bullish"]
-    is_momentum_long = d["trend_1h"] > 0.8 and d["v1t"] > 1.0 and d["bullish"] and d["vol_pool_pct"] > 8 and vol_conf_long
-    if is_pin_long or is_vol_break_long or is_momentum_long:
-        typ = "MOMENTUM PUMP" if is_momentum_long else "VOL BREAK" if is_vol_break_long else "PIN BAR"
-        if can_send(typ.split()[0], True):
-            range_hl = max(d["accum_high"]-d["accum_low"], price*0.005)
-            sl_struct = min(d["accum_low"], d["prev_low"]) * 0.99
-            sl_cap = price - range_hl*1.5
-            sl = max(sl_struct, sl_cap)
-            tp1 = d["accum_high"] * 0.995
-            tp2 = d["prev_high"] * 0.995
-            if tp2 <= price: tp2 = (price + range_hl*1.5) * 0.995
-            risk = price - sl
-            reward = tp1 - price
-            if risk <=0 or reward/risk < 1.0:
-                print(f"{sym_spot} skip low RR {reward/risk:.2f}", flush=True)
-                return
-            nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            send_telegram(f"🟢 {sym_spot} BUY {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:+.1f}% Vol {d['vol_pool_pct']:.0f}% BV/SV {d['bv']:.0f}/{d['sv']:.0f}\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
-            return
-    is_pin_short = ((d["up_r"]>=1.0 and d["swept_high"]) or (d["v1t"]>=1.0 and d["up_r"]>=1.2 and d["bearish"])) and d["trend_1h"] < -0.2 and vol_conf_short
-    is_vol_break_short = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price < d["accum_low"] and vol_conf_short and d["bearish"]
-    is_momentum_short = d["trend_1h"] < -0.8 and d["v1t"] > 1.0 and d["bearish"] and d["vol_pool_pct"] > 8 and vol_conf_short
-    if is_pin_short or is_vol_break_short or is_momentum_short:
-        typ = "MOMENTUM DUMP" if is_momentum_short else "VOL BREAK" if is_vol_break_short else "PIN BAR"
-        if can_send(typ.split()[0], False):
-            range_hl = max(d["accum_high"]-d["accum_low"], price*0.005)
-            sl_struct = max(d["accum_high"], d["prev_high"]) * 1.01
-            sl_cap = price + range_hl*1.5
-            sl = min(sl_struct, sl_cap)
-            tp1 = d["accum_low"] * 1.005
-            tp2 = d["prev_low"] * 1.005
-            if tp2 >= price: tp2 = (price - range_hl*1.5) * 1.005
-            risk = sl - price
-            reward = price - tp1
-            if risk <=0 or reward/risk < 1.0:
-                print(f"{sym_spot} skip low RR {reward/risk:.2f}", flush=True)
-                return
-            nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            send_telegram(f"🔴 {sym_spot} SELL {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:+.1f}% Vol {d['vol_pool_pct']:.0f}% BV/SV {d['bv']:.0f}/{d['sv']:.0f}\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
-
-ONCE = "--once" in sys.argv
-print(f"=== BOT V12 RR-FILTER ===", flush=True)
-if ONCE:
-    for s,p in zip(SYMBOLS, SYMBOLS_PERP):
-        try: scan(s,p)
-        except Exception as e: print(e, flush=True)
+print("=== BOT V14 VOL-RADAR ===",flush=True)
+if "--once" in sys.argv:
+    for s,p in zip(SYMBOLS,PERPS):
+        try: full_scan(s,p)
+        except Exception as e: print(e,flush=True)
 else:
+    last15=0
     while True:
-        for s,p in zip(SYMBOLS, SYMBOLS_PERP):
-            try: scan(s,p)
-            except Exception as e: print(e, flush=True)
-        time.sleep(300)
+        volume_radar() # every 60s - catches split-second volume
+        if time.time()-last15>900:
+            for s,p in zip(SYMBOLS,PERPS):
+                try: full_scan(s,p)
+                except: pass
+            last15=time.time()
+        time.sleep(60)
