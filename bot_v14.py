@@ -18,6 +18,8 @@ def tg(msg):
         try: requests.get(f"https://api.telegram.org/bot{tok}/sendMessage",params={"chat_id":chat,"text":msg},timeout=10)
         except: pass
 
+ACTIVE = {} # s -> {entry, is_buy, t, atr, sig}
+
 def kl(sym, interval):
     r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}",params={"interval":interval},timeout=10).json()
     if not r.get("success"): return None
@@ -25,6 +27,13 @@ def kl(sym, interval):
     return {"o":[float(x) for x in d.get("open",[])],"h":[float(x) for x in d.get("high",[])],
             "l":[float(x) for x in d.get("low",[])],"c":[float(x) for x in d.get("close",[])],
             "v":[float(x) for x in d.get("vol",[])]}
+
+def get_atr(p):
+    d=kl(p,"Min15")
+    if not d or len(d["c"])<15: return None
+    h,l,c=d["h"][-15:],d["l"][-15:],d["c"][-15:]
+    trs=[max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])) for i in range(1,len(h))]
+    return sum(trs)/len(trs) if trs else None
 
 def pattern(h,l):
     tops=[];bots=[]
@@ -59,13 +68,11 @@ def full_scan(s,p):
     dd=kl(p,"Day1")
     ph,pl=(dd["h"][-2],dd["l"][-2]) if dd and len(dd["h"])>=2 else (max(h[-20:]),min(l[-20:]))
 
-    # VOLUME IS #1 - gatekeeper
     if v15 < 1.3:
         return
 
     sig=None; is_buy=False
 
-    # BREAKOUT - fixed to match jun logic
     box_h = max(h[-13:-1])
     box_l = min(l[-13:-1])
     box_mid = (box_h + box_l) / 2
@@ -84,6 +91,14 @@ def full_scan(s,p):
     if not sig and pat in ("double_bottom","triple_bottom") and v15>1.5: sig=f"{pat.upper()} BUY"; is_buy=True
     if not sig and pat in ("double_top","triple_top") and v15>1.5: sig=f"{pat.upper()} SELL"; is_buy=False
     if not sig: return
+
+    # TREND FILTER - avoid V-reversal squeezes
+    if not is_buy and trend > 1.5:
+        print(f"Filtered SELL {s} - Trend4H {trend:.2f}% too strong",flush=True)
+        return
+    if is_buy and trend < -1.5:
+        print(f"Filtered BUY {s} - Trend4H {trend:.2f}% too weak",flush=True)
+        return
 
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
     is_flip=prev.get("dir") is not None and prev.get("dir")!=is_buy
@@ -104,8 +119,34 @@ def full_scan(s,p):
         tp2 = price - risk * 2.0
 
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
+    atr = get_atr(p)
+    ACTIVE[s] = {"entry": price, "is_buy": is_buy, "t": now, "atr": atr, "sig": sig}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f} [{nai}]")
+    manage = "Plan: Take 70% at TP1 -> move SL to BE | Timeout 15m | Exit on RSI flip >60 (short) / <40 (long)"
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n{manage} [{nai}]")
+
+def check_reversals():
+    now=time.time()
+    for s,p in zip(SYMBOLS,PERPS):
+        pos=ACTIVE.get(s)
+        if not pos: continue
+        if now-pos["t"]>30*60:
+            ACTIVE.pop(s,None); continue
+        try:
+            m1=kl(p,"Min1")
+            if not m1 or not m1["c"]: continue
+            cur=m1["c"][-1]
+            atr=pos["atr"]
+            if not atr: continue
+            if now-pos["t"]>15*60:
+                tg(f"⏰ TIMEOUT {s} - 15m no follow-through. Consider exit. Entry:{pos['entry']:.6f} Now:{cur:.6f}")
+                ACTIVE.pop(s,None); continue
+            against=(cur-pos["entry"]) if not pos["is_buy"] else (pos["entry"]-cur)
+            if against>1.5*atr:
+                direction="SHORT" if not pos["is_buy"] else "LONG"
+                tg(f"⚠️ V-REVERSAL {s} {direction} in trouble! Entry:{pos['entry']:.6f} Now:{cur:.6f} (+{against/atr:.1f}x ATR). Kill or tighten!")
+                ACTIVE.pop(s,None)
+        except Exception as e: print(f"reversal check err {s}: {e}",flush=True)
 
 def volume_radar():
     for s,p in zip(SYMBOLS,PERPS):
@@ -118,7 +159,7 @@ def volume_radar():
                 full_scan(s,p)
         except Exception as e: print(e,flush=True)
 
-print("=== BOT V14 VOL-RADAR ===",flush=True)
+print("=== BOT V15 VOL-RADAR + REVERSAL GUARD ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try:
@@ -132,6 +173,7 @@ else:
     last15=0
     while True:
         volume_radar()
+        check_reversals()
         if time.time()-last15>900:
             for s,p in zip(SYMBOLS,PERPS):
                 try: full_scan(s,p)
