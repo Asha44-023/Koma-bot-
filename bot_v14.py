@@ -61,14 +61,15 @@ def full_scan(s,p):
 
     sig=None; is_buy=False
 
-    # BREAKOUT pump/dump catcher - added
-    rh = max(h[-13:-1])
-    rl = min(l[-13:-1])
-    prev_rng = (rh - rl) / price * 100 if price>0 else 99
-    if prev_rng < 1.8 and v15 >= 2.0:
-        if c[-1] > rh and c[-1] > o[-1]:
+    # BREAKOUT - fixed to match jun logic
+    box_h = max(h[-13:-1])
+    box_l = min(l[-13:-1])
+    box_mid = (box_h + box_l) / 2
+    box_rng = (box_h - box_l) / box_mid * 100 if box_mid>0 else 99
+    if box_rng < 1.8 and v15 >= 1.5:
+        if c[-1] > box_h and c[-1] > o[-1] and c[-1] > box_mid:
             sig="BREAKOUT PUMP BUY"; is_buy=True
-        elif c[-1] < rl and c[-1] < o[-1]:
+        elif c[-1] < box_l and c[-1] < o[-1] and c[-1] < box_mid:
             sig="BREAKOUT DUMP SELL"; is_buy=False
 
     if not sig and v15>=2.0:
