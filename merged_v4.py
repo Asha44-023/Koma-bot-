@@ -83,7 +83,6 @@ def scan(sym_spot, sym_perp):
     if not d: return
     print(f"{sym_spot} flat {d['accum_hours']:.1f}h vol {d['vol_pool_pct']:.0f}% trend {d['trend_1h']:+.2f}% bv/sv {d['bv']:.0f}/{d['sv']:.0f}", flush=True)
     if d["vol_pool_pct"] < VOL_ABSOLUTE_MIN: return
-    # V11: skip indecision at junction - volume must agree
     bv, sv = d["bv"], d["sv"]
     vol_conf_long = bv > sv*1.2
     vol_conf_short = sv > bv*1.2
@@ -99,17 +98,24 @@ def scan(sym_spot, sym_perp):
         save_cooldown(); return True
 
     price = d["price"]
-    # V11: strict trend + directional volume
     is_pin_long = ((d["low_r"]>=1.0 and d["swept_low"]) or (d["v1t"]>=1.0 and d["low_r"]>=1.2 and d["bullish"])) and d["trend_1h"] > 0.2 and vol_conf_long
     is_vol_break_long = d["accum_hours"]>=0.3 and d["vol_pool_pct"]>=VOL_POOL_BREAK_PCT and price > d["accum_high"] and vol_conf_long and d["bullish"]
     is_momentum_long = d["trend_1h"] > 0.8 and d["v1t"] > 1.0 and d["bullish"] and d["vol_pool_pct"] > 8 and vol_conf_long
     if is_pin_long or is_vol_break_long or is_momentum_long:
         typ = "MOMENTUM PUMP" if is_momentum_long else "VOL BREAK" if is_vol_break_long else "PIN BAR"
         if can_send(typ.split()[0], True):
-            sl = min(d["accum_low"], d["prev_low"]) * 0.99
+            range_hl = max(d["accum_high"]-d["accum_low"], price*0.005)
+            sl_struct = min(d["accum_low"], d["prev_low"]) * 0.99
+            sl_cap = price - range_hl*1.5
+            sl = max(sl_struct, sl_cap)
             tp1 = d["accum_high"] * 0.995
             tp2 = d["prev_high"] * 0.995
-            if tp2 <= price: tp2 = (price + (d["accum_high"]-d["accum_low"])*1.5) * 0.995
+            if tp2 <= price: tp2 = (price + range_hl*1.5) * 0.995
+            risk = price - sl
+            reward = tp1 - price
+            if risk <=0 or reward/risk < 1.0:
+                print(f"{sym_spot} skip low RR {reward/risk:.2f}", flush=True)
+                return
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
             send_telegram(f"🟢 {sym_spot} BUY {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:+.1f}% Vol {d['vol_pool_pct']:.0f}% BV/SV {d['bv']:.0f}/{d['sv']:.0f}\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
             return
@@ -119,14 +125,23 @@ def scan(sym_spot, sym_perp):
     if is_pin_short or is_vol_break_short or is_momentum_short:
         typ = "MOMENTUM DUMP" if is_momentum_short else "VOL BREAK" if is_vol_break_short else "PIN BAR"
         if can_send(typ.split()[0], False):
-            sl = max(d["accum_high"], d["prev_high"]) * 1.01
+            range_hl = max(d["accum_high"]-d["accum_low"], price*0.005)
+            sl_struct = max(d["accum_high"], d["prev_high"]) * 1.01
+            sl_cap = price + range_hl*1.5
+            sl = min(sl_struct, sl_cap)
             tp1 = d["accum_low"] * 1.005
             tp2 = d["prev_low"] * 1.005
+            if tp2 >= price: tp2 = (price - range_hl*1.5) * 1.005
+            risk = sl - price
+            reward = price - tp1
+            if risk <=0 or reward/risk < 1.0:
+                print(f"{sym_spot} skip low RR {reward/risk:.2f}", flush=True)
+                return
             nairobi = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
             send_telegram(f"🔴 {sym_spot} SELL {typ} [PERP]\nEntry: {price:.6f} NOW\nTrend: {d['trend_1h']:+.1f}% Vol {d['vol_pool_pct']:.0f}% BV/SV {d['bv']:.0f}/{d['sv']:.0f}\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f} [{nairobi}]")
 
 ONCE = "--once" in sys.argv
-print(f"=== BOT V11 DIR-VOL ===", flush=True)
+print(f"=== BOT V12 RR-FILTER ===", flush=True)
 if ONCE:
     for s,p in zip(SYMBOLS, SYMBOLS_PERP):
         try: scan(s,p)
