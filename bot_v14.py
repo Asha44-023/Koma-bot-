@@ -59,6 +59,10 @@ def full_scan(s,p):
     dd=kl(p,"Day1")
     ph,pl=(dd["h"][-2],dd["l"][-2]) if dd and len(dd["h"])>=2 else (max(h[-20:]),min(l[-20:]))
 
+    # VOLUME IS #1 - gatekeeper
+    if v15 < 1.3:
+        return
+
     sig=None; is_buy=False
 
     # BREAKOUT - fixed to match jun logic
