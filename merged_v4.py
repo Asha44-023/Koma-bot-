@@ -12,9 +12,10 @@ if os.path.exists(COOLDOWN_FILE):
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def tg(msg):
     print(msg, flush=True)
-    t=os.getenv("TELEGRAM_TOKEN") or ""; c=os.getenv("TELEGRAM_CHAT") or ""
-    if t and c:
-        try: requests.get(f"https://api.telegram.org/bot{t}/sendMessage",params={"chat_id":c,"text":msg},timeout=10)
+    tok=os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or ""
+    chat=os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT") or ""
+    if tok and chat:
+        try: requests.get(f"https://api.telegram.org/bot{tok}/sendMessage",params={"chat_id":chat,"text":msg},timeout=10)
         except: pass
 
 def kl(sym, interval):
@@ -38,13 +39,12 @@ def pattern(h,l):
     return "none"
 
 def full_scan(s,p):
-    d15=kl(p,"Min15"); h1=kl(p,"Min60"); m1=kl(p,"Min1")
+    d15=kl(p,"Min15"); h1=kl(p,"Min60")
     if not d15 or not h1: return
     c,o,h,l,v=d15["c"][-60:],d15["o"][-60:],d15["h"][-60:],d15["l"][-60:],d15["v"][-60:]
     price=c[-1]
     v15=v[-1]/(sum(v[-20:])/20+1e-9)
     hv=h1["v"]; v1h=hv[-1]/(sum(hv[-20:])/20+1e-9) if len(hv)>=20 else 1
-    # RSI
     g=[max(c[-i]-c[-i-1],0) for i in range(1,15)]; lo=[max(c[-i-1]-c[-i],0) for i in range(1,15)]
     rsi=100-100/(1+(sum(g)/14)/(sum(lo)/14+1e-9))
     body=abs(c[-1]-o[-1])+1e-9
@@ -71,8 +71,7 @@ def full_scan(s,p):
 
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
     is_flip=prev.get("dir") is not None and prev.get("dir")!=is_buy
-    # SMART COOLDOWN - volume is boss
-    if v15>=3.0: pass # bypass all
+    if v15>=3.0: pass
     elif is_flip:
         if now-prev.get("t",0)<60*60: return
     else:
@@ -87,7 +86,6 @@ def full_scan(s,p):
     tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f} [{nai}]")
 
 def volume_radar():
-    # 1m spike detector - understands seconds/minutes
     for s,p in zip(SYMBOLS,PERPS):
         try:
             m1=kl(p,"Min1")
@@ -101,12 +99,17 @@ def volume_radar():
 print("=== BOT V14 VOL-RADAR ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
-        try: full_scan(s,p)
+        try:
+            m1=kl(p,"Min1")
+            if m1 and len(m1["v"])>=21:
+                v1=m1["v"]; sp=v1[-1]/(sum(v1[-21:-1])/20+1e-9)
+                if sp>=3.0: print(f"⚡ 1m SPIKE {s} {sp:.1f}x",flush=True)
+            full_scan(s,p)
         except Exception as e: print(e,flush=True)
 else:
     last15=0
     while True:
-        volume_radar() # every 60s - catches split-second volume
+        volume_radar()
         if time.time()-last15>900:
             for s,p in zip(SYMBOLS,PERPS):
                 try: full_scan(s,p)
