@@ -3,7 +3,7 @@ on:
   push:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/2 * * * *'
 
 concurrency:
   group: grass-bot-single
@@ -12,30 +12,32 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 4
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Restore cooldown
         uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v9-4
-          
+          key: cooldown-v14
+
       - run: pip install requests
 
-      - name: Run V9.4 PUMP 15MIN CD
+      - name: Run V14 VOL-RADAR
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== V9.4 PUMP 15MIN BOTH SIDES ==="
-          python -u merged_v4.py --once
+          echo "=== V14 VOL-RADAR ==="
+          python -u bot_v14.py --once
 
       - name: Save cooldown
         uses: actions/cache/save@v4
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v9-4
+          key: cooldown-v14
