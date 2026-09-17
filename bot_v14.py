@@ -78,9 +78,15 @@ def full_scan(s,p):
         if prev.get("dir")==is_buy: return
         if now-prev.get("t",0)<240*60: return
 
-    sl=min(l[-1],pl)*0.997 if is_buy else max(h[-1],ph)*1.003
-    tp1=price+(ph-price)*0.5 if is_buy else price-(price-pl)*0.5
-    tp2=ph*1.005 if is_buy else pl*0.995
+    sl = min(l[-1],pl)*0.997 if is_buy else max(h[-1],ph)*1.003
+    risk = abs(price - sl)
+    if is_buy:
+        tp1 = price + risk * 1.5
+        tp2 = price + risk * 2.0
+    else:
+        tp1 = price - risk * 1.5
+        tp2 = price - risk * 2.0
+
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f} [{nai}]")
