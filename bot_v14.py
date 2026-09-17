@@ -60,13 +60,24 @@ def full_scan(s,p):
     ph,pl=(dd["h"][-2],dd["l"][-2]) if dd and len(dd["h"])>=2 else (max(h[-20:]),min(l[-20:]))
 
     sig=None; is_buy=False
-    if v15>=2.0:
+
+    # BREAKOUT pump/dump catcher - added
+    rh = max(h[-13:-1])
+    rl = min(l[-13:-1])
+    prev_rng = (rh - rl) / price * 100 if price>0 else 99
+    if prev_rng < 1.8 and v15 >= 2.0:
+        if c[-1] > rh and c[-1] > o[-1]:
+            sig="BREAKOUT PUMP BUY"; is_buy=True
+        elif c[-1] < rl and c[-1] < o[-1]:
+            sig="BREAKOUT DUMP SELL"; is_buy=False
+
+    if not sig and v15>=2.0:
         if c[-1]>o[-1] and rsi>55: sig="VOL BOSS BUY"; is_buy=True
         elif c[-1]<o[-1] and rsi<45: sig="VOL BOSS SELL"; is_buy=False
-    if bull_sw and rsi>50: sig="SWEEP BUY"; is_buy=True
-    if bear_sw and rsi<50: sig="SWEEP SELL"; is_buy=False
-    if pat in ("double_bottom","triple_bottom") and v15>1.5: sig=f"{pat.upper()} BUY"; is_buy=True
-    if pat in ("double_top","triple_top") and v15>1.5: sig=f"{pat.upper()} SELL"; is_buy=False
+    if not sig and bull_sw and rsi>50: sig="SWEEP BUY"; is_buy=True
+    if not sig and bear_sw and rsi<50: sig="SWEEP SELL"; is_buy=False
+    if not sig and pat in ("double_bottom","triple_bottom") and v15>1.5: sig=f"{pat.upper()} BUY"; is_buy=True
+    if not sig and pat in ("double_top","triple_top") and v15>1.5: sig=f"{pat.upper()} SELL"; is_buy=False
     if not sig: return
 
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
