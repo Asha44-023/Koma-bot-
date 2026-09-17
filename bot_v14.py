@@ -35,6 +35,17 @@ def get_atr(p):
     trs=[max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])) for i in range(1,len(h))]
     return sum(trs)/len(trs) if trs else None
 
+def get_cvd(p, lookback=20):
+    d=kl(p,"Min15")
+    if not d or len(d["c"]) < lookback: return 0, 0
+    c,o,v=d["c"][-lookback:],d["o"][-lookback:],d["v"][-lookback:]
+    cvd = sum(((1 if c[i] > o[i] else -1) * v[i]) for i in range(lookback))
+    # slope of last 5 vs previous: positive = buyers accelerating
+    recent = sum(((1 if c[i] > o[i] else -1) * v[i]) for i in range(lookback-5, lookback))
+    prev = sum(((1 if c[i] > o[i] else -1) * v[i]) for i in range(lookback-10, lookback-5))
+    slope = recent - prev
+    return cvd, slope
+
 def pattern(h,l):
     tops=[];bots=[]
     for i in range(2,len(h)-2):
@@ -92,6 +103,15 @@ def full_scan(s,p):
     if not sig and pat in ("double_top","triple_top") and v15>1.5: sig=f"{pat.upper()} SELL"; is_buy=False
     if not sig: return
 
+    # CVD FILTER - must agree with direction
+    cvd, cvd_slope = get_cvd(p)
+    if is_buy and cvd_slope < 0:
+        print(f"Filtered BUY {s} - CVD falling {cvd_slope:.0f}",flush=True)
+        return
+    if not is_buy and cvd_slope > 0:
+        print(f"Filtered SELL {s} - CVD rising {cvd_slope:.0f}",flush=True)
+        return
+
     # TREND FILTER - avoid V-reversal squeezes
     if not is_buy and trend > 1.5:
         print(f"Filtered SELL {s} - Trend4H {trend:.2f}% too strong",flush=True)
@@ -123,7 +143,8 @@ def full_scan(s,p):
     ACTIVE[s] = {"entry": price, "is_buy": is_buy, "t": now, "atr": atr, "sig": sig}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     manage = "Plan: Take 70% at TP1 -> move SL to BE | Timeout 15m | Exit on RSI flip >60 (short) / <40 (long)"
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n{manage} [{nai}]")
+    cvd_tag = "🟢 buyers" if cvd_slope>0 else "🔴 sellers"
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {'BUY' if is_buy else 'SELL'} {sig} [PERP]\nEntry:{price:.6f} RSI:{rsi:.0f} V15:{v15:.1f}x V1H:{v1h:.1f}x Trend4H:{trend:+.2f}%\nCVD:{cvd_slope:+.0f} {cvd_tag}\nJunction:{jun}\nSL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n{manage} [{nai}]")
 
 def check_reversals():
     now=time.time()
@@ -159,7 +180,7 @@ def volume_radar():
                 full_scan(s,p)
         except Exception as e: print(e,flush=True)
 
-print("=== BOT V15 VOL-RADAR + REVERSAL GUARD ===",flush=True)
+print("=== BOT V16 VOL-RADAR + CVD + REVERSAL GUARD ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try:
