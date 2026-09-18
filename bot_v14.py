@@ -85,7 +85,9 @@ def full_scan(s,p):
     cvd, cvd_slope, cvd_cum = get_cvd(p)
     dh, dl = get_daily_levels(p)
 
-    if v15 < 1.3: return
+    if v15 < 1.3:
+        print(f"quiet {s} v15 {v15:.2f}x", flush=True)
+        return
     sig=None; is_buy=False
 
     box_h = max(h[-13:-1]); box_l = min(l[-13:-1]); box_mid=(box_h+box_l)/2
@@ -102,7 +104,9 @@ def full_scan(s,p):
         sig=f"{pat.upper()} BUY" if cvd_slope>0 else f"{pat.upper()}_FADE SELL"; is_buy=cvd_slope>0
     if not sig and pat in ("double_top","triple_top") and v15>1.5:
         sig=f"{pat.upper()} SELL" if cvd_slope<0 else f"{pat.upper()}_FADE BUY"; is_buy=cvd_slope>=0
-    if not sig: return
+    if not sig:
+        print(f"no_sig {s} v15 {v15:.2f}x pat {pat}", flush=True)
+        return
 
     # FIX 1: V1H
     if v1h < 1.0 and v15 < 3.5:
@@ -148,10 +152,13 @@ def full_scan(s,p):
     is_flip=prev.get("dir") is not None and prev.get("dir")!=is_buy
     if v15>=3.0: pass
     elif is_flip:
-        if now-prev.get("t",0)<60*60: return
+        if now-prev.get("t",0)<60*60:
+            print(f"Filtered {s} cooldown flip",flush=True); return
     else:
-        if prev.get("dir")==is_buy: return
-        if now-prev.get("t",0)<240*60: return
+        if prev.get("dir")==is_buy:
+            print(f"Filtered {s} cooldown same dir",flush=True); return
+        if now-prev.get("t",0)<240*60:
+            print(f"Filtered {s} cooldown 4h",flush=True); return
 
     atr=get_atr(p); risk=(atr*1.5) if atr else price*0.02; risk=min(risk,price*0.035)
     sl=price-risk if is_buy else price+risk
