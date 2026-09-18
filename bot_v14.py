@@ -114,11 +114,13 @@ def full_scan(s,p):
     recent_high=max(h[-20:]); recent_low=min(l[-20:])
     if not is_buy and (recent_high-price)/recent_high>0.03: print(f"Filtered SELL {s} late",flush=True); return
     if is_buy and (price-recent_low)/recent_low>0.03: print(f"Filtered BUY {s} late",flush=True); return
-    # EYE FIX: Premium/Discount
+    # EYE FIX: Premium/Discount - exempt breakouts both ways
     high20=max(h[-20:]); low20=min(l[-20:])
     range_pos=(price-low20)/(high20-low20+1e-9)
-    if is_buy and range_pos>0.5: print(f"Filtered BUY {s} premium {range_pos:.2f}",flush=True); return
-    if not is_buy and range_pos<0.5: print(f"Filtered SELL {s} discount {range_pos:.2f}",flush=True); return
+    is_breakout = "BREAKOUT" in sig
+    if not is_breakout:
+        if is_buy and range_pos>0.5: print(f"Filtered BUY {s} premium {range_pos:.2f}",flush=True); return
+        if not is_buy and range_pos<0.5: print(f"Filtered SELL {s} discount {range_pos:.2f}",flush=True); return
     # DAILY CEILING/FLOOR
     if dh and dl:
         if not is_buy and (price-dl)/price*100<0.8: print(f"Filtered SELL {s} into daily low",flush=True); return
@@ -192,7 +194,7 @@ def volume_radar():
                 print(f"⚡ 1m SPIKE {s} {spike:.1f}x",flush=True); full_scan(s,p)
         except: pass
 
-print("=== BOT V19 EYES ===",flush=True)
+print("=== BOT V19.1 EYES ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
