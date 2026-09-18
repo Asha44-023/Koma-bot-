@@ -2,7 +2,6 @@ import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# MEXC perp mapping: display -> api
 SYMBOL_MAP = {
     "GRASSUSDT": "GRASS_USDT",
     "VELVETUSDT": "VELVET_USDT",
@@ -39,6 +38,19 @@ def kl(sym, interval):
             params={"interval":interval}, timeout=10).json()
         data=r.get("data", [])
         if not data: return None
+        # dict format: {"open":[],"high":[],"low":[],"close":[],"vol":[]}
+        if isinstance(data, dict):
+            def f(x):
+                try: return float(x)
+                except: return 0.0
+            return {
+                "o": [f(x) for x in data.get("open",[])],
+                "h": [f(x) for x in data.get("high",[])],
+                "l": [f(x) for x in data.get("low",[])],
+                "c": [f(x) for x in data.get("close",[])],
+                "v": [f(x) for x in data.get("vol",[])]
+            }
+        # list format: [[time,o,h,l,c,vol],...]
         o,h,l,c,v=[],[],[],[],[]
         for k in data:
             o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4])); v.append(float(k[5]))
@@ -144,43 +156,35 @@ def full_scan(s,p):
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
     if len(c)<30: return
     price=c[-1]
-
     dir1h = 1 if h1["c"][-1] > ema(h1["c"],50) else -1
     dir4h = 1 if h4["c"][-1] > ema(h4["c"],50) else -1
     if dir1h!=dir4h: return
     is_buy = dir1h==1
-
     bos = detect_bos(d5["h"], d5["l"], d5["c"]) or detect_bos(d15["h"], d15["l"], d15["c"])
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
-
     vp5 = volume_pressure(o,h,l,c,v)
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
     vp = vp5 if vp5["vol_x"]>=vp15["vol_x"] else vp15
     state = market_state(c, vp)
-
     liq = detect_liquidity_grab(o,h,l,c,v)
     whale = detect_whale(o,h,l,c,v)
     if liq or whale:
         tg(f"🐋 <b>{s}</b>\n{liq or ''}\n{whale or ''}\nPrice: {price}")
-
     if not (bos or pat!="none"): return
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
     if vp["vol_x"]<1.2:
         print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
         return
-
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
     if now-prev.get("t",0)<30*60 and prev.get("dir")==is_buy: return
-
     trs=[max(h[i]-l[i], abs(h[i]-c[i-1])) for i in range(-14,0)]
     atr=sum(trs)/len(trs) if trs else price*0.01
     risk=min(atr*1.5, price*0.03)
     sl=price-risk if is_buy else price+risk
     tp1=price+risk*1.5 if is_buy else price-risk*1.5
     tp2=price+risk*2 if is_buy else price-risk*2
-
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
