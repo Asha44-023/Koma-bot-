@@ -22,7 +22,7 @@ jobs:
           path: cooldown.json
           key: cooldown-v14
 
-      - run: pip install requests
+      - run: pip install requests numpy
 
       - name: Run V14 VOL-RADAR
         env:
