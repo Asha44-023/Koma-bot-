@@ -18,7 +18,7 @@ def tg(msg):
         try: requests.get(f"https://api.telegram.org/bot{tok}/sendMessage",params={"chat_id":chat,"text":msg},timeout=10)
         except: pass
 
-ACTIVE = {} # s -> {entry, is_buy, t, atr, sig}
+ACTIVE = {}
 
 def kl(sym, interval):
     r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}",params={"interval":interval},timeout=10).json()
@@ -40,7 +40,6 @@ def get_cvd(p, lookback=20):
     if not d or len(d["c"]) < lookback: return 0, 0
     c,o,v=d["c"][-lookback:],d["o"][-lookback:],d["v"][-lookback:]
     cvd = sum(((1 if c[i] > o[i] else -1) * v[i]) for i in range(lookback))
-    # slope of last 5 vs previous: positive = buyers accelerating
     recent = sum(((1 if c[i] > o[i] else -1) * v[i]) for i in range(lookback-5, lookback))
     prev = sum(((1 if c[i] > o[i] else -1) * v[i]) for i in range(lookback-10, lookback-5))
     slope = recent - prev
@@ -79,6 +78,8 @@ def full_scan(s,p):
     dd=kl(p,"Day1")
     ph,pl=(dd["h"][-2],dd["l"][-2]) if dd and len(dd["h"])>=2 else (max(h[-20:]),min(l[-20:]))
 
+    cvd, cvd_slope = get_cvd(p)
+
     if v15 < 1.3:
         return
 
@@ -99,12 +100,23 @@ def full_scan(s,p):
         elif c[-1]<o[-1] and rsi<45: sig="VOL BOSS SELL"; is_buy=False
     if not sig and bull_sw and rsi>50: sig="SWEEP BUY"; is_buy=True
     if not sig and bear_sw and rsi<50: sig="SWEEP SELL"; is_buy=False
-    if not sig and pat in ("double_bottom","triple_bottom") and v15>1.5: sig=f"{pat.upper()} BUY"; is_buy=True
-    if not sig and pat in ("double_top","triple_top") and v15>1.5: sig=f"{pat.upper()} SELL"; is_buy=False
+
+    # DOUBLE TOP / BOTTOM WITH VOLUME+CVD FADE LOGIC
+    if not sig and pat in ("double_bottom","triple_bottom") and v15>1.5:
+        if cvd_slope > 0:
+            sig=f"{pat.upper()} BUY"; is_buy=True
+        else:
+            sig=f"{pat.upper()}_FADE SELL"; is_buy=False
+
+    if not sig and pat in ("double_top","triple_top") and v15>1.5:
+        if cvd_slope < 0:
+            sig=f"{pat.upper()} SELL"; is_buy=False
+        else:
+            sig=f"{pat.upper()}_FADE BUY"; is_buy=True
+
     if not sig: return
 
     # CVD FILTER - must agree with direction
-    cvd, cvd_slope = get_cvd(p)
     if is_buy and cvd_slope < 0:
         print(f"Filtered BUY {s} - CVD falling {cvd_slope:.0f}",flush=True)
         return
@@ -112,7 +124,7 @@ def full_scan(s,p):
         print(f"Filtered SELL {s} - CVD rising {cvd_slope:.0f}",flush=True)
         return
 
-    # TREND FILTER - avoid V-reversal squeezes
+    # TREND FILTER
     if not is_buy and trend > 1.5:
         print(f"Filtered SELL {s} - Trend4H {trend:.2f}% too strong",flush=True)
         return
@@ -180,7 +192,7 @@ def volume_radar():
                 full_scan(s,p)
         except Exception as e: print(e,flush=True)
 
-print("=== BOT V16 VOL-RADAR + CVD + REVERSAL GUARD ===",flush=True)
+print("=== BOT V17 VOL-RADAR + CVD FADE ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try:
