@@ -75,9 +75,6 @@ def full_scan(s,p):
     jun="none"
     if rng<1.8:
         jun="continual buying" if v1h>1.5 and price>sum(c[-12:])/12 else "continual selling" if v1h>1.5 and price<sum(c[-12:])/12 else "indecision - wait"
-    dd=kl(p,"Day1")
-    ph,pl=(dd["h"][-2],dd["l"][-2]) if dd and len(dd["h"])>=2 else (max(h[-20:]),min(l[-20:]))
-
     cvd, cvd_slope = get_cvd(p)
 
     if v15 < 1.3:
@@ -101,7 +98,6 @@ def full_scan(s,p):
     if not sig and bull_sw and rsi>50: sig="SWEEP BUY"; is_buy=True
     if not sig and bear_sw and rsi<50: sig="SWEEP SELL"; is_buy=False
 
-    # DOUBLE TOP / BOTTOM WITH VOLUME+CVD FADE LOGIC
     if not sig and pat in ("double_bottom","triple_bottom") and v15>1.5:
         if cvd_slope > 0:
             sig=f"{pat.upper()} BUY"; is_buy=True
@@ -116,7 +112,35 @@ def full_scan(s,p):
 
     if not sig: return
 
-    # CVD FILTER - must agree with direction
+    # === FIX 1: V1H fuel ===
+    if v1h < 1.0 and v15 < 3.5:
+        print(f"Filtered {s} - V1H {v1h:.1f}x too low",flush=True)
+        return
+
+    # === FIX 2: RSI exhaustion ===
+    if is_buy and rsi > 70:
+        print(f"Filtered BUY {s} - RSI {rsi:.0f} overbought",flush=True)
+        return
+    if not is_buy and rsi < 35:
+        print(f"Filtered SELL {s} - RSI {rsi:.0f} oversold",flush=True)
+        return
+
+    # === FIX 3: Late entry ===
+    recent_high = max(h[-20:])
+    recent_low = min(l[-20:])
+    if not is_buy and (recent_high - price) / recent_high > 0.03:
+        print(f"Filtered SELL {s} - late {(recent_high-price)/recent_high*100:.1f}% from high",flush=True)
+        return
+    if is_buy and (price - recent_low) / recent_low > 0.03:
+        print(f"Filtered BUY {s} - late {(price-recent_low)/recent_low*100:.1f}% from low",flush=True)
+        return
+
+    # === FIX 4: Junction ===
+    if jun == "indecision - wait":
+        print(f"Filtered {s} - junction indecision",flush=True)
+        return
+
+    # CVD FILTER
     if is_buy and cvd_slope < 0:
         print(f"Filtered BUY {s} - CVD falling {cvd_slope:.0f}",flush=True)
         return
@@ -141,8 +165,11 @@ def full_scan(s,p):
         if prev.get("dir")==is_buy: return
         if now-prev.get("t",0)<240*60: return
 
-    sl = min(l[-1],pl)*0.997 if is_buy else max(h[-1],ph)*1.003
-    risk = abs(price - sl)
+    # === FIX 5: ATR SL ===
+    atr = get_atr(p)
+    risk = (atr * 1.5) if atr else price * 0.02
+    risk = min(risk, price * 0.035)
+    sl = price - risk if is_buy else price + risk
     if is_buy:
         tp1 = price + risk * 1.5
         tp2 = price + risk * 2.0
@@ -151,7 +178,6 @@ def full_scan(s,p):
         tp2 = price - risk * 2.0
 
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
-    atr = get_atr(p)
     ACTIVE[s] = {"entry": price, "is_buy": is_buy, "t": now, "atr": atr, "sig": sig}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     manage = "Plan: Take 70% at TP1 -> move SL to BE | Timeout 15m | Exit on RSI flip >60 (short) / <40 (long)"
@@ -192,7 +218,7 @@ def volume_radar():
                 full_scan(s,p)
         except Exception as e: print(e,flush=True)
 
-print("=== BOT V17 VOL-RADAR + CVD FADE ===",flush=True)
+print("=== BOT V18 FIXED ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try:
