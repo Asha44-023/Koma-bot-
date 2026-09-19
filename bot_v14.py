@@ -187,12 +187,21 @@ def full_scan(s,p):
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
 
+    bull_pats = ["double_bottom", "triple_bottom"]
+    bear_pats = ["double_top", "triple_top"]
+
+    valid_bos = (is_buy and bos == "BOS_UP") or (not is_buy and bos == "BOS_DOWN")
+    valid_pat = (is_buy and pat in bull_pats) or (not is_buy and pat in bear_pats)
+
+    if not (valid_bos or valid_pat):
+        return
+
     vp5 = volume_pressure(o,h,l,c,v)
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
     vp = vp5 if vp5["vol_x"]>=vp15["vol_x"] else vp15
     state = market_state(c, vp)
 
-    # --- FVG + OB filter ---
+    # FVG + OB filter
     fvgs_1h = get_fvgs(h1["h"], h1["l"])
     has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-5:])
     has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-5:])
@@ -204,14 +213,12 @@ def full_scan(s,p):
     else:
         if not has_bear_fvg: return
         if not ob: return
-    # --- end FVG+OB ---
 
     liq = detect_liquidity_grab(o,h,l,c,v)
     whale = detect_whale(o,h,l,c,v)
     if liq or whale:
         tg(f"🐋 <b>{s}</b>\n{liq or ''}\n{whale or ''}\nPrice: {price}")
 
-    if not (bos or pat!="none"): return
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
 
@@ -261,7 +268,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V20.3 - FVG+OB ===", flush=True)
+print("=== BOT V20.4 - FVG+OB + directional ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
