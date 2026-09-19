@@ -4,11 +4,11 @@ from zoneinfo import ZoneInfo
 
 SYMBOL_MAP = {
     "GRASSUSDT": "GRASS_USDT",
-    "VELVETUSDT": "VELVET_USDT",
-    "HEIUSDT": "HEI_USDT",
-    "SENTUSDT": "SENT_USDT",
-    "SIRENUSDT": "SIREN_USDT",
-    "LABUSDT": "LAB_USDT",
+    "TAOUSDT"  : "TAO_USDT",
+    "SANDUSDT" : "SAND_USDT",
+    "SENTUSDT" : "SENT_USDT",
+    "FARTCOINUSDT": "FARTCOIN_USDT",
+    "JASMYUSDT": "JASMY_USDT",
     "KOMAUSDT": "KOMA_USDT",
 }
 SYMBOLS = list(SYMBOL_MAP.keys())
