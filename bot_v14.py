@@ -92,6 +92,28 @@ def pattern(h,l):
     if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008: return "double_bottom"
     return "none"
 
+def get_fvgs(h, l, lookback=50):
+    fvgs = []
+    for i in range(max(2, len(h)-lookback), len(h)-1):
+        if l[i] > h[i-2]:
+            fvgs.append(('bull', h[i-2], l[i]))
+        if h[i] < l[i-2]:
+            fvgs.append(('bear', l[i-2], h[i]))
+    return fvgs
+
+def get_last_ob(o,h,l,c, bullish=True, lookback=20):
+    atr = sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
+    for i in range(len(c)-2, len(c)-lookback, -1):
+        body = c[i+1]-o[i+1]
+        is_impulse = body > atr*0.5 if atr else body > 0
+        if bullish:
+            if c[i] < o[i] and is_impulse and c[i+1] > o[i+1]:
+                return (l[i], h[i])
+        else:
+            if c[i] > o[i] and is_impulse and c[i+1] < o[i+1]:
+                return (l[i], h[i])
+    return None
+
 def volume_pressure(o,h,l,c,v, n=20):
     if len(v)<n: return {"vol_x":1,"buy_pct":50,"sell_pct":50}
     avg=statistics.mean(v[-n:])
@@ -170,6 +192,20 @@ def full_scan(s,p):
     vp = vp5 if vp5["vol_x"]>=vp15["vol_x"] else vp15
     state = market_state(c, vp)
 
+    # --- FVG + OB filter ---
+    fvgs_1h = get_fvgs(h1["h"], h1["l"])
+    has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-5:])
+    has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-5:])
+    ob = get_last_ob(o,h,l,c, bullish=is_buy)
+
+    if is_buy:
+        if not has_bull_fvg: return
+        if not ob: return
+    else:
+        if not has_bear_fvg: return
+        if not ob: return
+    # --- end FVG+OB ---
+
     liq = detect_liquidity_grab(o,h,l,c,v)
     whale = detect_whale(o,h,l,c,v)
     if liq or whale:
@@ -197,7 +233,7 @@ def full_scan(s,p):
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY' if is_buy else 'SELL'}</b> [{state}]\n"
-       f"Structure: {bos or ''} {pat}\n"
+       f"Structure: {bos or ''} {pat} + FVG/OB confirmed\n"
        f"15m/1h: {'UP' if is_buy else 'DOWN'}\n"
        f"Price: {price} Vol: {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n[{nai}]")
@@ -225,7 +261,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V20.2 - 15m+1h QUIET ===", flush=True)
+print("=== BOT V20.3 - FVG+OB ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
