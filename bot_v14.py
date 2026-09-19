@@ -179,22 +179,6 @@ def full_scan(s,p):
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
 
-    # BUILDING WATCH: 1.0x - 1.2x
-    if vp["vol_x"] >= 1.0 and vp["vol_x"] < 1.2:
-        now_ew = time.time()
-        prev_ew = COOLDOWN["signals"].get(f"EW_{s}", {})
-        if now_ew - prev_ew.get("t", 0) > 30*60:
-            COOLDOWN["signals"][f"EW_{s}"] = {"t": now_ew}
-            save()
-            nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-            tg(f"⚠️ <b>{s} building</b> [{state}]\n"
-               f"Structure: {bos or ''} {pat}\n"
-               f"15m/1h: {'UP' if is_buy else 'DOWN'}\n"
-               f"Vol: {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
-               f"Price: {price} - watching for 1.2x entry [{nai}]")
-        print(f"watch {s} {vp['vol_x']:.2f}x {state}", flush=True)
-        return
-
     if vp["vol_x"]<1.2:
         print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
         return
@@ -241,7 +225,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V20.1 - 15m+1h ===", flush=True)
+print("=== BOT V20.2 - 15m+1h QUIET ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
