@@ -1,4 +1,4 @@
-# V26 - BOTH WAYS ALL SESSIONS - OUT&IN + DEEP W/M + IRL->ERL
+# V26 PATCHED - BOTH WAYS ALL SESSIONS - RELAXED OR LOGIC
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -94,7 +94,6 @@ def detect_out_in(o,h,l,c, side):
 def detect_deep_WM(h,l, side):
     if len(h)<8: return False
     if side=="BUY":
-        # two bottoms, 2nd deeper 0.15%
         _, lows = swing_points(h,l, look=2)
         if len(lows)<2: return False
         l1=lows[-2][1]; l2=lows[-1][1]
@@ -213,34 +212,25 @@ def full_scan(s,p):
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
     if len(c)<30 or len(d15["c"])<50 or len(h1["c"])<50: return
     price=c[-1]
-
     session_name, session_emoji = get_session()
-    # V26: NO HTF BIAS FILTER - check both ways
-
     h1_highs, h1_lows = swing_points(h1["h"], h1["l"], look=2)
     bos = detect_bos(d5["h"], d5["l"], d5["c"]) or detect_bos(d15["h"], d15["l"], d15["c"])
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
-
     highs_5, lows_5 = swing_points(d5["h"], d5["l"])
     vp5 = volume_pressure(o,h,l,c,v)
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
     vp = vp5 if vp5["vol_x"]>=vp15["vol_x"] else vp15
     state = market_state(c, vp)
-
     fvgs_1h = get_fvgs(h1["h"], h1["l"])
     has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-10:])
     has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-10:])
 
-    # Try both sides now
     for is_buy in [True, False]:
         side = "BUY" if is_buy else "SELL"
         key = f"{s}_{side}"
-
-        # Cooldown logic V26
         now=time.time(); prev=COOLDOWN["signals"].get(key,{})
         elapsed = now-prev.get("t",0)
-        # Determine cooldown needed
         last_result = prev.get("result","normal")
         cd_need = COOLDOWN_NORMAL
         if last_result=="SL": cd_need = COOLDOWN_AFTER_SL
@@ -248,25 +238,20 @@ def full_scan(s,p):
         if vp["vol_x"]>1.8: cd_need = min(cd_need, 10*60)
         if elapsed < cd_need: continue
 
-        # Pattern + BOS for this side
         if is_buy:
             if pat not in ["double_bottom","triple_bottom"] and bos!= "BOS_UP": continue
         else:
             if pat not in ["double_top","triple_top"] and bos!= "BOS_DOWN": continue
 
-        # OUT & IN + DEEP W/M - core liquidity hunt
         out_in = detect_out_in(o,h,l,c, side)
         deep = detect_deep_WM(h,l, side)
         sweep_low = detect_xxx_sweep(lows_5, l[-1]) if lows_5 else False
         sweep_high = detect_xxx_sweep_high(highs_5, h[-1]) if highs_5 else False
         sweep_ok = sweep_low if is_buy else sweep_high
 
-        if not (out_in or sweep_ok): continue
-        if not deep:
-            # allow if very strong engulf but prefer deep
-            pass
-        else:
-            STATS["xxx"]+=1
+        # PATCHED: OR logic so bot moves in all sessions
+        if not (out_in or deep or sweep_ok): continue
+        if out_in or deep or sweep_ok: STATS["xxx"]+=1
 
         ob = get_last_ob(o,h,l,c, bullish=is_buy)
         if not ob: continue
@@ -274,13 +259,12 @@ def full_scan(s,p):
         ob_width = (ob_high - ob_low) / (ob_low or 1e-9)
         if ob_width < 0.004: continue
 
-        # IRL check - price must be near IRL (Asian 50% approx as 20EMA zone)
-        # Simple IRL: price within 1% of EMA50 1H = IRL
         irl_mid = ema(h1["c"],50)
         irl_ok = abs(price-irl_mid)/irl_mid < 0.015 if irl_mid else True
 
         if ob_low*0.99 <= price <= ob_high*1.01:
             STATS["touched"]+=1
+            print(f"EYE {s} {side} TOUCHED OB {ob} BOS:{bos} {pat} IRL:{irl_ok}", flush=True)
 
         if is_buy:
             if price > ob_high * 1.012: continue
@@ -303,8 +287,6 @@ def full_scan(s,p):
             if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
             continue
 
-        if candles["is_harami"] and not sweep_ok: continue
-
         if is_buy and vp["buy_pct"]<45: continue
         if not is_buy and vp["sell_pct"]<45: continue
         if vp["vol_x"]<0.75: continue
@@ -325,13 +307,17 @@ def full_scan(s,p):
 
         rr1 = abs(auto_tp1 - price) / (risk or 1e-9)
         rr2 = abs(auto_tp2 - price) / (risk or 1e-9)
-        if rr2 < 1.2: continue # FIX 0.06R
+        if rr2 < 1.2: continue
 
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
         ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p,"tp1":auto_tp1,"tp2":auto_tp2,"sl":sl,"side_key":key}
         STATS["sniper"]+=1
         nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-        sweep_txt = f"OUT&IN+DEEP {'W' if is_buy else 'M'}" if out_in and deep else f"SWEEP {'Deep W' if is_buy else 'Deep M'}"
+        tag = []
+        if out_in: tag.append("OUT&IN")
+        if deep: tag.append(f"Deep{'W' if is_buy else 'M'}")
+        if sweep_ok: tag.append("XXX")
+        sweep_txt = "+".join(tag)
         tg(f"{session_emoji} {'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} V26 {session_name} {sweep_txt}</b> [{state}]\n"
            f"{bos or ''} {pat} + {candles['name']} IRL:{'YES' if irl_ok else 'NO'}\n"
            f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% OB {ob_width*100:.2f}%\n"
@@ -372,14 +358,15 @@ def check_exits():
                 tg(f"🛑 SL HIT {s}")
                 COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}
                 save(); ACTIVE.pop(s); continue
-        if now-pos["t"]>30*60: # timeout longer for ERL
+        if now-pos["t"]>30*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V26 - BOTH WAYS ALL SESSIONS OUT&IN DEEP W/M IRL->ERL 15/30/5 ===", flush=True)
+print("=== BOT V26 PATCHED - RELAXED OR LOGIC ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
         except Exception as e: print(e, flush=True)
+    print(f"FINAL STATS T:{STATS['touched']} ALMOST:{STATS['almost']} SNIPER:{STATS['sniper']} XXX:{STATS['xxx']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS, PERPS):
