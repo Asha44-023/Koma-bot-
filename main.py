@@ -127,34 +127,22 @@ def volume_pressure(o,h,l,c,v, n=20):
     total=bp+sp or 1
     return {"vol_x":cur/(avg or 1), "buy_pct":bp/total*100, "sell_pct":sp/total*100}
 
-def detect_liquidity_grab(o,h,l,c,v):
-    if len(c)<25: return None
-    avg=statistics.mean(v[-20:])
-    k_idx=-2
-    body=abs(c[k_idx]-o[k_idx])+1e-9
-    rng=h[k_idx]-l[k_idx] or 1e-9
-    uw=h[k_idx]-max(o[k_idx],c[k_idx])
-    lw=min(o[k_idx],c[k_idx])-l[k_idx]
-    vol_x=v[k_idx]/(avg or 1)
-    if lw>body*2 and lw>rng*0.6 and vol_x>2.5 and c[k_idx]>o[k_idx]:
-        return f"LIQUIDITY GRAB DOWN {vol_x:.1f}x - bear trap"
-    if uw>body*2 and uw>rng*0.6 and vol_x>2.5 and c[k_idx]<o[k_idx]:
-        return f"LIQUIDITY GRAB UP {vol_x:.1f}x - bull trap"
-    return None
-
-def detect_whale(o,h,l,c,v):
-    if len(c)<25: return None
-    avg=statistics.mean(v[-20:])
-    atr=statistics.mean([h[i]-l[i] for i in range(-14,0)])
-    rng=h[-1]-l[-1]
-    vol_x=v[-1]/(avg or 1)
-    rp=(c[-1]-o[-1])/(rng or 1e-9)
-    if vol_x>4 and rng>atr*2:
-        if rp>0.5: return f"WHALE BUY {vol_x:.1f}x - manipulation up"
-        if rp<-0.5: return f"WHALE SELL {vol_x:.1f}x - manipulation down"
-    if vol_x>3 and rng<atr*0.7:
-        return f"ABSORPTION {vol_x:.1f}x - big move coming"
-    return None
+# === V23 STRONGEST ONLY - ANTI SPAM ===
+def detect_strong_candles(o,h,l,c):
+    if len(c)<3: return {"buy":False,"sell":False,"name":"none"}
+    prev_o, prev_h, prev_l, prev_c = o[-2], h[-2], l[-2], c[-2]
+    cur_o, cur_h, cur_l, cur_c = o[-1], h[-1], l[-1], c[-1]
+    c1_o,c1_h,c1_l,c1_c = o[-3], h[-3], l[-3], c[-3]
+    body_cur = abs(cur_c - cur_o) + 1e-9
+    body_prev = abs(prev_c - prev_o) + 1e-9
+    bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_o < prev_c and cur_c > prev_o and body_cur > body_prev*1.1
+    morning_star = c1_c < c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
+    bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_o > prev_c and cur_c < prev_o and body_cur > body_prev*1.1
+    evening_star = c1_c > c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
+    buy = bullish_engulfing or morning_star
+    sell = bearish_engulfing or evening_star
+    name = "BULLISH_ENGULFING" if bullish_engulfing else "MORNING_STAR" if morning_star else "BEARISH_ENGULFING" if bearish_engulfing else "EVENING_STAR" if evening_star else "none"
+    return {"buy":buy,"sell":sell,"name":name}
 
 def market_state(c, vp):
     e20=ema(c,20)
@@ -163,41 +151,12 @@ def market_state(c, vp):
     atr=statistics.mean([abs(c[i]-c[i-1]) for i in range(-14,0)]) or 1e-9
     consolidating = rng < atr*3
     if consolidating and vp["vol_x"]<1.5:
-        return "CONSOLIDATING JUNCTION"
-    if price>e20 and vp["buy_pct"]>60 and vp["vol_x"]>1.5:
-        return "PUMPING - high volume buying pressure"
-    if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.5:
-        return "DUMPING - high volume selling pressure"
-    return "TREND CONTINUING"
-
-# === V22 - 7 STRONGEST CANDLESTICKS (BUY DIP + SELL TIP) ===
-def detect_strong_candles(o,h,l,c):
-    if len(c)<3: return {"buy":False,"sell":False,"name":"none"}
-    prev_o, prev_h, prev_l, prev_c = o[-2], h[-2], l[-2], c[-2]
-    cur_o, cur_h, cur_l, cur_c = o[-1], h[-1], l[-1], c[-1]
-    c1_o,c1_h,c1_l,c1_c = o[-3], h[-3], l[-3], c[-3]
-
-    body_cur = abs(cur_c - cur_o) + 1e-9
-    body_prev = abs(prev_c - prev_o) + 1e-9
-
-    # BUY
-    bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_o < prev_c and cur_c > prev_o and body_cur > body_prev*1.1
-    lower_wick = min(cur_o, cur_c) - cur_l
-    upper_wick_small = cur_h - max(cur_o, cur_c)
-    hammer = lower_wick > body_cur*2 and upper_wick_small < body_cur*0.3 and cur_c > cur_o
-    morning_star = c1_c < c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
-
-    # SELL
-    bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_o > prev_c and cur_c < prev_o and body_cur > body_prev*1.1
-    upper_wick = cur_h - max(cur_o, cur_c)
-    lower_wick_small = min(cur_o, cur_c) - cur_l
-    shooting_star = upper_wick > body_cur*2 and lower_wick_small < body_cur*0.3 and cur_c < cur_o
-    evening_star = c1_c > c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
-
-    buy = bullish_engulfing or hammer or morning_star
-    sell = bearish_engulfing or shooting_star or evening_star
-    name = "bullish_engulfing" if bullish_engulfing else "hammer_dragonfly" if hammer else "morning_star" if morning_star else "bearish_engulfing" if bearish_engulfing else "shooting_star_gravestone" if shooting_star else "evening_star" if evening_star else "none"
-    return {"buy":buy,"sell":sell,"name":name}
+        return "CONSOLIDATING"
+    if price>e20 and vp["buy_pct"]>60 and vp["vol_x"]>1.1:
+        return "PUMPING"
+    if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.1:
+        return "DUMPING"
+    return "TRENDING"
 
 def full_scan(s,p):
     d5=kl(p,"Min5"); d15=kl(p,"Min15"); h1=kl(p,"Min60")
@@ -208,29 +167,22 @@ def full_scan(s,p):
 
     dir1h = 1 if h1["c"][-1] > ema(h1["c"],50) else -1
     dir15 = 1 if d15["c"][-1] > ema(d15["c"],50) else -1
-    if dir1h!= dir15:
-        return
+    if dir1h!= dir15: return
     is_buy = dir1h==1
 
     h1_highs, h1_lows = swing_points(h1["h"], h1["l"])
     if len(h1_highs) >= 2 and len(h1_lows) >= 2:
-        if is_buy and h1_highs[-1][1] < h1_highs[-2][1]:
-            return
-        if not is_buy and h1_lows[-1][1] > h1_lows[-2][1]:
-            return
+        if is_buy and h1_highs[-1][1] < h1_highs[-2][1]: return
+        if not is_buy and h1_lows[-1][1] > h1_lows[-2][1]: return
 
     bos = detect_bos(d5["h"], d5["l"], d5["c"]) or detect_bos(d15["h"], d15["l"], d15["c"])
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
-
     bull_pats = ["double_bottom", "triple_bottom"]
     bear_pats = ["double_top", "triple_top"]
-
     valid_bos = (is_buy and bos == "BOS_UP") or (not is_buy and bos == "BOS_DOWN")
     valid_pat = (is_buy and pat in bull_pats) or (not is_buy and pat in bear_pats)
-
-    if not (valid_bos or valid_pat):
-        return
+    if not (valid_bos or valid_pat): return
 
     vp5 = volume_pressure(o,h,l,c,v)
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
@@ -241,7 +193,6 @@ def full_scan(s,p):
     has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-5:])
     has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-5:])
     ob = get_last_ob(o,h,l,c, bullish=is_buy)
-
     if is_buy:
         if not has_bull_fvg: return
         if not ob: return
@@ -262,34 +213,21 @@ def full_scan(s,p):
     if is_buy and dist > 1.5: return
     if not is_buy and dist < -1.5: return
 
-    h1_high = max(h1["h"][-20:])
-    h1_low = min(h1["l"][-20:])
-    if is_buy and (h1_high - price) / price < 0.005: return
-    if not is_buy and (price - h1_low) / price < 0.005: return
-
-    # === V22 NEW: CANDLESTICK WHEN FILTER ===
+    # V23 CANDLE FILTER - STRONGEST ONLY
     candles = detect_strong_candles(o,h,l,c)
-    if is_buy and not candles["buy"]:
-        print(f"WAIT {s} - no buy dip candle, got {candles['name']}", flush=True)
-        return
-    if not is_buy and not candles["sell"]:
-        print(f"WAIT {s} - no sell tip candle, got {candles['name']}", flush=True)
-        return
-
-    liq = detect_liquidity_grab(o,h,l,c,v)
-    whale = detect_whale(o,h,l,c,v)
-    if liq or whale:
-        tg(f"🐋 <b>{s}</b>\n{liq or ''}\n{whale or ''}\nPrice: {price}")
+    if is_buy and not candles["buy"]: return
+    if not is_buy and not candles["sell"]: return
 
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
 
-    if vp["vol_x"]<1.2:
+    # YOUR 1.1x
+    if vp["vol_x"]<1.1:
         print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
         return
 
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
-    if now-prev.get("t",0)<30*60 and prev.get("dir")==is_buy: return
+    if now-prev.get("t",0)<60*60 and prev.get("dir")==is_buy: return
 
     trs=[max(h[i]-l[i], abs(h[i]-c[i-1])) for i in range(-14,0)]
     atr=sum(trs)/len(trs) if trs else price*0.01
@@ -302,9 +240,8 @@ def full_scan(s,p):
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TIP'}</b> [{state}]\n"
-       f"Structure: {bos or ''} {pat} + FVG/OB + <b>{candles['name'].upper()}</b>\n"
-       f"15m/1h: {'UP' if is_buy else 'DOWN'}\n"
-       f"Price: {price} Vol: {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
+       f"{bos or ''} {pat} + {candles['name']} {vp['vol_x']:.2f}x\n"
+       f"Price: {price} Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n[{nai}]")
 
 def check_exits():
@@ -321,16 +258,16 @@ def check_exits():
         sl=entry-risk if is_buy else entry+risk
         if is_buy:
             if cur>=tp2: tg(f"🎯 TP2 HIT {s}"); ACTIVE.pop(s); continue
-            if cur>=tp1 and not pos.get("tp1"): pos["tp1"]=True; tg(f"🎯 TP1 HIT {s} -> move SL to BE")
+            if cur>=tp1 and not pos.get("tp1"): pos["tp1"]=True; tg(f"🎯 TP1 HIT {s} -> SL BE")
             if cur<=sl: tg(f"🛑 SL HIT {s}"); ACTIVE.pop(s); continue
         else:
             if cur<=tp2: tg(f"🎯 TP2 HIT {s}"); ACTIVE.pop(s); continue
-            if cur<=tp1 and not pos.get("tp1"): pos["tp1"]=True; tg(f"🎯 TP1 HIT {s} -> move SL to BE")
+            if cur<=tp1 and not pos.get("tp1"): pos["tp1"]=True; tg(f"🎯 TP1 HIT {s} -> SL BE")
             if cur>=sl: tg(f"🛑 SL HIT {s}"); ACTIVE.pop(s); continue
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V22 - BUY DIP + SELL TIP 7 STRONGEST ===", flush=True)
+print("=== BOT V23 FINAL - 1.1x + ANTI-SPAM LOCKED ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
