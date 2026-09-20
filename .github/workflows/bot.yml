@@ -1,4 +1,4 @@
-name: grass-bot-v25-sniper
+name: grass-bot-v26-sniper
 on:
   push:
     branches: [main]
@@ -11,7 +11,7 @@ on:
     - cron: '*/2 * * * *'
 
 concurrency:
-  group: grass-bot-v25-sniper
+  group: grass-bot-v26-sniper
   cancel-in-progress: false
 
 jobs:
@@ -25,13 +25,14 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v25-obtob-sniper-${{ github.run_id }}
+          key: cooldown-v26-bothways-${{ github.run_id }}
           restore-keys: |
+            cooldown-v26-bothways
             cooldown-v25-obtob-sniper
 
       - run: pip install requests numpy
 
-      - name: Run V25 OB-TO-OB SNIPER HARAMI+XXX BSL
+      - name: Run V26 BOTH WAYS ALL SESSIONS
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -39,13 +40,14 @@ jobs:
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+BSL ==="
+          echo "=== BOT V26 - BOTH WAYS ALL SESSIONS OUT&IN DEEP W/M IRL->ERL 15/30/5 ==="
           python -u main.py --once
 
       - name: Ensure cooldown file exists
         if: always()
         run: |
           ls -la
+          cat cooldown.json || echo "{}"
           touch cooldown.json
 
       - name: Save cooldown
@@ -53,4 +55,4 @@ jobs:
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v25-obtob-sniper-${{ github.run_id }}
+          key: cooldown-v26-bothways-${{ github.run_id }}
