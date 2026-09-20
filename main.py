@@ -1,4 +1,4 @@
-# V26.3 FIXED FINAL - BOTH WAYS ALL SESSIONS BSL/SSL ERL 15/30/5
+# V26.4 DEBUG - WHY SNIPER 0 - NEAR OB + FVG BONUS + LOG REASON
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -15,7 +15,6 @@ COOLDOWN={"signals":{}}
 if os.path.exists(COOLDOWN_FILE):
     try:
         d=json.load(open(COOLDOWN_FILE))
-        # auto clear old format
         if d.get("signals") and len(d["signals"])>0:
             k=list(d["signals"].keys())[0]
             if "_" not in k: d={"signals":{}}
@@ -29,7 +28,7 @@ def tg(msg):
     chat=os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT") or ""
     if tok and chat:
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
-        except: pass
+        except Exception as e: print(f"tg err {e}", flush=True)
 ACTIVE={}
 COOLDOWN_NORMAL=15*60
 COOLDOWN_AFTER_SL=30*60
@@ -206,14 +205,8 @@ def full_scan(s,p):
     for is_buy in [True,False]:
         side="BUY" if is_buy else "SELL"
         key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{}); elapsed=now-prev.get("t",0)
-        last_result=prev.get("result","normal")
-        cd_need=COOLDOWN_NORMAL
-        if last_result=="SL": cd_need=COOLDOWN_AFTER_SL
-        if last_result=="TP2": cd_need=COOLDOWN_AFTER_TP2
-        if vp["vol_x"]>1.8: cd_need=min(cd_need,10*60)
-        if elapsed<cd_need: continue
+        if elapsed<60: continue
 
-        # BOS + PATTERN - MUST HAVE ONE
         if is_buy:
             if pat not in ["double_bottom","triple_bottom"] and bos!="BOS_UP": continue
         else:
@@ -228,28 +221,41 @@ def full_scan(s,p):
         STATS["xxx"]+=1
 
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=50)
-        if not ob: continue
+        if not ob:
+            print(f"FOUND {s} {side} BUT NO OB", flush=True)
+            continue
         ob_low,ob_high=ob
-        # FIX: allow NEAR OB not just INSIDE
         if is_buy:
-            in_ob = ob_low*0.985 <= price <= ob_high*1.015
-            near_ob = abs(price-ob_high)/price < 0.03
+            in_ob=ob_low*0.985 <= price <= ob_high*1.015
+            near_ob=abs(price-ob_high)/price < 0.03
             if not (in_ob or near_ob): continue
         else:
-            in_ob = ob_low*0.985 <= price <= ob_high*1.015
-            near_ob = abs(price-ob_low)/price < 0.03
+            in_ob=ob_low*0.985 <= price <= ob_high*1.015
+            near_ob=abs(price-ob_low)/price < 0.03
             if not (in_ob or near_ob): continue
         STATS["touched"]+=1
+        print(f"EYE {s} {side} T:{STATS['touched']} OB:{ob_low:.5f}-{ob_high:.5f} Price:{price:.5f} PAT:{pat} BOS:{bos} OUT:{out_in} DEEP:{deep} XXX:{sweep_ok}", flush=True)
 
         candles=detect_strong_candles(o,h,l,c)
+        print(f" -> CANDLE {s} {side}: {candles['name']} buy:{candles['buy']} sell:{candles['sell']} | Vol:{vp['vol_x']:.2f}x Buy%:{vp['buy_pct']:.0f} Sell%:{vp['sell_pct']:.0f}", flush=True)
         if is_buy and not candles["buy"]:
-            STATS["almost"]+=1; continue
+            STATS["almost"]+=1
+            print(f" -> SKIP {s} {side} NO BULL CANDLE", flush=True)
+            continue
         if not is_buy and not candles["sell"]:
-            STATS["almost"]+=1; continue
+            STATS["almost"]+=1
+            print(f" -> SKIP {s} {side} NO BEAR CANDLE", flush=True)
+            continue
 
-        if is_buy and vp["buy_pct"]<40: continue
-        if not is_buy and vp["sell_pct"]<40: continue
-        if vp["vol_x"]<0.65: continue
+        if is_buy and vp["buy_pct"]<40:
+            print(f" -> SKIP {s} {side} BUY% LOW {vp['buy_pct']:.0f}", flush=True)
+            continue
+        if not is_buy and vp["sell_pct"]<40:
+            print(f" -> SKIP {s} {side} SELL% LOW {vp['sell_pct']:.0f}", flush=True)
+            continue
+        if vp["vol_x"]<0.65:
+            print(f" -> SKIP {s} {side} VOL LOW {vp['vol_x']:.2f}x", flush=True)
+            continue
 
         trs=[max(h[i]-l[i],abs(h[i]-c[i-1])) for i in range(-14,0)]
         atr=sum(trs)/len(trs) if trs else price*0.01
@@ -264,7 +270,10 @@ def full_scan(s,p):
             if auto_tp1>price-min_tp: auto_tp1=price-min_tp
             if auto_tp2>price-min_tp*1.5: auto_tp2=price-min_tp*1.5
         rr1=abs(auto_tp1-price)/(risk or 1e-9); rr2=abs(auto_tp2-price)/(risk or 1e-9)
-        if rr2<1.0: continue
+        print(f" -> RR {s} {side}: {rr1:.1f}R / {rr2:.1f}R SL:{sl:.5f} TP2:{auto_tp2:.5f}", flush=True)
+        if rr2<1.0:
+            print(f" -> SKIP {s} {side} RR LOW {rr2:.1f}", flush=True)
+            continue
 
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
         ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p,"tp1":auto_tp1,"tp2":auto_tp2,"sl":sl,"side_key":key}
@@ -277,13 +286,12 @@ def full_scan(s,p):
         if has_fvg_bull and is_buy: tag.append("FVG")
         if has_fvg_bear and not is_buy: tag.append("FVG")
         sweep_txt="+".join(tag) or "SNIPER"
-        fvg_icon="✅FVG" if (has_fvg_bull and is_buy) or (has_fvg_bear and not is_buy) else "NO-FVG"
-        tg(f"{session_emoji} {'🟢' if is_buy else '🔴'} <b>{s} {'BUY' if is_buy else 'SELL'} V26.3 {session_name} {sweep_txt}</b> [{state}] {fvg_icon}\n"
+        tg(f"{session_emoji} {'🟢' if is_buy else '🔴'} <b>{s} {'BUY' if is_buy else 'SELL'} V26.4 {session_name} {sweep_txt}</b> [{state}]\n"
            f"{bos or ''} {pat} + {candles['name']}\n"
            f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% \n"
            f"OB {ob_low:.5f}-{ob_high:.5f} Price: {price}\n"
            f"SL:{sl:.6f} TP1:{auto_tp1:.6f}({rr1:.1f}R) TP2:{auto_tp2:.6f}({rr2:.1f}R) ERL\n"
-           f"[{nai}] CD:{cd_need//60}m | T:{STATS['touched']} S:{STATS['sniper']}")
+           f"[{nai}]")
 
 def check_exits():
     now=time.time()
@@ -302,7 +310,7 @@ def check_exits():
             if cur>=sl: tg(f"🛑 SL HIT {s}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
         if now-pos["t"]>30*60: tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V26.3 FIXED - NEAR OB + FVG BONUS ===", flush=True)
+print("=== BOT V26.4 DEBUG WHY SNIPER 0 ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
