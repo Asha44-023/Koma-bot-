@@ -88,15 +88,15 @@ def detect_bos(h,l,c):
 def detect_xxx_sweep(lows, current_low):
     if len(lows)<2: return False
     l1=lows[-2][1]; l2=lows[-1][1]
-    equal = abs(l1-l2)/l1 < 0.0025 # V25.2 0.25% BEST FOR ALTS
-    swept = current_low < min(l1,l2)*0.997 # 0.3% sweep
+    equal = abs(l1-l2)/l1 < 0.0025
+    swept = current_low < min(l1,l2)*0.997
     return equal and swept
 
 def detect_xxx_sweep_high(highs, current_high):
     if len(highs)<2: return False
     h1=highs[-2][1]; h2=highs[-1][1]
-    equal = abs(h1-h2)/h1 < 0.0025 # V25.2 0.25% BEST FOR ALTS
-    swept = current_high > max(h1,h2)*1.003 # 0.3% sweep
+    equal = abs(h1-h2)/h1 < 0.0025
+    swept = current_high > max(h1,h2)*1.003
     return equal and swept
 
 def pattern(h,l):
@@ -149,12 +149,13 @@ def detect_strong_candles(o,h,l,c):
     c1_o,c1_h,c1_l,c1_c = o[-3], h[-3], l[-3], c[-3]
     body_cur = abs(cur_c - cur_o) + 1e-9
     body_prev = abs(prev_c - prev_o) + 1e-9
-    bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_o < prev_c and cur_c > prev_o and body_cur > body_prev*1.1
-    morning_star = c1_c < c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
-    bullish_harami = prev_c < prev_o and cur_c > cur_o and cur_o > prev_c and cur_c < prev_o and body_cur < body_prev*0.6
-    bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_o > prev_c and cur_c < prev_o and body_cur > body_prev*1.1
-    evening_star = c1_c > c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
-    bearish_harami = prev_c > prev_o and cur_c < cur_o and cur_o < prev_c and cur_c > prev_o and body_cur < body_prev*0.6
+    # V25.3 LOOSER - 0.8x instead of 1.1x to catch instant bounces
+    bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_c > prev_o and body_cur > body_prev*0.8
+    morning_star = c1_c < c1_o and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
+    bullish_harami = prev_c < prev_o and cur_c > cur_o and cur_o > prev_c and cur_c < prev_o and body_cur < body_prev*0.7
+    bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_c < prev_o and body_cur > body_prev*0.8
+    evening_star = c1_c > c1_o and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
+    bearish_harami = prev_c > prev_o and cur_c < cur_o and cur_o < prev_c and cur_c > prev_o and body_cur < body_prev*0.7
     buy = bullish_engulfing or morning_star or bullish_harami
     sell = bearish_engulfing or evening_star or bearish_harami
     name = "BULL_HARAMI" if bullish_harami else "BULLISH_ENGULFING" if bullish_engulfing else "MORNING_STAR" if morning_star else "BEAR_HARAMI" if bearish_harami else "BEARISH_ENGULFING" if bearish_engulfing else "EVENING_STAR" if evening_star else "none"
@@ -249,12 +250,15 @@ def full_scan(s,p):
 
     e20_5m = ema(c, 20)
     dist = (price - e20_5m) / e20_5m * 100 if e20_5m else 0
-    if is_buy and dist > 1.5: return
-    if not is_buy and dist < -1.5: return
+    if is_buy and dist > 2.5: return
+    if not is_buy and dist < -2.5: return
 
     candles = detect_strong_candles(o,h,l,c)
     is_strong_buy_engulf = candles["name"] in ("BULLISH_ENGULFING", "MORNING_STAR")
     is_strong_sell_engulf = candles["name"] in ("BEARISH_ENGULFING", "EVENING_STAR")
+
+    if ob_low*0.99 <= price <= ob_high*1.01:
+        print(f"DEBUG {s} candle:{candles['name']} buy:{candles['buy']} vol:{vp['vol_x']:.2f}x b%:{vp['buy_pct']:.0f} s%:{vp['sell_pct']:.0f} dist:{dist:.2f}% sweep:{sweep_low if is_buy else sweep_high}", flush=True)
 
     if is_buy and not candles["buy"]:
         if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
@@ -263,7 +267,6 @@ def full_scan(s,p):
         if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
         return
 
-    # V25.2 - Instant bounce + 0.25% sweep
     if candles["is_harami"]:
         if is_buy and not sweep_low:
             print(f"FILTERED {s} Bull Harami but no XXX sweep", flush=True)
@@ -279,9 +282,9 @@ def full_scan(s,p):
             print(f"FILTERED {s} {candles['name']} need sweep or strong engulf", flush=True)
             STATS["almost"]+=1; return
 
-    if is_buy and vp["buy_pct"]<55: return
-    if not is_buy and vp["sell_pct"]<55: return
-    if vp["vol_x"]<1.1:
+    if is_buy and vp["buy_pct"]<48: return
+    if not is_buy and vp["sell_pct"]<48: return
+    if vp["vol_x"]<0.85:
         print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
         return
 
@@ -310,7 +313,7 @@ def full_scan(s,p):
     sweep_txt = f"XXX SWEEP {lows_5[-2:]}" if is_buy else f"XXX SWEEP {highs_5[-2:]}"
     if not (sweep_low if is_buy else sweep_high):
         sweep_txt = f"INSTANT BOUNCE {candles['name']} (no XXX needed)"
-    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25.2 0.25% ALWAYS-ON</b> [{state}]\n"
+    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25.3 0.25% ALWAYS-ON</b> [{state}]\n"
        f"{bos or ''} {pat} + {candles['name']}\n{sweep_txt}\n"
        f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"OB {ob_low:.4f}-{ob_high:.4f} Price: {price}\n"
@@ -340,7 +343,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V25.2 ALWAYS-ON + INSTANT BOUNCE 0.25% ===", flush=True)
+print("=== BOT V25.3 ALWAYS-ON + INSTANT BOUNCE 0.25% LOOSER ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
