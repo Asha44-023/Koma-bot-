@@ -21,7 +21,6 @@ if os.path.exists(COOLDOWN_FILE):
     except: pass
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 
-# COUNTERS FOR RARITY
 STATS = {"touched":0,"almost":0,"sniper":0,"xxx":0}
 
 def tg(msg):
@@ -93,10 +92,9 @@ def detect_bos(h,l,c):
     return None
 
 def detect_xxx_sweep(lows, current_low):
-    # YOUR XXX IN PIC - equal lows swept
     if len(lows)<2: return False
     l1=lows[-2][1]; l2=lows[-1][1]
-    equal = abs(l1-l2)/l1 < 0.0015 # within 0.15% = equal lows
+    equal = abs(l1-l2)/l1 < 0.0015
     swept = current_low < min(l1,l2)*0.998
     return equal and swept
 
@@ -157,16 +155,12 @@ def detect_strong_candles(o,h,l,c):
     c1_o,c1_h,c1_l,c1_c = o[-3], h[-3], l[-3], c[-3]
     body_cur = abs(cur_c - cur_o) + 1e-9
     body_prev = abs(prev_c - prev_o) + 1e-9
-
     bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_o < prev_c and cur_c > prev_o and body_cur > body_prev*1.1
     morning_star = c1_c < c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
-    # NEW - YOUR PIC
     bullish_harami = prev_c < prev_o and cur_c > cur_o and cur_o > prev_c and cur_c < prev_o and body_cur < body_prev*0.6
-
     bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_o > prev_c and cur_c < prev_o and body_cur > body_prev*1.1
     evening_star = c1_c > c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
     bearish_harami = prev_c > prev_o and cur_c < cur_o and cur_o < prev_c and cur_c > prev_o and body_cur < body_prev*0.6
-
     buy = bullish_engulfing or morning_star or bullish_harami
     sell = bearish_engulfing or evening_star or bearish_harami
     name = "BULL_HARAMI" if bullish_harami else "BULLISH_ENGULFING" if bullish_engulfing else "MORNING_STAR" if morning_star else "BEAR_HARAMI" if bearish_harami else "BEARISH_ENGULFING" if bearish_engulfing else "EVENING_STAR" if evening_star else "none"
@@ -183,6 +177,27 @@ def market_state(c, vp):
     if price>e20 and vp["buy_pct"]>60 and vp["vol_x"]>1.1: return "PUMPING"
     if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.1: return "DUMPING"
     return "TRENDING"
+
+# --- NEW BSL/SSL AUTO TP ---
+def get_bsl_ssl_auto(h, l, c, is_buy):
+    highs, lows = swing_points(h, l, look=2)
+    price = c[-1]
+    if is_buy:
+        above = [x[1] for x in highs if x[1] > price*1.0005]
+        if not above:
+            above = [max(h[-20:])]
+        above = sorted(set(above))
+        bsl1 = above[0]
+        bsl2 = above[1] if len(above) > 1 else above[0]*1.008
+        return bsl1*0.999, bsl2*0.998
+    else:
+        below = [x[1] for x in lows if x[1] < price*0.9995]
+        if not below:
+            below = [min(l[-20:])]
+        below = sorted(set(below), reverse=True)
+        ssl1 = below[0]
+        ssl2 = below[1] if len(below) > 1 else below[0]*0.992
+        return ssl1*1.001, ssl2*1.002
 
 def full_scan(s,p):
     if not in_killzone():
@@ -207,7 +222,6 @@ def full_scan(s,p):
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
 
-    # XXX SWEEP CHECK - YOUR IMAGE
     highs_5, lows_5 = swing_points(d5["h"], d5["l"])
     sweep_low = detect_xxx_sweep(lows_5, l[-1]) if lows_5 else False
     sweep_high = detect_xxx_sweep_high(highs_5, h[-1]) if highs_5 else False
@@ -237,7 +251,6 @@ def full_scan(s,p):
 
     ob_low, ob_high = ob
 
-    # COUNTER LEVEL 1 - OB TOUCHED
     if ob_low*0.99 <= price <= ob_high*1.01:
         STATS["touched"]+=1
         print(f"EYE {s} TOUCHED OB {ob} BOS:{bos} Sweep:{sweep_low if is_buy else sweep_high} | T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}", flush=True)
@@ -264,7 +277,6 @@ def full_scan(s,p):
             STATS["almost"]+=1
         return
 
-    # ENFORCE XXX SWEEP FOR HARAMI - YOUR MODEL
     if candles["is_harami"]:
         if is_buy and not sweep_low:
             print(f"FILTERED {s} Bull Harami but no XXX sweep - waiting", flush=True)
@@ -289,11 +301,20 @@ def full_scan(s,p):
     atr=sum(trs)/len(trs) if trs else price*0.01
     risk=min(atr*1.5, price*0.03)
     sl=price-risk if is_buy else price+risk
-    tp1=price+risk*1.5 if is_buy else price-risk*1.5
-    tp2=price+risk*2 if is_buy else price-risk*2
+
+    # --- AUTO TP BSL/SSL ---
+    auto_tp1, auto_tp2 = get_bsl_ssl_auto(d5["h"], d5["l"], d5["c"], is_buy)
+    rr1 = abs(auto_tp1 - price) / (risk or 1e-9)
+    if 0.8 <= rr1 <= 4.0:
+        tp1, tp2 = auto_tp1, auto_tp2
+        tp_src = f"BSL/SSL {rr1:.2f}R"
+    else:
+        tp1=price+risk*1.5 if is_buy else price-risk*1.5
+        tp2=price+risk*2 if is_buy else price-risk*2
+        tp_src = f"FIXED {rr1:.2f}R fallback"
 
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
-    ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
+    ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl}
     STATS["sniper"]+=1
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     kill = "ASIAN" if 2 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 5 else "LONDON" if 9 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 12 else "NY"
@@ -303,7 +324,7 @@ def full_scan(s,p):
        f"{sweep_txt}\n"
        f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"OB {ob_low:.4f}-{ob_high:.4f} Price: {price}\n"
-       f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n"
+       f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f} [{tp_src}]\n"
        f"[{nai}] | Stats T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}")
 
 def check_exits():
@@ -313,23 +334,23 @@ def check_exits():
         p=pos.get("perp", SYMBOL_MAP.get(s, s))
         d=kl(p,"Min1")
         if not d: continue
-        cur=d["c"][-1]; atr=pos["atr"]; entry=pos["entry"]; is_buy=pos["is_buy"]
-        risk=atr*1.5
-        tp1=entry+risk*1.5 if is_buy else entry-risk*1.5
-        tp2=entry+risk*2 if is_buy else entry-risk*2
-        sl=entry-risk if is_buy else entry+risk
+        cur=d["c"][-1]
+        entry=pos["entry"]; is_buy=pos["is_buy"]
+        sl=pos.get("sl", entry*0.99 if is_buy else entry*1.01)
+        tp1=pos.get("tp1", entry*1.01)
+        tp2=pos.get("tp2", entry*1.015)
         if is_buy:
-            if cur>=tp2: tg(f"🎯 TP2 HIT {s}"); ACTIVE.pop(s); continue
-            if cur>=tp1 and not pos.get("tp1"): pos["tp1"]=True; tg(f"🎯 TP1 HIT {s} -> SL BE")
+            if cur>=tp2: tg(f"🎯 TP2 HIT {s} BSL"); ACTIVE.pop(s); continue
+            if cur>=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 TP1 HIT {s} BSL -> SL BE")
             if cur<=sl: tg(f"🛑 SL HIT {s}"); ACTIVE.pop(s); continue
         else:
-            if cur<=tp2: tg(f"🎯 TP2 HIT {s}"); ACTIVE.pop(s); continue
-            if cur<=tp1 and not pos.get("tp1"): pos["tp1"]=True; tg(f"🎯 TP1 HIT {s} -> SL BE")
+            if cur<=tp2: tg(f"🎯 TP2 HIT {s} SSL"); ACTIVE.pop(s); continue
+            if cur<=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 TP1 HIT {s} SSL -> SL BE")
             if cur>=sl: tg(f"🛑 SL HIT {s}"); ACTIVE.pop(s); continue
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER ===", flush=True)
+print("=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER + BSL AUTO ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
