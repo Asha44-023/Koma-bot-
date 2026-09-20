@@ -20,7 +20,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v25-obtob-sniper
+          key: cooldown-v25-obtob-sniper-${{ github.run_id }}
+          restore-keys: |
+            cooldown-v25-obtob-sniper
 
       - run: pip install requests numpy
 
@@ -35,11 +37,15 @@ jobs:
           echo "=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER ==="
           python -u main.py --once
 
+      - name: Ensure cooldown file exists
+        if: always()
+        run: |
+          ls -la
+          touch cooldown.json
+
       - name: Save cooldown
         uses: actions/cache/save@v4
         if: always()
         with:
           path: cooldown.json
           key: cooldown-v25-obtob-sniper-${{ github.run_id }}
-          restore-keys: |
-            cooldown-v25-obtob-sniper
