@@ -21,6 +21,9 @@ if os.path.exists(COOLDOWN_FILE):
     except: pass
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 
+# COUNTERS FOR RARITY
+STATS = {"touched":0,"almost":0,"sniper":0,"xxx":0}
+
 def tg(msg):
     print(msg, flush=True)
     tok=os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or ""
@@ -32,11 +35,9 @@ def tg(msg):
 
 ACTIVE = {}
 
-# === 3 KILLZONES ===
 def in_killzone():
     now = datetime.now(ZoneInfo("Africa/Nairobi"))
     t = now.hour*60 + now.minute
-    # Asian 02:00-04:30, London 09:00-11:30, NY 16:00-18:30 EAT
     sessions = [(2*60, 4*60+30), (9*60, 11*60+30), (16*60, 18*60+30)]
     for s,e in sessions:
         if s <= t <= e:
@@ -91,6 +92,21 @@ def detect_bos(h,l,c):
     if price<last_l and last_l<prev_l: return "BOS_DOWN"
     return None
 
+def detect_xxx_sweep(lows, current_low):
+    # YOUR XXX IN PIC - equal lows swept
+    if len(lows)<2: return False
+    l1=lows[-2][1]; l2=lows[-1][1]
+    equal = abs(l1-l2)/l1 < 0.0015 # within 0.15% = equal lows
+    swept = current_low < min(l1,l2)*0.998
+    return equal and swept
+
+def detect_xxx_sweep_high(highs, current_high):
+    if len(highs)<2: return False
+    h1=highs[-2][1]; h2=highs[-1][1]
+    equal = abs(h1-h2)/h1 < 0.0015
+    swept = current_high > max(h1,h2)*1.002
+    return equal and swept
+
 def pattern(h,l):
     tops=[];bots=[]
     for i in range(2,len(h)-2):
@@ -135,20 +151,27 @@ def volume_pressure(o,h,l,c,v, n=20):
     return {"vol_x":cur/(avg or 1), "buy_pct":bp/total*100, "sell_pct":sp/total*100}
 
 def detect_strong_candles(o,h,l,c):
-    if len(c)<3: return {"buy":False,"sell":False,"name":"none"}
+    if len(c)<3: return {"buy":False,"sell":False,"name":"none","is_harami":False}
     prev_o, prev_h, prev_l, prev_c = o[-2], h[-2], l[-2], c[-2]
     cur_o, cur_h, cur_l, cur_c = o[-1], h[-1], l[-1], c[-1]
     c1_o,c1_h,c1_l,c1_c = o[-3], h[-3], l[-3], c[-3]
     body_cur = abs(cur_c - cur_o) + 1e-9
     body_prev = abs(prev_c - prev_o) + 1e-9
+
     bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_o < prev_c and cur_c > prev_o and body_cur > body_prev*1.1
     morning_star = c1_c < c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
+    # NEW - YOUR PIC
+    bullish_harami = prev_c < prev_o and cur_c > cur_o and cur_o > prev_c and cur_c < prev_o and body_cur < body_prev*0.6
+
     bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_o > prev_c and cur_c < prev_o and body_cur > body_prev*1.1
     evening_star = c1_c > c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
-    buy = bullish_engulfing or morning_star
-    sell = bearish_engulfing or evening_star
-    name = "BULLISH_ENGULFING" if bullish_engulfing else "MORNING_STAR" if morning_star else "BEARISH_ENGULFING" if bearish_engulfing else "EVENING_STAR" if evening_star else "none"
-    return {"buy":buy,"sell":sell,"name":name}
+    bearish_harami = prev_c > prev_o and cur_c < cur_o and cur_o < prev_c and cur_c > prev_o and body_cur < body_prev*0.6
+
+    buy = bullish_engulfing or morning_star or bullish_harami
+    sell = bearish_engulfing or evening_star or bearish_harami
+    name = "BULL_HARAMI" if bullish_harami else "BULLISH_ENGULFING" if bullish_engulfing else "MORNING_STAR" if morning_star else "BEAR_HARAMI" if bearish_harami else "BEARISH_ENGULFING" if bearish_engulfing else "EVENING_STAR" if evening_star else "none"
+    is_harami = bullish_harami or bearish_harami
+    return {"buy":buy,"sell":sell,"name":name,"is_harami":is_harami}
 
 def market_state(c, vp):
     e20=ema(c,20)
@@ -183,11 +206,20 @@ def full_scan(s,p):
     bos = detect_bos(d5["h"], d5["l"], d5["c"]) or detect_bos(d15["h"], d15["l"], d15["c"])
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
+
+    # XXX SWEEP CHECK - YOUR IMAGE
+    highs_5, lows_5 = swing_points(d5["h"], d5["l"])
+    sweep_low = detect_xxx_sweep(lows_5, l[-1]) if lows_5 else False
+    sweep_high = detect_xxx_sweep_high(highs_5, h[-1]) if highs_5 else False
+    if sweep_low or sweep_high:
+        STATS["xxx"]+=1
+
     bull_pats = ["double_bottom", "triple_bottom"]
     bear_pats = ["double_top", "triple_top"]
     valid_bos = (is_buy and bos == "BOS_UP") or (not is_buy and bos == "BOS_DOWN")
     valid_pat = (is_buy and pat in bull_pats) or (not is_buy and pat in bear_pats)
-    if not (valid_bos or valid_pat): return
+    if not (valid_bos or valid_pat):
+        return
 
     vp5 = volume_pressure(o,h,l,c,v)
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
@@ -198,14 +230,18 @@ def full_scan(s,p):
     has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-5:])
     has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-5:])
     ob = get_last_ob(o,h,l,c, bullish=is_buy)
-    if is_buy:
-        if not has_bull_fvg: return
-        if not ob: return
-    else:
-        if not has_bear_fvg: return
-        if not ob: return
+    if not ob:
+        return
+    if is_buy and not has_bull_fvg: return
+    if not is_buy and not has_bear_fvg: return
 
     ob_low, ob_high = ob
+
+    # COUNTER LEVEL 1 - OB TOUCHED
+    if ob_low*0.99 <= price <= ob_high*1.01:
+        STATS["touched"]+=1
+        print(f"EYE {s} TOUCHED OB {ob} BOS:{bos} Sweep:{sweep_low if is_buy else sweep_high} | T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}", flush=True)
+
     if is_buy:
         if price > ob_high * 1.008: return
         if price < ob_low * 0.99: return
@@ -219,14 +255,31 @@ def full_scan(s,p):
     if not is_buy and dist < -1.5: return
 
     candles = detect_strong_candles(o,h,l,c)
-    if is_buy and not candles["buy"]: return
-    if not is_buy and not candles["sell"]: return
+    if is_buy and not candles["buy"]:
+        if ob_low*0.99 <= price <= ob_high*1.01:
+            STATS["almost"]+=1
+        return
+    if not is_buy and not candles["sell"]:
+        if ob_low*0.99 <= price <= ob_high*1.01:
+            STATS["almost"]+=1
+        return
+
+    # ENFORCE XXX SWEEP FOR HARAMI - YOUR MODEL
+    if candles["is_harami"]:
+        if is_buy and not sweep_low:
+            print(f"FILTERED {s} Bull Harami but no XXX sweep - waiting", flush=True)
+            STATS["almost"]+=1
+            return
+        if not is_buy and not sweep_high:
+            print(f"FILTERED {s} Bear Harami but no XXX sweep - waiting", flush=True)
+            STATS["almost"]+=1
+            return
 
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
 
     if vp["vol_x"]<1.1:
-        print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
+        print(f"quiet {s} {vp['vol_x']:.2f}x {state} | T:{STATS['touched']} S:{STATS['sniper']}", flush=True)
         return
 
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
@@ -241,12 +294,17 @@ def full_scan(s,p):
 
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
+    STATS["sniper"]+=1
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
     kill = "ASIAN" if 2 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 5 else "LONDON" if 9 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 12 else "NY"
-    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TIP'}</b> [{state} {kill} KZ]\n"
-       f"{bos or ''} {pat} + {candles['name']} {vp['vol_x']:.2f}x\n"
-       f"Price: {price} Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
-       f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n[{nai}]")
+    sweep_txt = f"XXX SWEEP {lows_5[-2:]}" if is_buy else f"XXX SWEEP {highs_5[-2:]}"
+    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25</b> [{state} {kill} KZ]\n"
+       f"{bos or ''} {pat} + {candles['name']}\n"
+       f"{sweep_txt}\n"
+       f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
+       f"OB {ob_low:.4f}-{ob_high:.4f} Price: {price}\n"
+       f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n"
+       f"[{nai}] | Stats T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}")
 
 def check_exits():
     now=time.time()
@@ -271,7 +329,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V24 FINAL - 3 KILLZONES 1.1x BUY+SELL ===", flush=True)
+print("=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
