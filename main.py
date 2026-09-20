@@ -35,13 +35,7 @@ def tg(msg):
 ACTIVE = {}
 
 def in_killzone():
-    now = datetime.now(ZoneInfo("Africa/Nairobi"))
-    t = now.hour*60 + now.minute
-    sessions = [(2*60, 4*60+30), (9*60, 11*60+30), (16*60, 18*60+30)]
-    for s,e in sessions:
-        if s <= t <= e:
-            return True
-    return False
+    return True # ALWAYS ACTIVE - market builds momentum then BOOM
 
 def kl(sym, interval):
     try:
@@ -178,30 +172,25 @@ def market_state(c, vp):
     if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.1: return "DUMPING"
     return "TRENDING"
 
-# --- NEW BSL/SSL AUTO TP ---
 def get_bsl_ssl_auto(h, l, c, is_buy):
     highs, lows = swing_points(h, l, look=2)
     price = c[-1]
     if is_buy:
         above = [x[1] for x in highs if x[1] > price*1.0005]
-        if not above:
-            above = [max(h[-20:])]
+        if not above: above = [max(h[-20:])]
         above = sorted(set(above))
         bsl1 = above[0]
         bsl2 = above[1] if len(above) > 1 else above[0]*1.008
         return bsl1*0.999, bsl2*0.998
     else:
         below = [x[1] for x in lows if x[1] < price*0.9995]
-        if not below:
-            below = [min(l[-20:])]
+        if not below: below = [min(l[-20:])]
         below = sorted(set(below), reverse=True)
         ssl1 = below[0]
         ssl2 = below[1] if len(below) > 1 else below[0]*0.992
         return ssl1*1.001, ssl2*1.002
 
 def full_scan(s,p):
-    if not in_killzone():
-        return
     d5=kl(p,"Min5"); d15=kl(p,"Min15"); h1=kl(p,"Min60")
     if not d5 or not d15 or not h1: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
@@ -225,15 +214,13 @@ def full_scan(s,p):
     highs_5, lows_5 = swing_points(d5["h"], d5["l"])
     sweep_low = detect_xxx_sweep(lows_5, l[-1]) if lows_5 else False
     sweep_high = detect_xxx_sweep_high(highs_5, h[-1]) if highs_5 else False
-    if sweep_low or sweep_high:
-        STATS["xxx"]+=1
+    if sweep_low or sweep_high: STATS["xxx"]+=1
 
     bull_pats = ["double_bottom", "triple_bottom"]
     bear_pats = ["double_top", "triple_top"]
     valid_bos = (is_buy and bos == "BOS_UP") or (not is_buy and bos == "BOS_DOWN")
     valid_pat = (is_buy and pat in bull_pats) or (not is_buy and pat in bear_pats)
-    if not (valid_bos or valid_pat):
-        return
+    if not (valid_bos or valid_pat): return
 
     vp5 = volume_pressure(o,h,l,c,v)
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
@@ -244,13 +231,11 @@ def full_scan(s,p):
     has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-5:])
     has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-5:])
     ob = get_last_ob(o,h,l,c, bullish=is_buy)
-    if not ob:
-        return
+    if not ob: return
     if is_buy and not has_bull_fvg: return
     if not is_buy and not has_bear_fvg: return
 
     ob_low, ob_high = ob
-
     if ob_low*0.99 <= price <= ob_high*1.01:
         STATS["touched"]+=1
         print(f"EYE {s} TOUCHED OB {ob} BOS:{bos} Sweep:{sweep_low if is_buy else sweep_high} | T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}", flush=True)
@@ -269,29 +254,24 @@ def full_scan(s,p):
 
     candles = detect_strong_candles(o,h,l,c)
     if is_buy and not candles["buy"]:
-        if ob_low*0.99 <= price <= ob_high*1.01:
-            STATS["almost"]+=1
+        if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
         return
     if not is_buy and not candles["sell"]:
-        if ob_low*0.99 <= price <= ob_high*1.01:
-            STATS["almost"]+=1
+        if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
         return
 
     if candles["is_harami"]:
         if is_buy and not sweep_low:
-            print(f"FILTERED {s} Bull Harami but no XXX sweep - waiting", flush=True)
-            STATS["almost"]+=1
-            return
+            print(f"FILTERED {s} Bull Harami but no XXX sweep", flush=True)
+            STATS["almost"]+=1; return
         if not is_buy and not sweep_high:
-            print(f"FILTERED {s} Bear Harami but no XXX sweep - waiting", flush=True)
-            STATS["almost"]+=1
-            return
+            print(f"FILTERED {s} Bear Harami but no XXX sweep", flush=True)
+            STATS["almost"]+=1; return
 
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
-
     if vp["vol_x"]<1.1:
-        print(f"quiet {s} {vp['vol_x']:.2f}x {state} | T:{STATS['touched']} S:{STATS['sniper']}", flush=True)
+        print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
         return
 
     now=time.time(); prev=COOLDOWN["signals"].get(s,{})
@@ -302,7 +282,6 @@ def full_scan(s,p):
     risk=min(atr*1.5, price*0.03)
     sl=price-risk if is_buy else price+risk
 
-    # --- AUTO TP BSL/SSL ---
     auto_tp1, auto_tp2 = get_bsl_ssl_auto(d5["h"], d5["l"], d5["c"], is_buy)
     rr1 = abs(auto_tp1 - price) / (risk or 1e-9)
     if 0.8 <= rr1 <= 4.0:
@@ -311,21 +290,19 @@ def full_scan(s,p):
     else:
         tp1=price+risk*1.5 if is_buy else price-risk*1.5
         tp2=price+risk*2 if is_buy else price-risk*2
-        tp_src = f"FIXED {rr1:.2f}R fallback"
+        tp_src = f"FIXED {rr1:.2f}R"
 
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl}
     STATS["sniper"]+=1
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-    kill = "ASIAN" if 2 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 5 else "LONDON" if 9 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 12 else "NY"
     sweep_txt = f"XXX SWEEP {lows_5[-2:]}" if is_buy else f"XXX SWEEP {highs_5[-2:]}"
-    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25</b> [{state} {kill} KZ]\n"
-       f"{bos or ''} {pat} + {candles['name']}\n"
-       f"{sweep_txt}\n"
+    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25 ALWAYS-ON</b> [{state}]\n"
+       f"{bos or ''} {pat} + {candles['name']}\n{sweep_txt}\n"
        f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"OB {ob_low:.4f}-{ob_high:.4f} Price: {price}\n"
        f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f} [{tp_src}]\n"
-       f"[{nai}] | Stats T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}")
+       f"[{nai}] | T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}")
 
 def check_exits():
     now=time.time()
@@ -350,7 +327,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER + BSL AUTO ===", flush=True)
+print("=== BOT V25 ALWAYS-ON OB-TO-OB SNIPER - HARAMI+XXX+ BSL AUTO ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
