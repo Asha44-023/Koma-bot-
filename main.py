@@ -1,4 +1,4 @@
-# V26 PATCHED - BOTH WAYS ALL SESSIONS - RELAXED OR LOGIC
+# V26.1 - BOTH WAYS ALL SESSIONS - RELAXED + FVG OPTIONAL
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -13,8 +13,15 @@ PERPS = list(SYMBOL_MAP.values())
 COOLDOWN_FILE="cooldown.json"
 COOLDOWN={"signals":{}}
 if os.path.exists(COOLDOWN_FILE):
-    try: COOLDOWN=json.load(open(COOLDOWN_FILE))
-    except: pass
+    try:
+        COOLDOWN=json.load(open(COOLDOWN_FILE))
+        # MIGRATION: clear old format JASMYUSDT -> new format JASMYUSDT_BUY
+        if COOLDOWN.get("signals"):
+            first_key = list(COOLDOWN["signals"].keys())[0]
+            if "_" not in first_key: # old format
+                print(f"CLEARING OLD COOLDOWN FORMAT {first_key}", flush=True)
+                COOLDOWN={"signals":{}}
+    except: COOLDOWN={"signals":{}}
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 STATS = {"touched":0,"almost":0,"sniper":0,"xxx":0}
 def tg(msg):
@@ -25,7 +32,6 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 ACTIVE = {}
-
 COOLDOWN_NORMAL = 15*60
 COOLDOWN_AFTER_SL = 30*60
 COOLDOWN_AFTER_TP2 = 5*60
@@ -213,7 +219,6 @@ def full_scan(s,p):
     if len(c)<30 or len(d15["c"])<50 or len(h1["c"])<50: return
     price=c[-1]
     session_name, session_emoji = get_session()
-    h1_highs, h1_lows = swing_points(h1["h"], h1["l"], look=2)
     bos = detect_bos(d5["h"], d5["l"], d5["c"]) or detect_bos(d15["h"], d15["l"], d15["c"])
     pat = pattern(d5["h"], d5["l"])
     if pat=="none": pat = pattern(d15["h"], d15["l"])
@@ -222,9 +227,6 @@ def full_scan(s,p):
     vp15 = volume_pressure(d15["o"],d15["h"],d15["l"],d15["c"],d15["v"])
     vp = vp5 if vp5["vol_x"]>=vp15["vol_x"] else vp15
     state = market_state(c, vp)
-    fvgs_1h = get_fvgs(h1["h"], h1["l"])
-    has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-10:])
-    has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-10:])
 
     for is_buy in [True, False]:
         side = "BUY" if is_buy else "SELL"
@@ -236,7 +238,9 @@ def full_scan(s,p):
         if last_result=="SL": cd_need = COOLDOWN_AFTER_SL
         if last_result=="TP2": cd_need = COOLDOWN_AFTER_TP2
         if vp["vol_x"]>1.8: cd_need = min(cd_need, 10*60)
-        if elapsed < cd_need: continue
+        if elapsed < cd_need:
+            # print(f"CD SKIP {key} {cd_need-elapsed:.0f}s", flush=True)
+            continue
 
         if is_buy:
             if pat not in ["double_bottom","triple_bottom"] and bos!= "BOS_UP": continue
@@ -249,7 +253,6 @@ def full_scan(s,p):
         sweep_high = detect_xxx_sweep_high(highs_5, h[-1]) if highs_5 else False
         sweep_ok = sweep_low if is_buy else sweep_high
 
-        # PATCHED: OR logic so bot moves in all sessions
         if not (out_in or deep or sweep_ok): continue
         if out_in or deep or sweep_ok: STATS["xxx"]+=1
 
@@ -257,39 +260,37 @@ def full_scan(s,p):
         if not ob: continue
         ob_low, ob_high = ob
         ob_width = (ob_high - ob_low) / (ob_low or 1e-9)
-        if ob_width < 0.004: continue
+        if ob_width < 0.003: # RELAXED from 0.004 to 0.3%
+            print(f"NARROW OB SKIP {s} {side} {ob_width*100:.2f}%", flush=True)
+            continue
 
-        irl_mid = ema(h1["c"],50)
-        irl_ok = abs(price-irl_mid)/irl_mid < 0.015 if irl_mid else True
-
-        if ob_low*0.99 <= price <= ob_high*1.01:
+        if ob_low*0.985 <= price <= ob_high*1.015:
             STATS["touched"]+=1
-            print(f"EYE {s} {side} TOUCHED OB {ob} BOS:{bos} {pat} IRL:{irl_ok}", flush=True)
+            print(f"EYE {s} {side} TOUCHED OB {ob_low:.6f}-{ob_high:.6f} BOS:{bos} {pat} Vol:{vp['vol_x']:.2f}x", flush=True)
 
+        # WIDER OB proximity - V26.1 FIX
         if is_buy:
-            if price > ob_high * 1.012: continue
-            if price < ob_low * 0.99: continue
-            if not has_bull_fvg and pat not in ["double_bottom","triple_bottom"]: continue
+            if price > ob_high * 1.015: continue
+            if price < ob_low * 0.985: continue
         else:
-            if price < ob_low * 0.988: continue
-            if price > ob_high * 1.01: continue
-            if not has_bear_fvg and pat not in ["double_top","triple_top"]: continue
+            if price < ob_low * 0.985: continue
+            if price > ob_high * 1.015: continue
 
         e20_5m = ema(c, 20)
         dist = (price - e20_5m) / e20_5m * 100 if e20_5m else 0
-        if abs(dist) > 2.5: continue
+        if abs(dist) > 2.8: continue # RELAXED 2.5->2.8
 
         candles = detect_strong_candles(o,h,l,c)
         if is_buy and not candles["buy"]:
-            if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
+            if ob_low*0.985 <= price <= ob_high*1.015: STATS["almost"]+=1
             continue
         if not is_buy and not candles["sell"]:
-            if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
+            if ob_low*0.985 <= price <= ob_high*1.015: STATS["almost"]+=1
             continue
 
-        if is_buy and vp["buy_pct"]<45: continue
-        if not is_buy and vp["sell_pct"]<45: continue
-        if vp["vol_x"]<0.75: continue
+        if is_buy and vp["buy_pct"]<42: continue # RELAXED 45->42
+        if not is_buy and vp["sell_pct"]<42: continue
+        if vp["vol_x"]<0.70: continue # RELAXED 0.75->0.70
 
         trs=[max(h[i]-l[i], abs(h[i]-c[i-1])) for i in range(-14,0)]
         atr=sum(trs)/len(trs) if trs else price*0.01
@@ -307,7 +308,7 @@ def full_scan(s,p):
 
         rr1 = abs(auto_tp1 - price) / (risk or 1e-9)
         rr2 = abs(auto_tp2 - price) / (risk or 1e-9)
-        if rr2 < 1.2: continue
+        if rr2 < 1.0: continue # RELAXED 1.2->1.0
 
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
         ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p,"tp1":auto_tp1,"tp2":auto_tp2,"sl":sl,"side_key":key}
@@ -318,8 +319,8 @@ def full_scan(s,p):
         if deep: tag.append(f"Deep{'W' if is_buy else 'M'}")
         if sweep_ok: tag.append("XXX")
         sweep_txt = "+".join(tag)
-        tg(f"{session_emoji} {'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} V26 {session_name} {sweep_txt}</b> [{state}]\n"
-           f"{bos or ''} {pat} + {candles['name']} IRL:{'YES' if irl_ok else 'NO'}\n"
+        tg(f"{session_emoji} {'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} V26.1 {session_name} {sweep_txt}</b> [{state}]\n"
+           f"{bos or ''} {pat} + {candles['name']}\n"
            f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% OB {ob_width*100:.2f}%\n"
            f"OB {ob_low:.5f}-{ob_high:.5f} Price: {price}\n"
            f"SL:{sl:.6f} TP1:{auto_tp1:.6f}({rr1:.1f}R) TP2:{auto_tp2:.6f}({rr2:.1f}R) ERL\n"
@@ -361,7 +362,7 @@ def check_exits():
         if now-pos["t"]>30*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V26 PATCHED - RELAXED OR LOGIC ===", flush=True)
+print("=== BOT V26.1 - BOTH WAYS RELAXED ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
