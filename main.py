@@ -32,6 +32,17 @@ def tg(msg):
 
 ACTIVE = {}
 
+# === 3 KILLZONES ===
+def in_killzone():
+    now = datetime.now(ZoneInfo("Africa/Nairobi"))
+    t = now.hour*60 + now.minute
+    # Asian 02:00-04:30, London 09:00-11:30, NY 16:00-18:30 EAT
+    sessions = [(2*60, 4*60+30), (9*60, 11*60+30), (16*60, 18*60+30)]
+    for s,e in sessions:
+        if s <= t <= e:
+            return True
+    return False
+
 def kl(sym, interval):
     try:
         r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}",
@@ -95,10 +106,8 @@ def pattern(h,l):
 def get_fvgs(h, l, lookback=50):
     fvgs = []
     for i in range(max(2, len(h)-lookback), len(h)-1):
-        if l[i] > h[i-2]:
-            fvgs.append(('bull', h[i-2], l[i]))
-        if h[i] < l[i-2]:
-            fvgs.append(('bear', l[i-2], h[i]))
+        if l[i] > h[i-2]: fvgs.append(('bull', h[i-2], l[i]))
+        if h[i] < l[i-2]: fvgs.append(('bear', l[i-2], h[i]))
     return fvgs
 
 def get_last_ob(o,h,l,c, bullish=True, lookback=20):
@@ -107,11 +116,9 @@ def get_last_ob(o,h,l,c, bullish=True, lookback=20):
         body = c[i+1]-o[i+1]
         is_impulse = body > atr*0.5 if atr else body > 0
         if bullish:
-            if c[i] < o[i] and is_impulse and c[i+1] > o[i+1]:
-                return (l[i], h[i])
+            if c[i] < o[i] and is_impulse and c[i+1] > o[i+1]: return (l[i], h[i])
         else:
-            if c[i] > o[i] and is_impulse and c[i+1] < o[i+1]:
-                return (l[i], h[i])
+            if c[i] > o[i] and is_impulse and c[i+1] < o[i+1]: return (l[i], h[i])
     return None
 
 def volume_pressure(o,h,l,c,v, n=20):
@@ -127,7 +134,6 @@ def volume_pressure(o,h,l,c,v, n=20):
     total=bp+sp or 1
     return {"vol_x":cur/(avg or 1), "buy_pct":bp/total*100, "sell_pct":sp/total*100}
 
-# === V23 STRONGEST ONLY - ANTI SPAM ===
 def detect_strong_candles(o,h,l,c):
     if len(c)<3: return {"buy":False,"sell":False,"name":"none"}
     prev_o, prev_h, prev_l, prev_c = o[-2], h[-2], l[-2], c[-2]
@@ -150,15 +156,14 @@ def market_state(c, vp):
     rng=max(c[-10:])-min(c[-10:])
     atr=statistics.mean([abs(c[i]-c[i-1]) for i in range(-14,0)]) or 1e-9
     consolidating = rng < atr*3
-    if consolidating and vp["vol_x"]<1.5:
-        return "CONSOLIDATING"
-    if price>e20 and vp["buy_pct"]>60 and vp["vol_x"]>1.1:
-        return "PUMPING"
-    if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.1:
-        return "DUMPING"
+    if consolidating and vp["vol_x"]<1.5: return "CONSOLIDATING"
+    if price>e20 and vp["buy_pct"]>60 and vp["vol_x"]>1.1: return "PUMPING"
+    if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.1: return "DUMPING"
     return "TRENDING"
 
 def full_scan(s,p):
+    if not in_killzone():
+        return
     d5=kl(p,"Min5"); d15=kl(p,"Min15"); h1=kl(p,"Min60")
     if not d5 or not d15 or not h1: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
@@ -213,7 +218,6 @@ def full_scan(s,p):
     if is_buy and dist > 1.5: return
     if not is_buy and dist < -1.5: return
 
-    # V23 CANDLE FILTER - STRONGEST ONLY
     candles = detect_strong_candles(o,h,l,c)
     if is_buy and not candles["buy"]: return
     if not is_buy and not candles["sell"]: return
@@ -221,7 +225,6 @@ def full_scan(s,p):
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
 
-    # YOUR 1.1x
     if vp["vol_x"]<1.1:
         print(f"quiet {s} {vp['vol_x']:.2f}x {state}", flush=True)
         return
@@ -239,7 +242,8 @@ def full_scan(s,p):
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TIP'}</b> [{state}]\n"
+    kill = "ASIAN" if 2 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 5 else "LONDON" if 9 <= datetime.now(ZoneInfo("Africa/Nairobi")).hour < 12 else "NY"
+    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TIP'}</b> [{state} {kill} KZ]\n"
        f"{bos or ''} {pat} + {candles['name']} {vp['vol_x']:.2f}x\n"
        f"Price: {price} Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n[{nai}]")
@@ -267,7 +271,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V23 FINAL - 1.1x + ANTI-SPAM LOCKED ===", flush=True)
+print("=== BOT V24 FINAL - 3 KILLZONES 1.1x BUY+SELL ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
