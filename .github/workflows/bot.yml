@@ -20,11 +20,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v14
+          key: cooldown-v22-buy-dip-sell-tip
 
       - run: pip install requests numpy
 
-      - name: Run V14 VOL-RADAR
+      - name: Run V22 BUY DIP + SELL TIP
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -32,12 +32,12 @@ jobs:
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== V14 VOL-RADAR ==="
-          python -u bot_v14.py --once
+          echo "=== V22 BUY DIP + SELL TIP - 7 STRONGEST ==="
+          python -u main.py --once
 
       - name: Save cooldown
         uses: actions/cache/save@v4
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v14
+          key: cooldown-v22-buy-dip-sell-tip
