@@ -35,7 +35,7 @@ def tg(msg):
 ACTIVE = {}
 
 def in_killzone():
-    return True # ALWAYS ACTIVE - market builds momentum then BOOM
+    return True
 
 def kl(sym, interval):
     try:
@@ -88,15 +88,15 @@ def detect_bos(h,l,c):
 def detect_xxx_sweep(lows, current_low):
     if len(lows)<2: return False
     l1=lows[-2][1]; l2=lows[-1][1]
-    equal = abs(l1-l2)/l1 < 0.0015
-    swept = current_low < min(l1,l2)*0.998
+    equal = abs(l1-l2)/l1 < 0.0025 # V25.2 0.25% BEST FOR ALTS
+    swept = current_low < min(l1,l2)*0.997 # 0.3% sweep
     return equal and swept
 
 def detect_xxx_sweep_high(highs, current_high):
     if len(highs)<2: return False
     h1=highs[-2][1]; h2=highs[-1][1]
-    equal = abs(h1-h2)/h1 < 0.0015
-    swept = current_high > max(h1,h2)*1.002
+    equal = abs(h1-h2)/h1 < 0.0025 # V25.2 0.25% BEST FOR ALTS
+    swept = current_high > max(h1,h2)*1.003 # 0.3% sweep
     return equal and swept
 
 def pattern(h,l):
@@ -238,7 +238,6 @@ def full_scan(s,p):
     ob_low, ob_high = ob
     if ob_low*0.99 <= price <= ob_high*1.01:
         STATS["touched"]+=1
-        # temp log with engulf name for debug - will be overwritten later after candles detection
         print(f"EYE {s} TOUCHED OB {ob} BOS:{bos} Sweep:{sweep_low if is_buy else sweep_high} | T:{STATS['touched']} X:{STATS['xxx']} A:{STATS['almost']} S:{STATS['sniper']}", flush=True)
 
     if is_buy:
@@ -264,7 +263,7 @@ def full_scan(s,p):
         if ob_low*0.99 <= price <= ob_high*1.01: STATS["almost"]+=1
         return
 
-    # V25.1 INSTANT BOUNCE FIX - Engulfing can fire without XXX, Harami still needs XXX
+    # V25.2 - Instant bounce + 0.25% sweep
     if candles["is_harami"]:
         if is_buy and not sweep_low:
             print(f"FILTERED {s} Bull Harami but no XXX sweep", flush=True)
@@ -311,7 +310,7 @@ def full_scan(s,p):
     sweep_txt = f"XXX SWEEP {lows_5[-2:]}" if is_buy else f"XXX SWEEP {highs_5[-2:]}"
     if not (sweep_low if is_buy else sweep_high):
         sweep_txt = f"INSTANT BOUNCE {candles['name']} (no XXX needed)"
-    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25.1 ALWAYS-ON</b> [{state}]\n"
+    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TOP'} SNIPER V25.2 0.25% ALWAYS-ON</b> [{state}]\n"
        f"{bos or ''} {pat} + {candles['name']}\n{sweep_txt}\n"
        f"Vol {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"OB {ob_low:.4f}-{ob_high:.4f} Price: {price}\n"
@@ -341,7 +340,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V25.1 ALWAYS-ON + INSTANT BOUNCE ===", flush=True)
+print("=== BOT V25.2 ALWAYS-ON + INSTANT BOUNCE 0.25% ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
