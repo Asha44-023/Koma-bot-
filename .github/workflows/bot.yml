@@ -1,4 +1,4 @@
-name: grass-bot-24-7-instant
+name: grass-bot-v25-sniper
 on:
   push:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: '*/2 * * * *'
 
 concurrency:
-  group: grass-bot-single
+  group: grass-bot-v25-sniper
   cancel-in-progress: false
 
 jobs:
@@ -20,11 +20,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v22-buy-dip-sell-tip
+          key: cooldown-v25-obtob-sniper
 
       - run: pip install requests numpy
 
-      - name: Run V22 BUY DIP + SELL TIP
+      - name: Run V25 OB-TO-OB SNIPER HARAMI+XXX
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -32,7 +32,7 @@ jobs:
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== V22 BUY DIP + SELL TIP - 7 STRONGEST ==="
+          echo "=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER ==="
           python -u main.py --once
 
       - name: Save cooldown
@@ -40,4 +40,6 @@ jobs:
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v22-buy-dip-sell-tip
+          key: cooldown-v25-obtob-sniper-${{ github.run_id }}
+          restore-keys: |
+            cooldown-v25-obtob-sniper
