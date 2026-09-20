@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 SYMBOL_MAP = {
     "GRASSUSDT": "GRASS_USDT",
-    "TAOUSDT"  : "TAO_USDT",
+    "TAOUSDT" : "TAO_USDT",
     "SANDUSDT" : "SAND_USDT",
     "SENTUSDT" : "SENT_USDT",
     "FARTCOINUSDT": "FARTCOIN_USDT",
@@ -170,6 +170,35 @@ def market_state(c, vp):
         return "DUMPING - high volume selling pressure"
     return "TREND CONTINUING"
 
+# === V22 - 7 STRONGEST CANDLESTICKS (BUY DIP + SELL TIP) ===
+def detect_strong_candles(o,h,l,c):
+    if len(c)<3: return {"buy":False,"sell":False,"name":"none"}
+    prev_o, prev_h, prev_l, prev_c = o[-2], h[-2], l[-2], c[-2]
+    cur_o, cur_h, cur_l, cur_c = o[-1], h[-1], l[-1], c[-1]
+    c1_o,c1_h,c1_l,c1_c = o[-3], h[-3], l[-3], c[-3]
+
+    body_cur = abs(cur_c - cur_o) + 1e-9
+    body_prev = abs(prev_c - prev_o) + 1e-9
+
+    # BUY
+    bullish_engulfing = prev_c < prev_o and cur_c > cur_o and cur_o < prev_c and cur_c > prev_o and body_cur > body_prev*1.1
+    lower_wick = min(cur_o, cur_c) - cur_l
+    upper_wick_small = cur_h - max(cur_o, cur_c)
+    hammer = lower_wick > body_cur*2 and upper_wick_small < body_cur*0.3 and cur_c > cur_o
+    morning_star = c1_c < c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c > cur_o and cur_c > (c1_o+c1_c)/2
+
+    # SELL
+    bearish_engulfing = prev_c > prev_o and cur_c < cur_o and cur_o > prev_c and cur_c < prev_o and body_cur > body_prev*1.1
+    upper_wick = cur_h - max(cur_o, cur_c)
+    lower_wick_small = min(cur_o, cur_c) - cur_l
+    shooting_star = upper_wick > body_cur*2 and lower_wick_small < body_cur*0.3 and cur_c < cur_o
+    evening_star = c1_c > c1_o and abs(prev_c-prev_o) < (c1_h-c1_l)*0.3 and cur_c < cur_o and cur_c < (c1_o+c1_c)/2
+
+    buy = bullish_engulfing or hammer or morning_star
+    sell = bearish_engulfing or shooting_star or evening_star
+    name = "bullish_engulfing" if bullish_engulfing else "hammer_dragonfly" if hammer else "morning_star" if morning_star else "bearish_engulfing" if bearish_engulfing else "shooting_star_gravestone" if shooting_star else "evening_star" if evening_star else "none"
+    return {"buy":buy,"sell":sell,"name":name}
+
 def full_scan(s,p):
     d5=kl(p,"Min5"); d15=kl(p,"Min15"); h1=kl(p,"Min60")
     if not d5 or not d15 or not h1: return
@@ -183,7 +212,6 @@ def full_scan(s,p):
         return
     is_buy = dir1h==1
 
-    # 1h lower high filter - don't buy into downtrend highs
     h1_highs, h1_lows = swing_points(h1["h"], h1["l"])
     if len(h1_highs) >= 2 and len(h1_lows) >= 2:
         if is_buy and h1_highs[-1][1] < h1_highs[-2][1]:
@@ -209,7 +237,6 @@ def full_scan(s,p):
     vp = vp5 if vp5["vol_x"]>=vp15["vol_x"] else vp15
     state = market_state(c, vp)
 
-    # FVG + OB filter
     fvgs_1h = get_fvgs(h1["h"], h1["l"])
     has_bull_fvg = any(f[0]=='bull' for f in fvgs_1h[-5:])
     has_bear_fvg = any(f[0]=='bear' for f in fvgs_1h[-5:])
@@ -222,37 +249,32 @@ def full_scan(s,p):
         if not has_bear_fvg: return
         if not ob: return
 
-    # --- V20.5 PULLBACK ENTRY FIX ---
-    # 1. Don't chase: price must be near OB, not extended above/below it
     ob_low, ob_high = ob
     if is_buy:
-        if price > ob_high * 1.008: # more than 0.8% above OB = chase
-            return
-        # must be within 1.2% of OB to be valid pullback
-        if price < ob_low * 0.99:
-            return
+        if price > ob_high * 1.008: return
+        if price < ob_low * 0.99: return
     else:
-        if price < ob_low * 0.992:
-            return
-        if price > ob_high * 1.01:
-            return
+        if price < ob_low * 0.992: return
+        if price > ob_high * 1.01: return
 
-    # 2. Exhaustion filter: don't buy extended from EMA20
     e20_5m = ema(c, 20)
     dist = (price - e20_5m) / e20_5m * 100 if e20_5m else 0
-    if is_buy and dist > 1.5:
-        return
-    if not is_buy and dist < -1.5:
-        return
+    if is_buy and dist > 1.5: return
+    if not is_buy and dist < -1.5: return
 
-    # 3. Don't buy into 1h resistance / sell into 1h support
     h1_high = max(h1["h"][-20:])
     h1_low = min(h1["l"][-20:])
-    if is_buy and (h1_high - price) / price < 0.005:
+    if is_buy and (h1_high - price) / price < 0.005: return
+    if not is_buy and (price - h1_low) / price < 0.005: return
+
+    # === V22 NEW: CANDLESTICK WHEN FILTER ===
+    candles = detect_strong_candles(o,h,l,c)
+    if is_buy and not candles["buy"]:
+        print(f"WAIT {s} - no buy dip candle, got {candles['name']}", flush=True)
         return
-    if not is_buy and (price - h1_low) / price < 0.005:
+    if not is_buy and not candles["sell"]:
+        print(f"WAIT {s} - no sell tip candle, got {candles['name']}", flush=True)
         return
-    # --- END V20.5 ---
 
     liq = detect_liquidity_grab(o,h,l,c,v)
     whale = detect_whale(o,h,l,c,v)
@@ -279,8 +301,8 @@ def full_scan(s,p):
     COOLDOWN["signals"][s]={"t":now,"dir":is_buy}; save()
     ACTIVE[s]={"entry":price,"is_buy":is_buy,"t":now,"atr":atr,"perp":p}
     nai=datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%H:%M")
-    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY' if is_buy else 'SELL'}</b> [{state}]\n"
-       f"Structure: {bos or ''} {pat} + FVG/OB pullback\n"
+    tg(f"{'🟢' if is_buy else '🔴'} <b>{s} {'BUY DIP' if is_buy else 'SELL TIP'}</b> [{state}]\n"
+       f"Structure: {bos or ''} {pat} + FVG/OB + <b>{candles['name'].upper()}</b>\n"
        f"15m/1h: {'UP' if is_buy else 'DOWN'}\n"
        f"Price: {price} Vol: {vp['vol_x']:.2f}x Buy {vp['buy_pct']:.0f}% Sell {vp['sell_pct']:.0f}%\n"
        f"SL:{sl:.6f} TP1:{tp1:.6f} TP2:{tp2:.6f}\n[{nai}]")
@@ -308,7 +330,7 @@ def check_exits():
         if now-pos["t"]>15*60:
             tg(f"⏰ TIMEOUT {s}"); ACTIVE.pop(s)
 
-print("=== BOT V20.5 - pullback entry ===", flush=True)
+print("=== BOT V22 - BUY DIP + SELL TIP 7 STRONGEST ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS, PERPS):
         try: full_scan(s,p)
