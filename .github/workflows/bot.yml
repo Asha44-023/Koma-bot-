@@ -1,6 +1,11 @@
 name: grass-bot-v25-sniper
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - 'cooldown.json'
+      - '**.json'
+      - 'README.md'
   workflow_dispatch:
   schedule:
     - cron: '*/2 * * * *'
@@ -26,7 +31,7 @@ jobs:
 
       - run: pip install requests numpy
 
-      - name: Run V25 OB-TO-OB SNIPER HARAMI+XXX
+      - name: Run V25 OB-TO-OB SNIPER HARAMI+XXX BSL
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,7 +39,7 @@ jobs:
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+COUNTER ==="
+          echo "=== BOT V25 OB-TO-OB SNIPER - HARAMI+XXX+BSL ==="
           python -u main.py --once
 
       - name: Ensure cooldown file exists
