@@ -1,58 +1,42 @@
-name: grass-bot-v26-sniper
+name: grass-bot-v28-flash-fomo-wick
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'cooldown.json'
-      - '**.json'
-      - 'README.md'
   workflow_dispatch:
   schedule:
     - cron: '*/2 * * * *'
 
 concurrency:
-  group: grass-bot-v26-sniper
+  group: grass-bot-v28-flash-fomo-wick
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-
-      - name: Restore cooldown
-        uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v26-bothways-${{ github.run_id }}
+          key: cooldown-v28-${{ github.run_id }}
           restore-keys: |
+            cooldown-v28
             cooldown-v26-bothways
-            cooldown-v25-obtob-sniper
-
-      - run: pip install requests numpy
-
-      - name: Run V26 BOTH WAYS ALL SESSIONS
-        env:
+      - run: pip install requests
+      - env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
+        run: python -u bot.py --once
+      - if: always()
         run: |
-          echo "=== BOT V26 - BOTH WAYS ALL SESSIONS OUT&IN DEEP W/M IRL->ERL 15/30/5 ==="
-          python -u main.py --once
-
-      - name: Ensure cooldown file exists
-        if: always()
-        run: |
-          ls -la
-          cat cooldown.json || echo "{}"
+          cat cooldown.json || echo '{"signals":{}}' > cooldown.json
           touch cooldown.json
-
-      - name: Save cooldown
-        uses: actions/cache/save@v4
+      - uses: actions/cache/save@v4
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v26-bothways-${{ github.run_id }}
+          key: cooldown-v28-${{ github.run_id }}
