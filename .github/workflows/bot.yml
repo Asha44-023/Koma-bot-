@@ -10,60 +10,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - run: pip install requests
 
-      - name: Restore cooldown cache
-        uses: actions/cache/restore@v4
-        with:
-          path: cooldown.json
-          key: cooldown-v28-6-final
-          restore-keys: |
-            cooldown-v28-6-final
-
-      - name: Install deps
-        run: pip install requests
-
-      - name: Clean future timestamps (force wipe)
+      - name: KILL ALL COOLDOWN
         run: |
-          echo "BEFORE:"
-          cat cooldown.json || echo '{"signals":{}}' > cooldown.json
-          python3 -c "
-          import json, time
-          f='cooldown.json'
-          try:
-              d=json.load(open(f))
-              now=time.time()
-              print(f'Now: {now}')
-              cleaned={}
-              for k,v in d.get('signals',{}).items():
-                  t=v.get('t',0)
-                  if t > now + 3600:
-                      print(f'REMOVE FUTURE {k} {t} diff {t-now}')
-                      continue
-                  if now - t > 24*3600:
-                      continue
-                  cleaned[k]=v
-              d['signals']=cleaned
-              open(f,'w').write(json.dumps(d))
-              print(f'AFTER CLEAN: {len(cleaned)} entries')
-          except Exception as e:
-              print(f'Error {e} - wiping')
-              open(f,'w').write(json.dumps({'signals':{}}))
-          "
-          echo "AFTER:"
+          rm -f cooldown.json
+          echo '{"signals":{}}' > cooldown.json
+          echo "WIPED:"
           cat cooldown.json
 
       - name: Run bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          PYTHONUNBUFFERED: 1
         run: python -u bot.py --once
 
-      - name: Show cooldown
-        run: cat cooldown.json || echo '{"signals":{}}' > cooldown.json
-
-      - name: Save cooldown cache
-        uses: actions/cache/save@v4
-        with:
-          path: cooldown.json
-          key: cooldown-v28-6-final
+      - run: cat cooldown.json
