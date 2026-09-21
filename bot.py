@@ -1,4 +1,4 @@
-# V28.4 QUALITY ANTI-SPAM - 1 DIRECTION PER COIN + PATTERN MATCH
+# V28.5 FINAL QUALITY - FIXED WHALE DIRECTION + ANTI-SPAM
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -18,7 +18,7 @@ if os.path.exists(COOLDOWN_FILE):
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 STATS={"touched":0,"sniper":0,"xxx":0}
 WHALE_TRACKER={}; VOL_HISTORY={}
-LAST_SIGNAL_TIME={} # Anti-spam: last time any signal for symbol
+LAST_SIGNAL_TIME={}
 
 def tg(msg):
     print(msg, flush=True)
@@ -29,7 +29,7 @@ def tg(msg):
         except: pass
 
 ACTIVE={}
-COOLDOWN_NORMAL=30*60 # 30m no spam
+COOLDOWN_NORMAL=30*60
 COOLDOWN_AFTER_SL=45*60
 COOLDOWN_WHALE_FLASH=3*60
 
@@ -117,14 +117,14 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy):
     if is_buy:
         entry = ob_50
         sl = min(min(l[-7:]), ob_low) * 0.997
-        tp1 = recent_high * 0.995 # First wick
-        tp2 = recent_high * 1.01 # Break wick = higher than TP1 FIXED
+        tp1 = recent_high * 0.995
+        tp2 = recent_high * 1.01
         tp3 = tp2 * 1.02
     else:
         entry = ob_50
         sl = max(max(h[-7:]), ob_high) * 1.003
         tp1 = recent_low * 1.005
-        tp2 = recent_low * 0.99 # Lower than TP1 FIXED
+        tp2 = recent_low * 0.99
         tp3 = tp2 * 0.98
     risk = abs(entry - sl); rr2 = abs(tp2 - entry)/(risk or 1e-9)
     return entry, sl, tp1, tp2, tp3, rr2
@@ -148,10 +148,7 @@ def full_scan(s,p):
     price=c[-1]
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
-
-    # ANTI-SPAM: 1 signal per coin max 30 min
-    if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60:
-        return
+    if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60: return
 
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
@@ -160,29 +157,18 @@ def full_scan(s,p):
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
 
-    # QUALITY FILTERS - NO SPAM
-    if not is_whale and vp["vol_x"] < 1.0: return
-    if not is_whale and vp["buy_pct"]<55 and vp["sell_pct"]<55: return
+    if vp["vol_x"] < 1.0 and not is_whale: return
 
-    best_side = None
-    best_score = 0
     candidates = []
-
     for is_buy in [True, False]:
         side="BUY" if is_buy else "SELL"
-
-        # FIX 1: PATTERN MUST MATCH SIDE
         if is_buy and pat in ["double_top","triple_top"]: continue
         if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
-
-        # FIX 2: BOS MUST MATCH SIDE
         if bos=="BOS_UP" and not is_buy: continue
         if bos=="BOS_DOWN" and is_buy: continue
-
-        # FIX 3: BUY/SELL % MUST MATCH
-        if not is_whale:
-            if is_buy and vp["buy_pct"]<58: continue
-            if not is_buy and vp["sell_pct"]<58: continue
+        # FIXED: EVEN WHALE NEEDS CORRECT DOMINANCE
+        if is_buy and vp["buy_pct"]<58: continue
+        if not is_buy and vp["sell_pct"]<58: continue
 
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=40)
         if not ob: continue
@@ -198,7 +184,6 @@ def full_scan(s,p):
         candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
 
     if not candidates: return
-    # FIX 4: PICK ONLY 1 BEST DIRECTION PER COIN
     candidates.sort(reverse=True, key=lambda x: x[0])
     score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
 
@@ -225,7 +210,7 @@ f"TP2: {tp2:.6f}\n"
 f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%"
     )
 
-print("=== BOT V28.4 ANTI-SPAM QUALITY ===", flush=True)
+print("=== BOT V28.5 FINAL FIXED ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
