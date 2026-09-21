@@ -1,4 +1,4 @@
-# V28.7 FINAL QUALITY - FBS 62% FIRST - FIXED ALL
+# V28.7.1 FBS 62% FIRST + LOOSE VOL/RR
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -76,36 +76,24 @@ def detect_bos(h,l,c):
     if price<lows[-1][1] and lows[-1][1]<lows[-2][1]: return "BOS_DOWN"
     return None
 
-# ===== NEW V28.7 - FBS 62% FIRST FILTER FROM IMAGE =====
 def fbs_62_first(h,l,c):
-    """Top-Left WEAK reject, Top-Right STRONG enter - PRIMARY"""
     if len(c)<3: return None, "no data"
     prev_high = h[-2]; prev_low = l[-2]
     curr_close = c[-1]; curr_low = l[-1]; curr_high = h[-1]
     prev_range = prev_high - prev_low
     if prev_range == 0: return None, "no range"
-
     l75 = prev_low + prev_range*0.75
     l62 = prev_low + prev_range*0.62
     l38 = prev_low + prev_range*0.38
     l25 = prev_low + prev_range*0.25
-
-    # Top-Left: Bullish WEAK - close inside top 25% zone = DO NOT ENTER
-    if curr_close < l75 and c[-2] > c[-3]: # pumping but weak close
+    if curr_close < l75 and c[-2] > c[-3]:
         return None, f"WEAK TOP-LEFT {curr_close:.4f}<75% {l75:.4f}"
-
-    # Bottom-Left: Bearish WEAK - close inside bottom 25%
     if curr_close > l25 and c[-2] < c[-3]:
         return None, f"WEAK BTM-LEFT {curr_close:.4f}>25% {l25:.4f}"
-
-    # Top-Right: Bullish STRONG - close >62% and wick holds >38%
     if curr_close > l62 and curr_low > l38:
         return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {l62:.4f}"
-
-    # Bottom-Right: Bearish STRONG - close <38% and wick <62%
     if curr_close < l38 and curr_high < l62:
         return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {l38:.4f}"
-
     return None, "No 62% breakout"
 
 def pattern(h,l):
@@ -193,7 +181,7 @@ def full_scan(s,p):
     if session_name=="OFF": return
     if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60: return
 
-    # ===== V28.7 FILTER 0: FBS 62% FIRST - PRIMARY GATE =====
+    # FILTER 0: FBS 62% FIRST
     fbs_res, fbs_msg = fbs_62_first(d5["h"], d5["l"], d5["c"])
     if fbs_res is None:
         fbs_res15, fbs_msg15 = fbs_62_first(d15["h"], d15["l"], d15["c"])
@@ -204,16 +192,13 @@ def full_scan(s,p):
             fbs_res = fbs_res15
             fbs_msg = fbs_msg15 + " (15m)"
 
-    # If we are here, FBS passed
     print(f"{s} FBS PASS: {fbs_msg}", flush=True)
 
-    # 1. CONSOLIDATION FILTER
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     if atr>0:
         range_20 = max(h[-20:]) - min(l[-20:])
-        if range_20 < atr*2.0: return
+        if range_20 < atr*1.5: return # loosened from 2.0
 
-    # 2. TREND FILTER
     e50_5 = ema(c,50)
     e50_15 = ema(d15["c"],50)
     trend_up = price > e50_5 and price > e50_15
@@ -227,41 +212,44 @@ def full_scan(s,p):
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
 
-    if vp["vol_x"] < 1.0 and not is_whale: return
+    # V28.7.1 LOOSENED
+    if vp["vol_x"] < 0.7 and not is_whale:
+        print(f"{s} VOL SKIP {vp['vol_x']:.2f}x", flush=True)
+        return
 
     candidates = []
     for is_buy in [True, False]:
-        # ALIGN with FBS
         if "UP" in fbs_res and not is_buy: continue
         if "DOWN" in fbs_res and is_buy: continue
-
         if trend_up and not is_buy: continue
         if trend_down and is_buy: continue
-        if trend_up and buy_v > sell_v*1.3 and not is_buy: continue
-        if trend_down and sell_v > buy_v*1.3 and is_buy: continue
 
         side="BUY" if is_buy else "SELL"
         if is_buy and pat in ["double_top","triple_top"]: continue
         if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
         if bos=="BOS_UP" and not is_buy: continue
         if bos=="BOS_DOWN" and is_buy: continue
-        if is_buy and vp["buy_pct"]<58: continue
-        if not is_buy and vp["sell_pct"]<58: continue
+        if is_buy and vp["buy_pct"]<55: continue # loosened from 58
+        if not is_buy and vp["sell_pct"]<55: continue
 
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=40)
         if not ob: continue
         ob_low,ob_high=ob
-        inside = ob_low*0.98 <= price <= ob_high*1.02
+        inside = ob_low*0.95 <= price <= ob_high*1.05 # loosened OB
         if not inside and not is_whale: continue
 
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
-        if rr2<1.5 and not is_whale: continue
-        if rr2<1.2 and is_whale: continue
+        if rr2<1.2 and not is_whale:
+            print(f"{s} RR SKIP {rr2:.2f}", flush=True)
+            continue
+        if rr2<1.0 and is_whale: continue
 
         score = rr2 + (vp["buy_pct"] if is_buy else vp["sell_pct"])/100
         candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
 
-    if not candidates: return
+    if not candidates:
+        print(f"{s} FBS PASS but no OB/RR candidate", flush=True)
+        return
     candidates.sort(reverse=True, key=lambda x: x[0])
     score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
 
@@ -289,7 +277,7 @@ f"TP2: {tp2:.6f}\n"
 f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}"
     )
 
-print("=== BOT V28.7 FBS 62% FIRST - FIXED ===", flush=True)
+print("=== BOT V28.7.1 FBS 62% FIRST LOOSE ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
