@@ -1,4 +1,4 @@
-# V28.5 FINAL QUALITY - FIXED WHALE DIRECTION + ANTI-SPAM
+# V28.6 FINAL QUALITY - FIXED ALL
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -76,21 +76,28 @@ def detect_bos(h,l,c):
     if price<lows[-1][1] and lows[-1][1]<lows[-2][1]: return "BOS_DOWN"
     return None
 
-def detect_out_in(o,h,l,c,side):
-    if len(c)<6: return False
-    if side=="BUY": lvl=min(l[-6:-1]); return c[-2]<lvl*0.997 and c[-1]>lvl and c[-1]>o[-1]
-    else: lvl=max(h[-6:-1]); return c[-2]>lvl*1.003 and c[-1]<lvl and c[-1]<o[-1]
-
+# FIXED PATTERN - TIGHTER
 def pattern(h,l):
     tops=[];bots=[]
-    for i in range(2,len(h)-2):
-        if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i+1] and h[i]>h[i+2]: tops.append(h[i])
-        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i+1] and l[i]<l[i+2]: bots.append(l[i])
-    tops=tops[-3:];bots=bots[-3:]
-    if len(tops)>=3 and max(tops)-min(tops)<sum(tops)/3*0.015: return "triple_top"
-    if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.015: return "double_top"
-    if len(bots)>=3 and max(bots)-min(bots)<sum(bots)/3*0.015: return "triple_bottom"
-    if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.015: return "double_bottom"
+    for i in range(3,len(h)-3):
+        if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]:
+            tops.append((i,h[i]))
+        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]:
+            bots.append((i,l[i]))
+    if len(tops)>=3:
+        if tops[-1][0]-tops[-2][0]>=5 and tops[-2][0]-tops[-3][0]>=5:
+            prices=[tops[-1][1],tops[-2][1],tops[-3][1]]
+            if max(prices)-min(prices)<sum(prices)/3*0.008: return "triple_top"
+    if len(tops)>=2:
+        if tops[-1][0]-tops[-2][0]>=5:
+            if abs(tops[-1][1]-tops[-2][1])/tops[-2][1]<0.008: return "double_top"
+    if len(bots)>=3:
+        if bots[-1][0]-bots[-2][0]>=5 and bots[-2][0]-bots[-3][0]>=5:
+            prices=[bots[-1][1],bots[-2][1],bots[-3][1]]
+            if max(prices)-min(prices)<sum(prices)/3*0.008: return "triple_bottom"
+    if len(bots)>=2:
+        if bots[-1][0]-bots[-2][0]>=5:
+            if abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
     return "none"
 
 def get_last_ob(o,h,l,c,bullish=True,lookback=40):
@@ -106,6 +113,11 @@ def volume_pressure(o,h,l,c,v,n=20):
     avg=statistics.mean(v[-n:]); cur=v[-1]; bp=sp=0
     for i in range(-n,0): rng=h[i]-l[i] or 1e-9; delta=(c[i]-o[i])/rng*v[i]; bp+=delta if delta>0 else 0; sp+=-delta if delta<0 else 0
     total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
+
+def volume_delta(o,c,v,look=10):
+    buy_v=sum(v[i] for i in range(-look,0) if c[i]>o[i])
+    sell_v=sum(v[i] for i in range(-look,0) if c[i]<o[i])
+    return buy_v, sell_v
 
 def get_wick_levels(h,l,lookback=20):
     return max(h[-lookback:]), min(l[-lookback:])
@@ -150,6 +162,20 @@ def full_scan(s,p):
     if session_name=="OFF": return
     if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60: return
 
+    # === NEW FIXES ===
+    # 1. CONSOLIDATION FILTER
+    atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
+    if atr>0:
+        range_20 = max(h[-20:]) - min(l[-20:])
+        if range_20 < atr*2.0: return # too sideways
+
+    # 2. TREND FILTER - EMA50
+    e50_5 = ema(c,50)
+    e50_15 = ema(d15["c"],50)
+    trend_up = price > e50_5 and price > e50_15
+    trend_down = price < e50_5 and price < e50_15
+    buy_v, sell_v = volume_delta(o,c,v,10)
+
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
     if pat=="none": pat=pattern(d15["h"],d15["l"])
@@ -161,12 +187,18 @@ def full_scan(s,p):
 
     candidates = []
     for is_buy in [True, False]:
+        # 3. BLOCK COUNTER-TREND - FIXES GRASS/JASMY
+        if trend_up and not is_buy: continue
+        if trend_down and is_buy: continue
+        # 4. VOLUME DELTA FILTER
+        if trend_up and buy_v > sell_v*1.3 and not is_buy: continue
+        if trend_down and sell_v > buy_v*1.3 and is_buy: continue
+
         side="BUY" if is_buy else "SELL"
         if is_buy and pat in ["double_top","triple_top"]: continue
         if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
         if bos=="BOS_UP" and not is_buy: continue
         if bos=="BOS_DOWN" and is_buy: continue
-        # FIXED: EVEN WHALE NEEDS CORRECT DOMINANCE
         if is_buy and vp["buy_pct"]<58: continue
         if not is_buy and vp["sell_pct"]<58: continue
 
@@ -207,10 +239,10 @@ f"Entry: {entry:.6f} (50% OB)\n"
 f"SL: {sl:.6f}\n"
 f"TP1: {tp1:.6f}\n"
 f"TP2: {tp2:.6f}\n"
-f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%"
+f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}"
     )
 
-print("=== BOT V28.5 FINAL FIXED ===", flush=True)
+print("=== BOT V28.6 FIXED TREND+VOLUME+PATTERN ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
