@@ -1,4 +1,4 @@
-name: grass-bot-v28-6-fixed
+name: grass-bot-v28-7-fixed
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -8,25 +8,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/cache@v4
         with:
-          path: cooldown.json
-          key: cooldown-v28-6-final
+          path: |
+            cooldown.json
+            active.json
+          key: cooldown-v28-7-persistent
+          restore-keys: |
+            cooldown-v28-7-persistent
+
       - run: pip install requests
-      - run: |
-          echo '{"signals":{}}' > cooldown.json || true
-          cat cooldown.json
+
+      - name: Clean expired only (don't wipe!)
+        run: |
           python3 -c "
-          import json,time
-          try:
-            d=json.load(open('cooldown.json'))
-            now=time.time()
-            c={k:v for k,v in d.get('signals',{}).items() if v.get('t',0) <= now+3600 and now-v.get('t',0) < 86400}
-            open('cooldown.json','w').write(json.dumps({'signals':c}))
-          except: open('cooldown.json','w').write(json.dumps({'signals':{}}))
+          import json,time,os
+          if not os.path.exists('cooldown.json'):
+            open('cooldown.json','w').write(json.dumps({'signals':{}}))
+          else:
+            try:
+              d=json.load(open('cooldown.json'))
+              now=time.time()
+              # keep only last 24h and not future
+              c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < 86400 and v.get('t',0) <= now}
+              open('cooldown.json','w').write(json.dumps({'signals':c}))
+              print(f'Cooldown kept {len(c)} entries')
+            except Exception as e:
+              print(e)
+              open('cooldown.json','w').write(json.dumps({'signals':{}}))
           "
+          cat cooldown.json
+
       - env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -u bot.py --once
-      - run: cat cooldown.json
+
+      - run: |
+          echo "=== FINAL COOLDOWN ==="
+          cat cooldown.json
+          cat active.json || echo "no active.json"
