@@ -1,4 +1,4 @@
-# V28.7.3 FBS 62% STRONG SNIPER - OVERRIDE ALL
+# V28.7.5 ANTI-DOUBLE FINAL - FBS 62% + PAT BLOCK + 60min CD
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -29,9 +29,9 @@ def tg(msg):
         except: pass
 
 ACTIVE={}
-COOLDOWN_NORMAL=30*60
-COOLDOWN_AFTER_SL=45*60
-COOLDOWN_WHALE_FLASH=3*60
+COOLDOWN_NORMAL=60*60
+COOLDOWN_AFTER_SL=90*60
+COOLDOWN_WHALE_FLASH=10*60
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
@@ -179,9 +179,16 @@ def full_scan(s,p):
     price=c[-1]
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
-    if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60: return
 
-    # FILTER 0: FBS 62% FIRST
+    # V28.7.5 ANTI-DOUBLE FIX 1: ACTIVE check
+    if s in ACTIVE:
+        print(f"{s} ACTIVE SKIP already in trade", flush=True)
+        return
+    if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 60*60:
+        left = int(60 - (time.time()-LAST_SIGNAL_TIME[s])//60)
+        print(f"{s} COOLDOWN SKIP {left}m left", flush=True)
+        return
+
     fbs_res, fbs_msg = fbs_62_first(d5["h"], d5["l"], d5["c"])
     if fbs_res is None:
         fbs_res15, fbs_msg15 = fbs_62_first(d15["h"], d15["l"], d15["c"])
@@ -195,18 +202,7 @@ def full_scan(s,p):
     print(f"{s} FBS PASS: {fbs_msg}", flush=True)
     is_fbs_strong = "STRONG" in fbs_res
 
-    atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
-    if not is_fbs_strong:
-        if atr>0:
-            range_20 = max(h[-20:]) - min(l[-20:])
-            if range_20 < atr*1.2: return
-
-    e50_5 = ema(c,50)
-    e50_15 = ema(d15["c"],50)
-    trend_up = price > e50_5 and price > e50_15
-    trend_down = price < e50_5 and price < e50_15
     buy_v, sell_v = volume_delta(o,c,v,10)
-
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
     if pat=="none": pat=pattern(d15["h"],d15["l"])
@@ -214,7 +210,6 @@ def full_scan(s,p):
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
 
-    # V28.7.3 - FBS STRONG bypasses vol
     if is_fbs_strong:
         print(f"{s} FBS STRONG - VOL BYPASS {vp['vol_x']:.2f}x allowed", flush=True)
     else:
@@ -227,16 +222,18 @@ def full_scan(s,p):
         if "UP" in fbs_res and not is_buy: continue
         if "DOWN" in fbs_res and is_buy: continue
 
-        # If NOT FBS STRONG, apply all old filters
+        if is_buy and pat in ["double_top","triple_top"]:
+            print(f"{s} PAT BLOCK {pat} for BUY", flush=True)
+            continue
+        if not is_buy and pat in ["double_bottom","triple_bottom"]:
+            print(f"{s} PAT BLOCK {pat} for SELL", flush=True)
+            continue
+
         if not is_fbs_strong:
-            if trend_up and not is_buy: continue
-            if trend_down and is_buy: continue
-            if is_buy and pat in ["double_top","triple_top"]: continue
-            if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
+            if is_buy and vp["buy_pct"]<55: continue
+            if not is_buy and vp["sell_pct"]<55: continue
             if bos=="BOS_UP" and not is_buy: continue
             if bos=="BOS_DOWN" and is_buy: continue
-            if is_buy and vp["buy_pct"]<50: continue
-            if not is_buy and vp["sell_pct"]<50: continue
 
         side="BUY" if is_buy else "SELL"
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
@@ -248,11 +245,11 @@ def full_scan(s,p):
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
 
         if is_fbs_strong:
-            if rr2 < 0.4: # Very loose for STRONG
+            if rr2 < 0.8:
                 print(f"{s} RR TOO LOW even for STRONG {rr2:.2f}", flush=True)
                 continue
         else:
-            if rr2<1.0 and not is_whale:
+            if rr2<1.2 and not is_whale:
                 print(f"{s} RR SKIP {rr2:.2f}", flush=True)
                 continue
 
@@ -260,16 +257,20 @@ def full_scan(s,p):
         candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
 
     if not candidates:
-        print(f"{s} FBS PASS but no OB/RR candidate (pat:{pat} bos:{bos} vp:{vp['buy_pct']:.0f}/{vp['sell_pct']:.0f})", flush=True)
+        print(f"{s} FBS PASS but filtered PAT/RR", flush=True)
         return
 
     candidates.sort(reverse=True, key=lambda x: x[0])
     score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
 
+    # V28.7.5 ANTI-DOUBLE FIX 2: FILE cooldown 60min
     key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{})
     cd_need=COOLDOWN_WHALE_FLASH if is_whale else COOLDOWN_NORMAL
     if prev.get("result")=="SL": cd_need=COOLDOWN_AFTER_SL
-    if now-prev.get("t",0) < cd_need: return
+    if now-prev.get("t",0) < cd_need:
+        left = int((cd_need - (now-prev.get("t",0)))//60)
+        print(f"{s} FILE COOLDOWN SKIP {left}m", flush=True)
+        return
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
     LAST_SIGNAL_TIME[s]=now
@@ -290,7 +291,7 @@ f"TP2: {tp2:.6f}\n"
 f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}"
     )
 
-print("=== BOT V28.7.3 FBS STRONG SNIPER ===", flush=True)
+print("=== BOT V28.7.5 ANTI-DOUBLE FINAL ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
