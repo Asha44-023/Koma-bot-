@@ -1,64 +1,69 @@
-name: grass-bot-v28-6-trend-fixed
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-  schedule:
-    - cron: '*/5 * * * *'
+name: grass-bot-v28-6-fixed
 
-concurrency:
-  group: grass-bot-v28-6
-  cancel-in-progress: false
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache/restore@v4
+
+      - name: Restore cooldown cache
+        uses: actions/cache/restore@v4
         with:
           path: cooldown.json
           key: cooldown-v28-6-final
           restore-keys: |
-            cooldown-v28
+            cooldown-v28-6-final
 
-      - run: pip install requests
+      - name: Install deps
+        run: pip install requests
 
-      - name: Clean future timestamps
+      - name: Clean future timestamps (force wipe)
         run: |
+          echo "BEFORE:"
+          cat cooldown.json || echo '{"signals":{}}' > cooldown.json
           python3 -c "
-          import json,os,time
+          import json, time
+          f='cooldown.json'
           try:
-            d=json.load(open('cooldown.json'))
-            now=time.time()
-            cleaned={}
-            for k,v in d.get('signals',{}).items():
-              # remove if t is > 1 hour in future or older than 24h
-              if v.get('t',0) > now+3600: continue
-              if now - v.get('t',0) > 24*3600: continue
-              cleaned[k]=v
-            d['signals']=cleaned
-            open('cooldown.json','w').write(json.dumps(d))
-            print(f'Cleaned cooldown, kept {len(cleaned)} entries')
-          except:
-            open('cooldown.json','w').write('{\"signals\":{}}')
+              d=json.load(open(f))
+              now=time.time()
+              print(f'Now: {now}')
+              cleaned={}
+              for k,v in d.get('signals',{}).items():
+                  t=v.get('t',0)
+                  if t > now + 3600:
+                      print(f'REMOVE FUTURE {k} {t} diff {t-now}')
+                      continue
+                  if now - t > 24*3600:
+                      continue
+                  cleaned[k]=v
+              d['signals']=cleaned
+              open(f,'w').write(json.dumps(d))
+              print(f'AFTER CLEAN: {len(cleaned)} entries')
+          except Exception as e:
+              print(f'Error {e} - wiping')
+              open(f,'w').write(json.dumps({'signals':{}}))
           "
+          echo "AFTER:"
+          cat cooldown.json
 
-      - env:
+      - name: Run bot
+        env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: python -u bot.py --once
 
-      - if: always()
-        run: |
-          cat cooldown.json || echo '{"signals":{}}' > cooldown.json
+      - name: Show cooldown
+        run: cat cooldown.json || echo '{"signals":{}}' > cooldown.json
 
-      - uses: actions/cache/save@v4
-        if: always()
+      - name: Save cooldown cache
+        uses: actions/cache/save@v4
         with:
           path: cooldown.json
           key: cooldown-v28-6-final
