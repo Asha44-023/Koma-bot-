@@ -1,4 +1,4 @@
-# V28.2 ULTRA LOOSE - FIXED SNIPER:0 - WICK TP/SL + BUILDING+WHALE+FOMO
+# V28.4 QUALITY ANTI-SPAM - 1 DIRECTION PER COIN + PATTERN MATCH
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -18,6 +18,7 @@ if os.path.exists(COOLDOWN_FILE):
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 STATS={"touched":0,"sniper":0,"xxx":0}
 WHALE_TRACKER={}; VOL_HISTORY={}
+LAST_SIGNAL_TIME={} # Anti-spam: last time any signal for symbol
 
 def tg(msg):
     print(msg, flush=True)
@@ -27,15 +28,17 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 
-ACTIVE={}; COOLDOWN_NORMAL=12*60; COOLDOWN_AFTER_SL=25*60; COOLDOWN_AFTER_TP2=5*60
-COOLDOWN_BUILDING=12*60; COOLDOWN_WHALE_FLASH=2*60; COOLDOWN_RETAIL_FOMO=15*60
+ACTIVE={}
+COOLDOWN_NORMAL=30*60 # 30m no spam
+COOLDOWN_AFTER_SL=45*60
+COOLDOWN_WHALE_FLASH=3*60
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
-    if 0<=h<7: return "ASIAN","🟡","BUILDING"
-    if 7<=h<12: return "LONDON","🔵","FAKE SWEEP"
-    if 12<=h<21: return "NY","🟢","REAL + FOMO"
-    return "OFF","⚫","Off"
+    if 0<=h<7: return "ASIAN","🟡"
+    if 7<=h<12: return "LONDON","🔵"
+    if 12<=h<21: return "NY","🟢"
+    return "OFF","⚫"
 
 def kl(sym,interval):
     try:
@@ -75,16 +78,8 @@ def detect_bos(h,l,c):
 
 def detect_out_in(o,h,l,c,side):
     if len(c)<6: return False
-    if side=="BUY": lvl=min(l[-6:-1]); return c[-2]<lvl*0.997 and c[-1]>lvl and c[-1]>o[-1] and 0.1<=(lvl-min(l[-2],l[-3]))/lvl*100<=1.0
-    else: lvl=max(h[-6:-1]); return c[-2]>lvl*1.003 and c[-1]<lvl and c[-1]<o[-1] and 0.1<=(max(h[-2],h[-3])-lvl)/lvl*100<=1.0
-
-def detect_deep_WM(h,l,side):
-    if len(h)<8: return False
-    if side=="BUY": _,lows=swing_points(h,l,look=2); return len(lows)>=2 and lows[-1][1]<lows[-2][1] and (lows[-2][1]-lows[-1][1])/lows[-2][1]*100>=0.08
-    else: highs,_=swing_points(h,l,look=2); return len(highs)>=2 and highs[-1][1]>highs[-2][1] and (highs[-1][1]-highs[-2][1])/highs[-2][1]*100>=0.08
-
-def detect_xxx_sweep(lows,cur): return len(lows)>=2 and abs(lows[-2][1]-lows[-1][1])/lows[-2][1]<0.005 and cur<min(lows[-2][1],lows[-1][1])*0.996
-def detect_xxx_sweep_high(highs,cur): return len(highs)>=2 and abs(highs[-2][1]-highs[-1][1])/highs[-2][1]<0.005 and cur>max(highs[-2][1],highs[-1][1])*1.004
+    if side=="BUY": lvl=min(l[-6:-1]); return c[-2]<lvl*0.997 and c[-1]>lvl and c[-1]>o[-1]
+    else: lvl=max(h[-6:-1]); return c[-2]>lvl*1.003 and c[-1]<lvl and c[-1]<o[-1]
 
 def pattern(h,l):
     tops=[];bots=[]
@@ -92,16 +87,16 @@ def pattern(h,l):
         if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i+1] and h[i]>h[i+2]: tops.append(h[i])
         if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i+1] and l[i]<l[i+2]: bots.append(l[i])
     tops=tops[-3:];bots=bots[-3:]
-    if len(tops)>=3 and max(tops)-min(tops)<sum(tops)/3*0.018: return "triple_top"
-    if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.018: return "double_top"
-    if len(bots)>=3 and max(bots)-min(bots)<sum(bots)/3*0.018: return "triple_bottom"
-    if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.018: return "double_bottom"
+    if len(tops)>=3 and max(tops)-min(tops)<sum(tops)/3*0.015: return "triple_top"
+    if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.015: return "double_top"
+    if len(bots)>=3 and max(bots)-min(bots)<sum(bots)/3*0.015: return "triple_bottom"
+    if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.015: return "double_bottom"
     return "none"
 
-def get_last_ob(o,h,l,c,bullish=True,lookback=50):
+def get_last_ob(o,h,l,c,bullish=True,lookback=40):
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     for i in range(len(c)-2, len(c)-lookback, -1):
-        body=c[i+1]-o[i+1]; is_impulse=abs(body)>atr*0.25 if atr else True
+        body=c[i+1]-o[i+1]; is_impulse=abs(body)>atr*0.3 if atr else True
         if bullish and c[i]<o[i] and is_impulse and c[i+1]>o[i+1]: return (l[i],h[i])
         if not bullish and c[i]>o[i] and is_impulse and c[i+1]<o[i+1]: return (l[i],h[i])
     return None
@@ -112,156 +107,127 @@ def volume_pressure(o,h,l,c,v,n=20):
     for i in range(-n,0): rng=h[i]-l[i] or 1e-9; delta=(c[i]-o[i])/rng*v[i]; bp+=delta if delta>0 else 0; sp+=-delta if delta<0 else 0
     total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
 
-def detect_strong_candles(o,h,l,c):
-    if len(c)<3: return {"buy":True,"sell":True,"name":"ANY"} # ULTRA LOOSE - allow all
-    prev_o,prev_c=o[-2],c[-2]; cur_o,cur_c=o[-1],c[-1]; c1_o,c1_c=o[-3],c[-3]
-    body_cur=abs(cur_c-cur_o)+1e-9; body_prev=abs(prev_c-prev_o)+1e-9
-    bullish_engulfing=prev_c<prev_o and cur_c>cur_o and cur_c>prev_o and body_cur>body_prev*0.5
-    bearish_engulfing=prev_c>prev_o and cur_c<cur_o and cur_c<prev_o and body_cur>body_prev*0.5
-    buy=bullish_engulfing or (cur_c>cur_o); sell=bearish_engulfing or (cur_c<cur_o)
-    name="ENGULF" if bullish_engulfing or bearish_engulfing else "MOM"
-    return {"buy":buy,"sell":sell,"name":name}
-
-def market_state(c,vp):
-    e20=ema(c,20); price=c[-1]
-    if price>e20 and vp["buy_pct"]>55: return "PUMP"
-    if price<e20 and vp["sell_pct"]>55: return "DUMP"
-    return "TREND"
-
 def get_wick_levels(h,l,lookback=20):
-    recent_high_wick = max(h[-lookback:])
-    recent_low_wick = min(l[-lookback:])
-    swing_highs = sorted(h[-lookback:], reverse=True)[:3]
-    swing_lows = sorted(l[-lookback:])[:3]
-    return recent_high_wick, recent_low_wick, swing_highs, swing_lows
+    return max(h[-lookback:]), min(l[-lookback:])
 
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy):
     ob_low, ob_high = ob
     ob_50 = (ob_low + ob_high)/2
-    recent_high_wick, recent_low_wick, swing_highs, swing_lows = get_wick_levels(h,l,20)
+    recent_high, recent_low = get_wick_levels(h,l,20)
     if is_buy:
         entry = ob_50
-        sl = min(min(l[-5:]), ob_low) * 0.996
-        tp1 = swing_highs[0] * 0.997 if swing_highs else recent_high_wick*0.995
-        tp2 = recent_high_wick * 0.996
+        sl = min(min(l[-7:]), ob_low) * 0.997
+        tp1 = recent_high * 0.995 # First wick
+        tp2 = recent_high * 1.01 # Break wick = higher than TP1 FIXED
         tp3 = tp2 * 1.02
     else:
         entry = ob_50
-        sl = max(max(h[-5:]), ob_high) * 1.004
-        tp1 = swing_lows[0] * 1.003 if swing_lows else recent_low_wick*1.005
-        tp2 = recent_low_wick * 1.004
+        sl = max(max(h[-7:]), ob_high) * 1.003
+        tp1 = recent_low * 1.005
+        tp2 = recent_low * 0.99 # Lower than TP1 FIXED
         tp3 = tp2 * 0.98
     risk = abs(entry - sl); rr2 = abs(tp2 - entry)/(risk or 1e-9)
     return entry, sl, tp1, tp2, tp3, rr2
 
 def get_volume_phase(p, vol_x, price):
     now=time.time()
-    if p not in VOL_HISTORY: VOL_HISTORY[p]=[]
-    VOL_HISTORY[p].append(vol_x)
-    if len(VOL_HISTORY[p])>10: VOL_HISTORY[p].pop(0)
     if vol_x >= 1.7:
         if p not in WHALE_TRACKER or "exit_time" in WHALE_TRACKER[p]:
-            WHALE_TRACKER[p] = {"enter_time": now, "enter_vol": vol_x, "enter_price": price}
+            WHALE_TRACKER[p] = {"enter_time": now}
             return "WHALE_FLASH_ENTER", 0
-        time_in = now - WHALE_TRACKER[p]["enter_time"]
-        if time_in <= 15*60: return "WHALE_FLASH_ACTIVE", time_in
-        else:
-            WHALE_TRACKER[p] = {"exit_time": now, "exit_price": price, "last_enter": WHALE_TRACKER[p]}
-            return "WHALE_EXITED", time_in
-    if p in WHALE_TRACKER and "exit_time" in WHALE_TRACKER[p]:
-        if now - WHALE_TRACKER[p]["exit_time"] <= 60*60 and 1.0 <= vol_x <= 1.7: return "RETAIL_FOMO", now-WHALE_TRACKER[p]["exit_time"]
+        if now - WHALE_TRACKER[p]["enter_time"] <= 15*60:
+            return "WHALE_FLASH_ACTIVE", now - WHALE_TRACKER[p]["enter_time"]
     if vol_x >= 1.0: return "BUILDING", 0
-    if vol_x >= 0.7: return "WATCH", 0
-    return "DEAD", 0
+    return "WATCH", 0
 
 def full_scan(s,p):
-    d5=kl(p,"Min5"); d15=kl(p,"Min15"); h1=kl(p,"Min60")
-    if not d5 or not d15 or not h1: return
+    d5=kl(p,"Min5"); d15=kl(p,"Min15")
+    if not d5 or not d15: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
     if len(c)<30: return
     price=c[-1]
-    session_name,session_emoji,_=get_session()
+    session_name,session_emoji=get_session()
+    if session_name=="OFF": return
+
+    # ANTI-SPAM: 1 signal per coin max 30 min
+    if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60:
+        return
+
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
     if pat=="none": pat=pattern(d15["h"],d15["l"])
-    highs_5,lows_5=swing_points(d5["h"],d5["l"]); vp=volume_pressure(o,h,l,c,v); state=market_state(c,vp)
-    phase, phase_time = get_volume_phase(p, vp["vol_x"], price)
-    is_whale = "WHALE_FLASH" in phase or vp["vol_x"]>=1.7
+    vp=volume_pressure(o,h,l,c,v)
+    phase, _ = get_volume_phase(p, vp["vol_x"], price)
+    is_whale = "WHALE" in phase
 
-    for is_buy in [True,False]:
-        side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{}); elapsed=now-prev.get("t",0)
-        cd_need=COOLDOWN_BUILDING if phase=="BUILDING" else COOLDOWN_WHALE_FLASH if "WHALE" in phase else COOLDOWN_RETAIL_FOMO if phase=="RETAIL_FOMO" else COOLDOWN_NORMAL
-        if prev.get("result")=="SL": cd_need=max(cd_need, COOLDOWN_AFTER_SL)
-        if elapsed<cd_need: continue
-        if vp["vol_x"] < 0.7 and not is_whale: continue
+    # QUALITY FILTERS - NO SPAM
+    if not is_whale and vp["vol_x"] < 1.0: return
+    if not is_whale and vp["buy_pct"]<55 and vp["sell_pct"]<55: return
 
-        out_in=detect_out_in(o,h,l,c,side); deep=detect_deep_WM(h,l,side)
-        sweep_ok=(detect_xxx_sweep(lows_5,l[-1]) if is_buy else detect_xxx_sweep_high(highs_5,h[-1])) if (highs_5 and lows_5) else False
-        has_reason = out_in or deep or sweep_ok or pat!="none" or bos is not None
-        if not has_reason and not is_whale: continue
-        STATS["xxx"]+=1
+    best_side = None
+    best_score = 0
+    candidates = []
 
-        ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=50)
+    for is_buy in [True, False]:
+        side="BUY" if is_buy else "SELL"
+
+        # FIX 1: PATTERN MUST MATCH SIDE
+        if is_buy and pat in ["double_top","triple_top"]: continue
+        if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
+
+        # FIX 2: BOS MUST MATCH SIDE
+        if bos=="BOS_UP" and not is_buy: continue
+        if bos=="BOS_DOWN" and is_buy: continue
+
+        # FIX 3: BUY/SELL % MUST MATCH
+        if not is_whale:
+            if is_buy and vp["buy_pct"]<58: continue
+            if not is_buy and vp["sell_pct"]<58: continue
+
+        ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=40)
         if not ob: continue
         ob_low,ob_high=ob
-        near = abs(price-(ob_high if is_buy else ob_low))/price < 0.06
-        inside = ob_low*0.95 <= price <= ob_high*1.05
-        if not (inside or near or is_whale): continue
-        STATS["touched"]+=1
-
-        # ULTRA LOOSE - NO CANDLE BLOCK
-        candles=detect_strong_candles(o,h,l,c)
+        inside = ob_low*0.98 <= price <= ob_high*1.02
+        if not inside and not is_whale: continue
 
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
-        if rr2<0.8: continue # FIXED from 1.2
+        if rr2<1.5 and not is_whale: continue
+        if rr2<1.2 and is_whale: continue
 
-        COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
-        ACTIVE[s]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
-        STATS["sniper"]+=1
-        reason=f"{pat} {candles['name']} {bos or ''} {'SWEEP' if out_in else ''} {'DEEP' if deep else ''}".strip()
-        emoji = "🟢" if is_buy else "🔴"
-        if phase=="WHALE_FLASH_ENTER": phase_txt=f"⚡ WHALE ENTER {vp['vol_x']:.2f}x"
-        elif phase=="WHALE_FLASH_ACTIVE": phase_txt=f"⚡ WHALE ACTIVE {phase_time/60:.0f}m {vp['vol_x']:.2f}x"
-        elif phase=="RETAIL_FOMO": phase_txt=f"🔥 FOMO {vp['vol_x']:.2f}x"
-        else: phase_txt=f"🏗️ BUILDING {vp['vol_x']:.2f}x"
+        score = rr2 + (vp["buy_pct"] if is_buy else vp["sell_pct"])/100
+        candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
 
-        tg(
+    if not candidates: return
+    # FIX 4: PICK ONLY 1 BEST DIRECTION PER COIN
+    candidates.sort(reverse=True, key=lambda x: x[0])
+    score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
+
+    key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{})
+    cd_need=COOLDOWN_WHALE_FLASH if is_whale else COOLDOWN_NORMAL
+    if prev.get("result")=="SL": cd_need=COOLDOWN_AFTER_SL
+    if now-prev.get("t",0) < cd_need: return
+
+    COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
+    LAST_SIGNAL_TIME[s]=now
+    ACTIVE[s]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
+    STATS["sniper"]+=1
+
+    emoji = "🟢" if is_buy else "🔴"
+    phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
+
+    tg(
 f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n"
-f"{phase_txt}\n"
+f"{phase_txt} RR:{rr2:.1f}R\n"
 f"Entry: {entry:.6f} (50% OB)\n"
-f"Now: {price:.6f}\n"
 f"SL: {sl:.6f}\n"
 f"TP1: {tp1:.6f}\n"
-f"TP2: {tp2:.6f} RR:{rr2:.1f}R\n"
-f"TP3: {tp3:.6f}\n"
-f"{reason} | {state} {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%"
-        )
+f"TP2: {tp2:.6f}\n"
+f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%"
+    )
 
-def check_exits():
-    now=time.time()
-    for s in list(ACTIVE.keys()):
-        pos=ACTIVE[s]; p=pos.get("perp"); d=kl(p,"Min1")
-        if not d: continue
-        cur=d["c"][-1]; entry=pos["entry"]; is_buy=pos["is_buy"]; sl=pos["sl"]; tp1=pos["tp1"]; tp2=pos["tp2"]; key=pos["side_key"]
-        if is_buy:
-            if cur>=tp2: tg(f"✅ {s} TP2 HIT {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"TP2"}; save(); ACTIVE.pop(s); continue
-            if cur>=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 {s} TP1 BE {cur:.6f}"); pos["sl"]=entry
-            if cur<=sl: tg(f"❌ {s} SL {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
-        else:
-            if cur<=tp2: tg(f"✅ {s} TP2 HIT {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"TP2"}; save(); ACTIVE.pop(s); continue
-            if cur<=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 {s} TP1 BE {cur:.6f}"); pos["sl"]=entry
-            if cur>=sl: tg(f"❌ {s} SL {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
-        if now-pos["t"]>30*60: tg(f"⏰ {s} TIMEOUT"); ACTIVE.pop(s)
-
-print("=== BOT V28.2 ULTRA LOOSE ===", flush=True)
+print("=== BOT V28.4 ANTI-SPAM QUALITY ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(e, flush=True)
-    print(f"FINAL STATS T:{STATS['touched']} SNIPER:{STATS['sniper']} XXX:{STATS['xxx']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
-else:
-    while True:
-        for s,p in zip(SYMBOLS,PERPS):
-            try: full_scan(s,p)
-            except: pass
-        check_exits(); time.sleep(60)
+    print(f"FINAL STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
