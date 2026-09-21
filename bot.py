@@ -1,4 +1,4 @@
-# V28.7.2 FBS 62% FIRST + BYPASS VOL FOR STRONG
+# V28.7.3 FBS 62% STRONG SNIPER - OVERRIDE ALL
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -119,7 +119,7 @@ def pattern(h,l):
             if abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
     return "none"
 
-def get_last_ob(o,h,l,c,bullish=True,lookback=40):
+def get_last_ob(o,h,l,c,bullish=True,lookback=60):
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     for i in range(len(c)-2, len(c)-lookback, -1):
         body=c[i+1]-o[i+1]; is_impulse=abs(body)>atr*0.3 if atr else True
@@ -181,6 +181,7 @@ def full_scan(s,p):
     if session_name=="OFF": return
     if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60: return
 
+    # FILTER 0: FBS 62% FIRST
     fbs_res, fbs_msg = fbs_62_first(d5["h"], d5["l"], d5["c"])
     if fbs_res is None:
         fbs_res15, fbs_msg15 = fbs_62_first(d15["h"], d15["l"], d15["c"])
@@ -192,11 +193,13 @@ def full_scan(s,p):
             fbs_msg = fbs_msg15 + " (15m)"
 
     print(f"{s} FBS PASS: {fbs_msg}", flush=True)
+    is_fbs_strong = "STRONG" in fbs_res
 
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
-    if atr>0:
-        range_20 = max(h[-20:]) - min(l[-20:])
-        if range_20 < atr*1.2: return
+    if not is_fbs_strong:
+        if atr>0:
+            range_20 = max(h[-20:]) - min(l[-20:])
+            if range_20 < atr*1.2: return
 
     e50_5 = ema(c,50)
     e50_15 = ema(d15["c"],50)
@@ -211,8 +214,8 @@ def full_scan(s,p):
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
 
-    # V28.7.2 - BYPASS VOL IF FBS STRONG (from screenshot)
-    if "STRONG" in fbs_res:
+    # V28.7.3 - FBS STRONG bypasses vol
+    if is_fbs_strong:
         print(f"{s} FBS STRONG - VOL BYPASS {vp['vol_x']:.2f}x allowed", flush=True)
     else:
         if vp["vol_x"] < 0.5 and not is_whale:
@@ -223,42 +226,43 @@ def full_scan(s,p):
     for is_buy in [True, False]:
         if "UP" in fbs_res and not is_buy: continue
         if "DOWN" in fbs_res and is_buy: continue
-        if trend_up and not is_buy: continue
-        if trend_down and is_buy: continue
+
+        # If NOT FBS STRONG, apply all old filters
+        if not is_fbs_strong:
+            if trend_up and not is_buy: continue
+            if trend_down and is_buy: continue
+            if is_buy and pat in ["double_top","triple_top"]: continue
+            if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
+            if bos=="BOS_UP" and not is_buy: continue
+            if bos=="BOS_DOWN" and is_buy: continue
+            if is_buy and vp["buy_pct"]<50: continue
+            if not is_buy and vp["sell_pct"]<50: continue
 
         side="BUY" if is_buy else "SELL"
-        if is_buy and pat in ["double_top","triple_top"]: continue
-        if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
-        if bos=="BOS_UP" and not is_buy: continue
-        if bos=="BOS_DOWN" and is_buy: continue
-        if is_buy and vp["buy_pct"]<50: continue
-        if not is_buy and vp["sell_pct"]<50: continue
-
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
         if not ob:
             ob_low = min(l[-15:]); ob_high = max(h[-15:])
             ob = (ob_low, ob_high)
             print(f"{s} OB fallback {ob_low:.4f}-{ob_high:.4f}", flush=True)
 
-        ob_low,ob_high=ob
-        inside = ob_low*0.92 <= price <= ob_high*1.08
-        if not inside and not is_whale:
-            if "STRONG" not in fbs_res:
-                continue
-
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
-        if rr2<1.0 and not is_whale:
-            print(f"{s} RR SKIP {rr2:.2f}", flush=True)
-            if "STRONG" not in fbs_res:
-                continue
-        if rr2<0.8 and is_whale: continue
 
-        score = rr2 + (vp["buy_pct"] if is_buy else vp["sell_pct"])/100
+        if is_fbs_strong:
+            if rr2 < 0.4: # Very loose for STRONG
+                print(f"{s} RR TOO LOW even for STRONG {rr2:.2f}", flush=True)
+                continue
+        else:
+            if rr2<1.0 and not is_whale:
+                print(f"{s} RR SKIP {rr2:.2f}", flush=True)
+                continue
+
+        score = rr2 + (10 if is_fbs_strong else 0)
         candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
 
     if not candidates:
-        print(f"{s} FBS PASS but no OB/RR candidate", flush=True)
+        print(f"{s} FBS PASS but no OB/RR candidate (pat:{pat} bos:{bos} vp:{vp['buy_pct']:.0f}/{vp['sell_pct']:.0f})", flush=True)
         return
+
     candidates.sort(reverse=True, key=lambda x: x[0])
     score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
 
@@ -286,7 +290,7 @@ f"TP2: {tp2:.6f}\n"
 f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}"
     )
 
-print("=== BOT V28.7.2 FBS BYPASS VOL ===", flush=True)
+print("=== BOT V28.7.3 FBS STRONG SNIPER ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
