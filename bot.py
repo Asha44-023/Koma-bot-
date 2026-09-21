@@ -1,4 +1,4 @@
-# V28.6 FINAL QUALITY - FIXED ALL
+# V28.7 FINAL QUALITY - FBS 62% FIRST - FIXED ALL
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -76,7 +76,38 @@ def detect_bos(h,l,c):
     if price<lows[-1][1] and lows[-1][1]<lows[-2][1]: return "BOS_DOWN"
     return None
 
-# FIXED PATTERN - TIGHTER
+# ===== NEW V28.7 - FBS 62% FIRST FILTER FROM IMAGE =====
+def fbs_62_first(h,l,c):
+    """Top-Left WEAK reject, Top-Right STRONG enter - PRIMARY"""
+    if len(c)<3: return None, "no data"
+    prev_high = h[-2]; prev_low = l[-2]
+    curr_close = c[-1]; curr_low = l[-1]; curr_high = h[-1]
+    prev_range = prev_high - prev_low
+    if prev_range == 0: return None, "no range"
+
+    l75 = prev_low + prev_range*0.75
+    l62 = prev_low + prev_range*0.62
+    l38 = prev_low + prev_range*0.38
+    l25 = prev_low + prev_range*0.25
+
+    # Top-Left: Bullish WEAK - close inside top 25% zone = DO NOT ENTER
+    if curr_close < l75 and c[-2] > c[-3]: # pumping but weak close
+        return None, f"WEAK TOP-LEFT {curr_close:.4f}<75% {l75:.4f}"
+
+    # Bottom-Left: Bearish WEAK - close inside bottom 25%
+    if curr_close > l25 and c[-2] < c[-3]:
+        return None, f"WEAK BTM-LEFT {curr_close:.4f}>25% {l25:.4f}"
+
+    # Top-Right: Bullish STRONG - close >62% and wick holds >38%
+    if curr_close > l62 and curr_low > l38:
+        return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {l62:.4f}"
+
+    # Bottom-Right: Bearish STRONG - close <38% and wick <62%
+    if curr_close < l38 and curr_high < l62:
+        return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {l38:.4f}"
+
+    return None, "No 62% breakout"
+
 def pattern(h,l):
     tops=[];bots=[]
     for i in range(3,len(h)-3):
@@ -162,14 +193,27 @@ def full_scan(s,p):
     if session_name=="OFF": return
     if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 30*60: return
 
-    # === NEW FIXES ===
+    # ===== V28.7 FILTER 0: FBS 62% FIRST - PRIMARY GATE =====
+    fbs_res, fbs_msg = fbs_62_first(d5["h"], d5["l"], d5["c"])
+    if fbs_res is None:
+        fbs_res15, fbs_msg15 = fbs_62_first(d15["h"], d15["l"], d15["c"])
+        if fbs_res15 is None:
+            print(f"{s} SNIPER:0 - {fbs_msg} | {fbs_msg15}", flush=True)
+            return
+        else:
+            fbs_res = fbs_res15
+            fbs_msg = fbs_msg15 + " (15m)"
+
+    # If we are here, FBS passed
+    print(f"{s} FBS PASS: {fbs_msg}", flush=True)
+
     # 1. CONSOLIDATION FILTER
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     if atr>0:
         range_20 = max(h[-20:]) - min(l[-20:])
-        if range_20 < atr*2.0: return # too sideways
+        if range_20 < atr*2.0: return
 
-    # 2. TREND FILTER - EMA50
+    # 2. TREND FILTER
     e50_5 = ema(c,50)
     e50_15 = ema(d15["c"],50)
     trend_up = price > e50_5 and price > e50_15
@@ -187,10 +231,12 @@ def full_scan(s,p):
 
     candidates = []
     for is_buy in [True, False]:
-        # 3. BLOCK COUNTER-TREND - FIXES GRASS/JASMY
+        # ALIGN with FBS
+        if "UP" in fbs_res and not is_buy: continue
+        if "DOWN" in fbs_res and is_buy: continue
+
         if trend_up and not is_buy: continue
         if trend_down and is_buy: continue
-        # 4. VOLUME DELTA FILTER
         if trend_up and buy_v > sell_v*1.3 and not is_buy: continue
         if trend_down and sell_v > buy_v*1.3 and is_buy: continue
 
@@ -234,7 +280,8 @@ def full_scan(s,p):
 
     tg(
 f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n"
-f"{phase_txt} RR:{rr2:.1f}R\n"
+f"{phase_txt} {fbs_res} RR:{rr2:.1f}R\n"
+f"{fbs_msg}\n"
 f"Entry: {entry:.6f} (50% OB)\n"
 f"SL: {sl:.6f}\n"
 f"TP1: {tp1:.6f}\n"
@@ -242,7 +289,7 @@ f"TP2: {tp2:.6f}\n"
 f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}"
     )
 
-print("=== BOT V28.6 FIXED TREND+VOLUME+PATTERN ===", flush=True)
+print("=== BOT V28.7 FBS 62% FIRST - FIXED ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
