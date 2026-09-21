@@ -1,13 +1,13 @@
-name: grass-bot-v28-flash-fomo-wick
+name: grass-bot-v28-6-trend-fixed
 on:
   push:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: '*/2 * * * *'
+    - cron: '*/5 * * * *'
 
 concurrency:
-  group: grass-bot-v28-flash-fomo-wick
+  group: grass-bot-v28-6
   cancel-in-progress: false
 
 jobs:
@@ -19,11 +19,32 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: cooldown.json
-          key: cooldown-v28-${{ github.run_id }}
+          key: cooldown-v28-6-final
           restore-keys: |
             cooldown-v28
-            cooldown-v26-bothways
+
       - run: pip install requests
+
+      - name: Clean future timestamps
+        run: |
+          python3 -c "
+          import json,os,time
+          try:
+            d=json.load(open('cooldown.json'))
+            now=time.time()
+            cleaned={}
+            for k,v in d.get('signals',{}).items():
+              # remove if t is > 1 hour in future or older than 24h
+              if v.get('t',0) > now+3600: continue
+              if now - v.get('t',0) > 24*3600: continue
+              cleaned[k]=v
+            d['signals']=cleaned
+            open('cooldown.json','w').write(json.dumps(d))
+            print(f'Cleaned cooldown, kept {len(cleaned)} entries')
+          except:
+            open('cooldown.json','w').write('{\"signals\":{}}')
+          "
+
       - env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -31,12 +52,13 @@ jobs:
           TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUNBUFFERED: 1
         run: python -u bot.py --once
+
       - if: always()
         run: |
           cat cooldown.json || echo '{"signals":{}}' > cooldown.json
-          touch cooldown.json
+
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: cooldown.json
-          key: cooldown-v28-${{ github.run_id }}
+          key: cooldown-v28-6-final
