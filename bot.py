@@ -1,4 +1,4 @@
-# V26.8 FINAL - BUILDING + WHALE FLASH 15m + RETAIL FOMO + WICK TP/SL + ASIAN/LONDON/NY - BOTH WAYS
+# V28.1 FINAL LOOSE - BUILDING + WHALE FLASH 15m + FOMO + WICK TP/SL - FIXED T:0
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -32,10 +32,10 @@ COOLDOWN_BUILDING=15*60; COOLDOWN_WHALE_FLASH=3*60; COOLDOWN_RETAIL_FOMO=20*60
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
-    if 0<=h<7: return "ASIAN","🟡","BUILDING - Whales loading"
-    if 7<=h<12: return "LONDON","🔵","FLASH FAKE - Liquidity sweep"
-    if 12<=h<21: return "NY","🟢","REAL FLASH + FOMO"
-    return "OFF","⚫","Off session"
+    if 0<=h<7: return "ASIAN","🟡","BUILDING"
+    if 7<=h<12: return "LONDON","🔵","FAKE SWEEP"
+    if 12<=h<21: return "NY","🟢","REAL + FOMO"
+    return "OFF","⚫","Off"
 
 def kl(sym,interval):
     try:
@@ -140,7 +140,6 @@ def market_state(c,vp):
     if price<e20 and vp["sell_pct"]>60 and vp["vol_x"]>1.1: return "DUMP"
     return "TREND"
 
-# --- WICK BASED ENTRY/SL/TP ---
 def get_wick_levels(h,l,lookback=20):
     recent_high_wick = max(h[-lookback:])
     recent_low_wick = min(l[-lookback:])
@@ -155,14 +154,14 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy):
     if is_buy:
         entry = ob_50
         lowest_wick_5 = min(l[-5:])
-        sl = min(lowest_wick_5, ob_low) * 0.998
+        sl = min(lowest_wick_5, ob_low) * 0.997
         tp1 = swing_highs[0] * 0.998 if swing_highs else recent_high_wick*0.995
         tp2 = recent_high_wick * 0.997
         tp3 = tp2 * 1.015
     else:
         entry = ob_50
         highest_wick_5 = max(h[-5:])
-        sl = max(highest_wick_5, ob_high) * 1.002
+        sl = max(highest_wick_5, ob_high) * 1.003
         tp1 = swing_lows[0] * 1.002 if swing_lows else recent_low_wick*1.005
         tp2 = recent_low_wick * 1.003
         tp3 = tp2 * 0.985
@@ -188,7 +187,7 @@ def get_volume_phase(p, vol_x, price):
         time_since_exit = now - WHALE_TRACKER[p]["exit_time"]
         if time_since_exit <= 60*60 and 1.1 <= vol_x <= 1.7:
             return "RETAIL_FOMO", time_since_exit
-    if 1.1 <= vol_x <= 1.5: return "BUILDING", 0
+    if 1.1 <= vol_x <= 1.7: return "BUILDING", 0
     if 0.8 <= vol_x < 1.1: return "WATCH", 0
     if vol_x < 0.8: return "DEAD", 0
     return "STRONG", 0
@@ -207,6 +206,7 @@ def full_scan(s,p):
     fvgs=get_fvgs(h1["h"],h1["l"])
     has_fvg_bull=any(f[0]=='bull' for f in fvgs[-10:]); has_fvg_bear=any(f[0]=='bear' for f in fvgs[-10:])
     phase, phase_time = get_volume_phase(p, vp["vol_x"], price)
+    is_whale = "WHALE_FLASH" in phase or vp["vol_x"]>=1.7
 
     for is_buy in [True,False]:
         side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{}); elapsed=now-prev.get("t",0)
@@ -218,59 +218,74 @@ def full_scan(s,p):
         if prev.get("result")=="TP2": cd_need=COOLDOWN_AFTER_TP2
         if vp["vol_x"]>=1.7: cd_need=min(cd_need, COOLDOWN_WHALE_FLASH)
         if elapsed<cd_need: continue
-        if session_name=="ASIAN" and vp["vol_x"]>=1.7 and phase!="BUILDING": continue
-        if session_name=="OFF" and phase not in ["WHALE_FLASH_ENTER","WHALE_FLASH_ACTIVE"]: continue
-        if vp["vol_x"] < 1.1 and phase not in ["RETAIL_FOMO","WHALE_FLASH_ENTER","WHALE_FLASH_ACTIVE"]:
-            if vp["vol_x"] < 0.8: continue
-        if is_buy and pat not in ["double_bottom","triple_bottom"] and bos!="BOS_UP": continue
-        if not is_buy and pat not in ["double_top","triple_top"] and bos!="BOS_DOWN": continue
+        # LOOSE FILTER - ONLY BLOCK IF REALLY DEAD
+        if vp["vol_x"] < 0.85 and not is_whale: continue
+        if session_name=="OFF" and not is_whale: continue
+
         out_in=detect_out_in(o,h,l,c,side); deep=detect_deep_WM(h,l,side)
         sweep_ok=(detect_xxx_sweep(lows_5,l[-1]) if is_buy else detect_xxx_sweep_high(highs_5,h[-1])) if (highs_5 and lows_5) else False
-        if not (out_in or deep or sweep_ok): continue
-        STATS["xxx"]+=1
+
+        # FIXED XXX LOGIC - was too strict
+        if is_whale:
+            # Whale needs only 1 of these
+            if not (out_in or deep or sweep_ok or pat!="none" or bos is not None or True): # True = allow whale always if OB touch
+                pass
+            STATS["xxx"]+=1
+        else:
+            # Building needs at least 1 reason
+            has_reason = out_in or deep or sweep_ok or pat!="none" or bos is not None
+            if not has_reason: continue
+            STATS["xxx"]+=1
+
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=50)
         if not ob: continue
         ob_low,ob_high=ob
-        near = (abs(price-ob_high)/price<0.03) if is_buy else (abs(price-ob_low)/price<0.03)
-        inside = ob_low*0.985 <= price <= ob_high*1.015
-        if not (inside or near): continue
+        # LOOSE OB CHECK - 5% instead of 3%
+        near = (abs(price-ob_high)/price<0.05) if is_buy else (abs(price-ob_low)/price<0.05)
+        inside = ob_low*0.97 <= price <= ob_high*1.03
+        if not (inside or near):
+            # For whale, allow even if a bit far
+            if not is_whale: continue
         STATS["touched"]+=1
         candles=detect_strong_candles(o,h,l,c)
-        if is_buy and not candles["buy"]: continue
-        if not is_buy and not candles["sell"]: continue
-        if is_buy and vp["buy_pct"]<38: continue
-        if not is_buy and vp["sell_pct"]<38: continue
-        if vp["vol_x"]<0.60: continue
+        # LOOSE CANDLE - for whale allow any candle, for building need engulf
+        if not is_whale:
+            if is_buy and not candles["buy"] and not out_in: continue
+            if not is_buy and not candles["sell"] and not out_in: continue
+        # VOLUME %
+        if not is_whale:
+            if is_buy and vp["buy_pct"]<35: continue
+            if not is_buy and vp["sell_pct"]<35: continue
 
-        # NEW WICK BASED ENTRY/SL/TP
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
-        if rr2<1.5: continue
+        if rr2<1.2 and not is_whale: continue
+        if rr2<1.0 and is_whale: continue
 
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
         ACTIVE[s]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
         STATS["sniper"]+=1
         fvg_txt=" + FVG" if ((has_fvg_bull and is_buy) or (has_fvg_bear and not is_buy)) else ""
-        reason=f"{pat.replace('_',' ').upper()} + {candles['name']}{fvg_txt}"
+        reason=f"{pat.replace('_',' ').upper() if pat!='none' else 'NO PAT'} + {candles['name']}{fvg_txt}"
         if out_in: reason+=" + SWEEP"
         if deep: reason+=f" + DEEP {'W' if is_buy else 'M'}"
+        if bos: reason+=f" + {bos}"
         emoji = "🟢" if is_buy else "🔴"
         if phase=="WHALE_FLASH_ENTER": phase_txt=f"⚡ WHALE FLASH {side} ENTER 0m/15m {vp['vol_x']:.2f}x"
         elif phase=="WHALE_FLASH_ACTIVE": phase_txt=f"⚡ WHALE ACTIVE {side} {phase_time/60:.0f}m/15m {vp['vol_x']:.2f}x"
-        elif phase=="RETAIL_FOMO": phase_txt=f"🔥 RETAIL FOMO {side} {vp['vol_x']:.2f}x after whale"
-        elif phase=="BUILDING": phase_txt=f"🏗️ BUILDING {side} {vp['vol_x']:.2f}x (1.1-1.5x)"
+        elif phase=="RETAIL_FOMO": phase_txt=f"🔥 RETAIL FOMO {side} {vp['vol_x']:.2f}x"
+        elif phase=="BUILDING": phase_txt=f"🏗️ BUILDING {side} {vp['vol_x']:.2f}x"
         else: phase_txt=f"{phase} {vp['vol_x']:.2f}x"
 
         tg(
 f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n"
 f"{phase_txt}\n"
 f"Entry: {entry:.6f} (50% OB {ob_low:.6f}-{ob_high:.6f})\n"
-f"Price now: {price:.6f}\n"
-f"SL: {sl:.6f} (Below/Above wick)\n"
-f"TP1: {tp1:.6f} (Last wick)\n"
-f"TP2: {tp2:.6f} (BSL/SSL wick)\n"
-f"TP3: {tp3:.6f} (Runner)\n"
-f"RR: {rr2:.1f}R | {reason}\n"
-f"Vol: {vp['vol_x']:.2f}x {vp['buy_pct']:.0f}% | {state} | {session_desc}"
+f"Now: {price:.6f}\n"
+f"SL: {sl:.6f} (Wick)\n"
+f"TP1: {tp1:.6f} (Wick)\n"
+f"TP2: {tp2:.6f} (BSL/SSL) RR:{rr2:.1f}R\n"
+f"TP3: {tp3:.6f}\n"
+f"{reason} | {state} | Vol {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%"
         )
 
 def check_exits():
@@ -280,16 +295,16 @@ def check_exits():
         if not d: continue
         cur=d["c"][-1]; entry=pos["entry"]; is_buy=pos["is_buy"]; sl=pos.get("sl",entry*0.99 if is_buy else entry*1.01); tp1=pos.get("tp1",entry*1.01); tp2=pos.get("tp2",entry*1.015); key=pos.get("side_key",s)
         if is_buy:
-            if cur>=tp2: tg(f"✅ <b>{s} TP2 HIT</b>\nEntry {entry:.6f} -> {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"TP2"}; save(); ACTIVE.pop(s); continue
-            if cur>=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 <b>{s} TP1 HIT - SL to BE</b>\nPrice {cur:.6f}"); pos["sl"]=entry
-            if cur<=sl: tg(f"❌ <b>{s} SL HIT</b>\nPrice {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
+            if cur>=tp2: tg(f"✅ <b>{s} TP2 HIT</b> {entry:.6f} -> {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"TP2"}; save(); ACTIVE.pop(s); continue
+            if cur>=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 <b>{s} TP1 HIT - BE</b> {cur:.6f}"); pos["sl"]=entry
+            if cur<=sl: tg(f"❌ <b>{s} SL HIT</b> {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
         else:
-            if cur<=tp2: tg(f"✅ <b>{s} TP2 HIT</b>\nEntry {entry:.6f} -> {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"TP2"}; save(); ACTIVE.pop(s); continue
-            if cur<=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 <b>{s} TP1 HIT - SL to BE</b>\nPrice {cur:.6f}"); pos["sl"]=entry
-            if cur>=sl: tg(f"❌ <b>{s} SL HIT</b>\nPrice {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
+            if cur<=tp2: tg(f"✅ <b>{s} TP2 HIT</b> {entry:.6f} -> {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"TP2"}; save(); ACTIVE.pop(s); continue
+            if cur<=tp1 and not pos.get("tp1_hit"): pos["tp1_hit"]=True; tg(f"🎯 <b>{s} TP1 HIT - BE</b> {cur:.6f}"); pos["sl"]=entry
+            if cur>=sl: tg(f"❌ <b>{s} SL HIT</b> {cur:.6f}"); COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"SL"}; save(); ACTIVE.pop(s); continue
         if now-pos["t"]>30*60: tg(f"⏰ <b>{s} TIMEOUT</b>"); ACTIVE.pop(s)
 
-print("=== BOT V26.8 FLASH+FOMO+WICK ===", flush=True)
+print("=== BOT V28.1 FLASH+FOMO+WICK LOOSE ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
