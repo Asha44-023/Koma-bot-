@@ -1,11 +1,14 @@
-# V28.7.5 ANTI-DOUBLE FINAL - FBS 62% + PAT BLOCK + 60min CD
+# V28.7.7 PERSISTENT ANTI-SPAM - FBS 62% + ACTIVE.json
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","TAOUSDT":"TAO_USDT","SANDUSDT":"SAND_USDT","SENTUSDT":"SENT_USDT","FARTCOINUSDT":"FARTCOIN_USDT","JASMYUSDT":"JASMY_USDT","KOMAUSDT":"KOMA_USDT",}
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
-COOLDOWN_FILE="cooldown.json"; COOLDOWN={"signals":{}}
+
+COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
+COOLDOWN={"signals":{}}; ACTIVE={}
+
 if os.path.exists(COOLDOWN_FILE):
     try:
         d=json.load(open(COOLDOWN_FILE))
@@ -14,8 +17,15 @@ if os.path.exists(COOLDOWN_FILE):
             if "_" not in k: d={"signals":{}}
         COOLDOWN=d
     except: COOLDOWN={"signals":{}}
+if os.path.exists(ACTIVE_FILE):
+    try: ACTIVE=json.load(open(ACTIVE_FILE))
+    except: ACTIVE={}
 
-def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
+def save():
+    open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
+def save_active():
+    open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
+
 STATS={"touched":0,"sniper":0,"xxx":0}
 WHALE_TRACKER={}; VOL_HISTORY={}
 LAST_SIGNAL_TIME={}
@@ -28,7 +38,6 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 
-ACTIVE={}
 COOLDOWN_NORMAL=60*60
 COOLDOWN_AFTER_SL=90*60
 COOLDOWN_WHALE_FLASH=10*60
@@ -55,27 +64,6 @@ def kl(sym,interval):
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
 
-def ema(v,n):
-    if not v: return 0
-    k=2/(n+1); e=v[0]
-    for x in v[1:]: e=x*k+e*(1-k)
-    return e
-
-def swing_points(h,l,look=3):
-    highs=[]; lows=[]; n=len(h)
-    for i in range(look,n-look):
-        if all(h[i]>=h[j] for j in range(i-look,i+look+1) if j!=i): highs.append((i,h[i]))
-        if all(l[i]<=l[j] for j in range(i-look,i+look+1) if j!=i): lows.append((i,l[i]))
-    return highs,lows
-
-def detect_bos(h,l,c):
-    highs,lows=swing_points(h,l)
-    if len(highs)<2 or len(lows)<2: return None
-    price=c[-1]
-    if price>highs[-1][1] and highs[-1][1]>highs[-2][1]: return "BOS_UP"
-    if price<lows[-1][1] and lows[-1][1]<lows[-2][1]: return "BOS_DOWN"
-    return None
-
 def fbs_62_first(h,l,c):
     if len(c)<3: return None, "no data"
     prev_high = h[-2]; prev_low = l[-2]
@@ -87,9 +75,9 @@ def fbs_62_first(h,l,c):
     l38 = prev_low + prev_range*0.38
     l25 = prev_low + prev_range*0.25
     if curr_close < l75 and c[-2] > c[-3]:
-        return None, f"WEAK TOP-LEFT {curr_close:.4f}<75% {l75:.4f}"
+        return None, f"WEAK TOP-LEFT {curr_close:.4f}<75%"
     if curr_close > l25 and c[-2] < c[-3]:
-        return None, f"WEAK BTM-LEFT {curr_close:.4f}>25% {l25:.4f}"
+        return None, f"WEAK BTM-LEFT {curr_close:.4f}>25%"
     if curr_close > l62 and curr_low > l38:
         return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {l62:.4f}"
     if curr_close < l38 and curr_high < l62:
@@ -146,17 +134,11 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy):
     ob_50 = (ob_low + ob_high)/2
     recent_high, recent_low = get_wick_levels(h,l,20)
     if is_buy:
-        entry = ob_50
-        sl = min(min(l[-7:]), ob_low) * 0.997
-        tp1 = recent_high * 0.995
-        tp2 = recent_high * 1.01
-        tp3 = tp2 * 1.02
+        entry = ob_50; sl = min(min(l[-7:]), ob_low) * 0.997
+        tp1 = recent_high * 0.995; tp2 = recent_high * 1.01; tp3 = tp2 * 1.02
     else:
-        entry = ob_50
-        sl = max(max(h[-7:]), ob_high) * 1.003
-        tp1 = recent_low * 1.005
-        tp2 = recent_low * 0.99
-        tp3 = tp2 * 0.98
+        entry = ob_50; sl = max(max(h[-7:]), ob_high) * 1.003
+        tp1 = recent_low * 1.005; tp2 = recent_low * 0.99; tp3 = tp2 * 0.98
     risk = abs(entry - sl); rr2 = abs(tp2 - entry)/(risk or 1e-9)
     return entry, sl, tp1, tp2, tp3, rr2
 
@@ -171,6 +153,18 @@ def get_volume_phase(p, vol_x, price):
     if vol_x >= 1.0: return "BUILDING", 0
     return "WATCH", 0
 
+def detect_bos(h,l,c):
+    from collections import deque
+    highs=[]; lows=[]; look=3; n=len(h)
+    for i in range(look,n-look):
+        if all(h[i]>=h[j] for j in range(i-look,i+look+1) if j!=i): highs.append((i,h[i]))
+        if all(l[i]<=l[j] for j in range(i-look,i+look+1) if j!=i): lows.append((i,l[i]))
+    if len(highs)<2 or len(lows)<2: return None
+    price=c[-1]
+    if price>highs[-1][1] and highs[-1][1]>highs[-2][1]: return "BOS_UP"
+    if price<lows[-1][1] and lows[-1][1]<lows[-2][1]: return "BOS_DOWN"
+    return None
+
 def full_scan(s,p):
     d5=kl(p,"Min5"); d15=kl(p,"Min15")
     if not d5 or not d15: return
@@ -180,24 +174,22 @@ def full_scan(s,p):
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
 
-    # V28.7.5 ANTI-DOUBLE FIX 1: ACTIVE check
+    # ANTI-SPAM 1: ACTIVE.json check
     if s in ACTIVE:
-        print(f"{s} ACTIVE SKIP already in trade", flush=True)
+        age = int((time.time() - ACTIVE[s].get("t",0))//60)
+        print(f"{s} ACTIVE SKIP {age}m old trade {ACTIVE[s].get('entry')}", flush=True)
         return
     if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 60*60:
-        left = int(60 - (time.time()-LAST_SIGNAL_TIME[s])//60)
-        print(f"{s} COOLDOWN SKIP {left}m left", flush=True)
+        print(f"{s} COOLDOWN SKIP {int(60 - (time.time()-LAST_SIGNAL_TIME[s])//60)}m left", flush=True)
         return
 
     fbs_res, fbs_msg = fbs_62_first(d5["h"], d5["l"], d5["c"])
     if fbs_res is None:
         fbs_res15, fbs_msg15 = fbs_62_first(d15["h"], d15["l"], d15["c"])
         if fbs_res15 is None:
-            print(f"{s} SNIPER:0 - {fbs_msg} | {fbs_msg15}", flush=True)
+            print(f"{s} SNIPER:0 - {fbs_msg}", flush=True)
             return
-        else:
-            fbs_res = fbs_res15
-            fbs_msg = fbs_msg15 + " (15m)"
+        else: fbs_res = fbs_res15; fbs_msg = fbs_msg15 + " (15m)"
 
     print(f"{s} FBS PASS: {fbs_msg}", flush=True)
     is_fbs_strong = "STRONG" in fbs_res
@@ -210,90 +202,63 @@ def full_scan(s,p):
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
 
-    if is_fbs_strong:
-        print(f"{s} FBS STRONG - VOL BYPASS {vp['vol_x']:.2f}x allowed", flush=True)
-    else:
-        if vp["vol_x"] < 0.5 and not is_whale:
-            print(f"{s} VOL SKIP {vp['vol_x']:.2f}x", flush=True)
-            return
+    if not is_fbs_strong and vp["vol_x"] < 0.5 and not is_whale:
+        print(f"{s} VOL SKIP {vp['vol_x']:.2f}x", flush=True)
+        return
 
     candidates = []
     for is_buy in [True, False]:
         if "UP" in fbs_res and not is_buy: continue
         if "DOWN" in fbs_res and is_buy: continue
-
-        if is_buy and pat in ["double_top","triple_top"]:
-            print(f"{s} PAT BLOCK {pat} for BUY", flush=True)
-            continue
-        if not is_buy and pat in ["double_bottom","triple_bottom"]:
-            print(f"{s} PAT BLOCK {pat} for SELL", flush=True)
-            continue
-
-        if not is_fbs_strong:
-            if is_buy and vp["buy_pct"]<55: continue
-            if not is_buy and vp["sell_pct"]<55: continue
-            if bos=="BOS_UP" and not is_buy: continue
-            if bos=="BOS_DOWN" and is_buy: continue
-
+        if is_buy and pat in ["double_top","triple_top"]: continue
+        if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
         side="BUY" if is_buy else "SELL"
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
         if not ob:
-            ob_low = min(l[-15:]); ob_high = max(h[-15:])
-            ob = (ob_low, ob_high)
-            print(f"{s} OB fallback {ob_low:.4f}-{ob_high:.4f}", flush=True)
-
+            ob = (min(l[-15:]), max(h[-15:]))
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
-
-        if is_fbs_strong:
-            if rr2 < 0.8:
-                print(f"{s} RR TOO LOW even for STRONG {rr2:.2f}", flush=True)
-                continue
-        else:
-            if rr2<1.2 and not is_whale:
-                print(f"{s} RR SKIP {rr2:.2f}", flush=True)
-                continue
-
+        if rr2 < 0.8 and is_fbs_strong: continue
+        if rr2<1.2 and not is_whale and not is_fbs_strong: continue
         score = rr2 + (10 if is_fbs_strong else 0)
         candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
 
     if not candidates:
-        print(f"{s} FBS PASS but filtered PAT/RR", flush=True)
+        print(f"{s} FBS PASS but filtered", flush=True)
         return
-
     candidates.sort(reverse=True, key=lambda x: x[0])
     score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
 
-    # V28.7.5 ANTI-DOUBLE FIX 2: FILE cooldown 60min
+    # ANTI-SPAM 2: FILE cooldown
     key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{})
     cd_need=COOLDOWN_WHALE_FLASH if is_whale else COOLDOWN_NORMAL
     if prev.get("result")=="SL": cd_need=COOLDOWN_AFTER_SL
-    if now-prev.get("t",0) < cd_need:
-        left = int((cd_need - (now-prev.get("t",0)))//60)
-        print(f"{s} FILE COOLDOWN SKIP {left}m", flush=True)
+    last_t = prev.get("t",0)
+    print(f"{s} CD CHECK last={int((now-last_t)//60) if last_t else 0}m ago need={cd_need//60}m", flush=True)
+    if now-last_t < cd_need:
+        print(f"{s} FILE COOLDOWN SKIP {int((cd_need - (now-last_t))//60)}m left", flush=True)
         return
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
     LAST_SIGNAL_TIME[s]=now
     ACTIVE[s]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
-    STATS["sniper"]+=1
+    save_active(); STATS["sniper"]+=1
 
     emoji = "🟢" if is_buy else "🔴"
     phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
 
-    tg(
-f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n"
-f"{phase_txt} {fbs_res} RR:{rr2:.1f}R\n"
-f"{fbs_msg}\n"
-f"Entry: {entry:.6f} (50% OB)\n"
-f"SL: {sl:.6f}\n"
-f"TP1: {tp1:.6f}\n"
-f"TP2: {tp2:.6f}\n"
-f"{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}"
-    )
+    tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f}\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-print("=== BOT V28.7.5 ANTI-DOUBLE FINAL ===", flush=True)
+print("=== BOT V28.7.7 PERSISTENT ANTI-SPAM ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(e, flush=True)
-    print(f"FINAL STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
+    print(f"STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
+else:
+    # LOOP MODE - run every 60s, keeps ACTIVE in memory
+    while True:
+        for s,p in zip(SYMBOLS,PERPS):
+            try: full_scan(s,p)
+            except Exception as e: print(e, flush=True)
+        print(f"Sleep 60s... ACTIVE:{list(ACTIVE.keys())}", flush=True)
+        time.sleep(60)
