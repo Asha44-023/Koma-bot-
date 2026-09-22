@@ -1,4 +1,4 @@
-# V28.7.7 PERSISTENT ANTI-SPAM - FBS 62% + ACTIVE.json
+# V28.8.0 DUAL SIDE - BUY + SELL + ANTI-SPAM + NO 0.0x SPAM
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -21,14 +21,11 @@ if os.path.exists(ACTIVE_FILE):
     try: ACTIVE=json.load(open(ACTIVE_FILE))
     except: ACTIVE={}
 
-def save():
-    open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
-def save_active():
-    open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
+def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
+def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
 
 STATS={"touched":0,"sniper":0,"xxx":0}
-WHALE_TRACKER={}; VOL_HISTORY={}
-LAST_SIGNAL_TIME={}
+WHALE_TRACKER={}
 
 def tg(msg):
     print(msg, flush=True)
@@ -154,7 +151,6 @@ def get_volume_phase(p, vol_x, price):
     return "WATCH", 0
 
 def detect_bos(h,l,c):
-    from collections import deque
     highs=[]; lows=[]; look=3; n=len(h)
     for i in range(look,n-look):
         if all(h[i]>=h[j] for j in range(i-look,i+look+1) if j!=i): highs.append((i,h[i]))
@@ -174,88 +170,86 @@ def full_scan(s,p):
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
 
-    # ANTI-SPAM 1: ACTIVE.json check
-    if s in ACTIVE:
-        age = int((time.time() - ACTIVE[s].get("t",0))//60)
-        print(f"{s} ACTIVE SKIP {age}m old trade {ACTIVE[s].get('entry')}", flush=True)
-        return
-    if s in LAST_SIGNAL_TIME and time.time() - LAST_SIGNAL_TIME[s] < 60*60:
-        print(f"{s} COOLDOWN SKIP {int(60 - (time.time()-LAST_SIGNAL_TIME[s])//60)}m left", flush=True)
+    vp=volume_pressure(o,h,l,c,v)
+    # ANTI-SPAM 0.0x KILL
+    if vp["vol_x"] < 0.6:
+        print(f"{s} VOL KILL {vp['vol_x']:.2f}x", flush=True)
         return
 
-    fbs_res, fbs_msg = fbs_62_first(d5["h"], d5["l"], d5["c"])
-    if fbs_res is None:
-        fbs_res15, fbs_msg15 = fbs_62_first(d15["h"], d15["l"], d15["c"])
-        if fbs_res15 is None:
-            print(f"{s} SNIPER:0 - {fbs_msg}", flush=True)
-            return
-        else: fbs_res = fbs_res15; fbs_msg = fbs_msg15 + " (15m)"
+    # DUAL SIDE FBS DETECTION
+    fbs_up=None; fbs_down=None
+    fbs_msg_up=""; fbs_msg_down=""
+    for tf_data, tf_name in [(d5,"5m"),(d15,"15m")]:
+        res,msg = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"])
+        if res and "UP" in res and not fbs_up: fbs_up=res; fbs_msg_up=f"{msg} ({tf_name})"
+        if res and "DOWN" in res and not fbs_down: fbs_down=res; fbs_msg_down=f"{msg} ({tf_name})"
 
-    print(f"{s} FBS PASS: {fbs_msg}", flush=True)
-    is_fbs_strong = "STRONG" in fbs_res
+    if not fbs_up and not fbs_down:
+        print(f"{s} SNIPER:0 - No 62% breakout", flush=True)
+        return
 
     buy_v, sell_v = volume_delta(o,c,v,10)
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
     if pat=="none": pat=pattern(d15["h"],d15["l"])
-    vp=volume_pressure(o,h,l,c,v)
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
 
-    if not is_fbs_strong and vp["vol_x"] < 0.5 and not is_whale:
-        print(f"{s} VOL SKIP {vp['vol_x']:.2f}x", flush=True)
-        return
-
-    candidates = []
+    # TRY BOTH SIDES
     for is_buy in [True, False]:
-        if "UP" in fbs_res and not is_buy: continue
-        if "DOWN" in fbs_res and is_buy: continue
+        fbs_res = fbs_up if is_buy else fbs_down
+        fbs_msg = fbs_msg_up if is_buy else fbs_msg_down
+        if not fbs_res: continue
+
+        side="BUY" if is_buy else "SELL"
+        key=f"{s}_{side}"
+
+        # ANTI-SPAM PER SIDE
+        if key in ACTIVE:
+            age = int((time.time() - ACTIVE[key].get("t",0))//60)
+            print(f"{s} {side} ACTIVE SKIP {age}m", flush=True)
+            continue
+
+        prev=COOLDOWN["signals"].get(key,{})
+        now=time.time(); last_t=prev.get("t",0)
+        cd_need=COOLDOWN_WHALE_FLASH if is_whale else COOLDOWN_NORMAL
+        if prev.get("result")=="SL": cd_need=COOLDOWN_AFTER_SL
+        if now-last_t < cd_need:
+            print(f"{s} {side} FILE CD SKIP {int((cd_need-(now-last_t))//60)}m", flush=True)
+            continue
+
+        # pressure per side
+        if is_buy and vp["buy_pct"] < 60:
+            print(f"{s} BUY PRESSURE LOW {vp['buy_pct']:.0f}%", flush=True)
+            continue
+        if not is_buy and vp["sell_pct"] < 60:
+            print(f"{s} SELL PRESSURE LOW {vp['sell_pct']:.0f}%", flush=True)
+            continue
         if is_buy and pat in ["double_top","triple_top"]: continue
         if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
-        side="BUY" if is_buy else "SELL"
+
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
-        if not ob:
-            ob = (min(l[-15:]), max(h[-15:]))
+        if not ob: ob = (min(l[-15:]), max(h[-15:]))
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy)
-        if rr2 < 0.8 and is_fbs_strong: continue
-        if rr2<1.2 and not is_whale and not is_fbs_strong: continue
-        score = rr2 + (10 if is_fbs_strong else 0)
-        candidates.append((score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2))
+        if rr2 < 1.0:
+            print(f"{s} {side} RR LOW {rr2:.1f}", flush=True)
+            continue
 
-    if not candidates:
-        print(f"{s} FBS PASS but filtered", flush=True)
-        return
-    candidates.sort(reverse=True, key=lambda x: x[0])
-    score, is_buy, side, ob, entry, sl, tp1, tp2, tp3, rr2 = candidates[0]
+        COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
+        ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
+        save_active(); STATS["sniper"]+=1
 
-    # ANTI-SPAM 2: FILE cooldown
-    key=f"{s}_{side}"; now=time.time(); prev=COOLDOWN["signals"].get(key,{})
-    cd_need=COOLDOWN_WHALE_FLASH if is_whale else COOLDOWN_NORMAL
-    if prev.get("result")=="SL": cd_need=COOLDOWN_AFTER_SL
-    last_t = prev.get("t",0)
-    print(f"{s} CD CHECK last={int((now-last_t)//60) if last_t else 0}m ago need={cd_need//60}m", flush=True)
-    if now-last_t < cd_need:
-        print(f"{s} FILE COOLDOWN SKIP {int((cd_need - (now-last_t))//60)}m left", flush=True)
-        return
+        emoji = "🟢" if is_buy else "🔴"
+        phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
+        tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f}\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-    COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal"}; save()
-    LAST_SIGNAL_TIME[s]=now
-    ACTIVE[s]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
-    save_active(); STATS["sniper"]+=1
-
-    emoji = "🟢" if is_buy else "🔴"
-    phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
-
-    tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f}\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
-
-print("=== BOT V28.7.7 PERSISTENT ANTI-SPAM ===", flush=True)
+print("=== BOT V28.8.0 DUAL SIDE + ANTI-SPAM ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(e, flush=True)
     print(f"STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
 else:
-    # LOOP MODE - run every 60s, keeps ACTIVE in memory
     while True:
         for s,p in zip(SYMBOLS,PERPS):
             try: full_scan(s,p)
