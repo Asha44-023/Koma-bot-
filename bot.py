@@ -1,12 +1,14 @@
-# V28.8.1 DUAL SIDE - VOL 0.4x - KEEP 62%
+# V28.8.2 DUAL SIDE - 62% FIRST - VOL 0.4x SECOND
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","TAOUSDT":"TAO_USDT","SANDUSDT":"SAND_USDT","SENTUSDT":"SENT_USDT","FARTCOINUSDT":"FARTCOIN_USDT","JASMYUSDT":"JASMY_USDT","KOMAUSDT":"KOMA_USDT",}
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
+
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
 COOLDOWN={"signals":{}}; ACTIVE={}
+
 if os.path.exists(COOLDOWN_FILE):
     try:
         d=json.load(open(COOLDOWN_FILE))
@@ -18,10 +20,13 @@ if os.path.exists(COOLDOWN_FILE):
 if os.path.exists(ACTIVE_FILE):
     try: ACTIVE=json.load(open(ACTIVE_FILE))
     except: ACTIVE={}
+
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
+
 STATS={"touched":0,"sniper":0,"xxx":0}
 WHALE_TRACKER={}
+
 def tg(msg):
     print(msg, flush=True)
     tok=os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or ""
@@ -29,15 +34,18 @@ def tg(msg):
     if tok and chat:
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
+
 COOLDOWN_NORMAL=60*60
 COOLDOWN_AFTER_SL=90*60
 COOLDOWN_WHALE_FLASH=10*60
+
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
     if 0<=h<7: return "ASIAN","🟡"
     if 7<=h<12: return "LONDON","🔵"
     if 12<=h<21: return "NY","🟢"
     return "OFF","⚫"
+
 def kl(sym,interval):
     try:
         r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}", params={"interval":interval}, timeout=10).json()
@@ -52,6 +60,7 @@ def kl(sym,interval):
         for k in data: o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4])); v.append(float(k[5]))
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
+
 def fbs_62_first(h,l,c):
     if len(c)<3: return None, "no data"
     prev_high = h[-2]; prev_low = l[-2]
@@ -71,6 +80,7 @@ def fbs_62_first(h,l,c):
     if curr_close < l38 and curr_high < l62:
         return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {l38:.4f}"
     return None, "No 62% breakout"
+
 def pattern(h,l):
     tops=[];bots=[]
     for i in range(3,len(h)-3):
@@ -93,6 +103,7 @@ def pattern(h,l):
         if bots[-1][0]-bots[-2][0]>=5:
             if abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
     return "none"
+
 def get_last_ob(o,h,l,c,bullish=True,lookback=60):
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     for i in range(len(c)-2, len(c)-lookback, -1):
@@ -100,17 +111,21 @@ def get_last_ob(o,h,l,c,bullish=True,lookback=60):
         if bullish and c[i]<o[i] and is_impulse and c[i+1]>o[i+1]: return (l[i],h[i])
         if not bullish and c[i]>o[i] and is_impulse and c[i+1]<o[i+1]: return (l[i],h[i])
     return None
+
 def volume_pressure(o,h,l,c,v,n=20):
     if len(v)<n: return {"vol_x":1,"buy_pct":50,"sell_pct":50}
     avg=statistics.mean(v[-n:]); cur=v[-1]; bp=sp=0
     for i in range(-n,0): rng=h[i]-l[i] or 1e-9; delta=(c[i]-o[i])/rng*v[i]; bp+=delta if delta>0 else 0; sp+=-delta if delta<0 else 0
     total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
+
 def volume_delta(o,c,v,look=10):
     buy_v=sum(v[i] for i in range(-look,0) if c[i]>o[i])
     sell_v=sum(v[i] for i in range(-look,0) if c[i]<o[i])
     return buy_v, sell_v
+
 def get_wick_levels(h,l,lookback=20):
     return max(h[-lookback:]), min(l[-lookback:])
+
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy):
     ob_low, ob_high = ob
     ob_50 = (ob_low + ob_high)/2
@@ -123,6 +138,7 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy):
         tp1 = recent_low * 1.005; tp2 = recent_low * 0.99; tp3 = tp2 * 0.98
     risk = abs(entry - sl); rr2 = abs(tp2 - entry)/(risk or 1e-9)
     return entry, sl, tp1, tp2, tp3, rr2
+
 def get_volume_phase(p, vol_x, price):
     now=time.time()
     if vol_x >= 1.7:
@@ -133,6 +149,7 @@ def get_volume_phase(p, vol_x, price):
             return "WHALE_FLASH_ACTIVE", now - WHALE_TRACKER[p]["enter_time"]
     if vol_x >= 1.0: return "BUILDING", 0
     return "WATCH", 0
+
 def detect_bos(h,l,c):
     highs=[]; lows=[]; look=3; n=len(h)
     for i in range(look,n-look):
@@ -143,6 +160,7 @@ def detect_bos(h,l,c):
     if price>highs[-1][1] and highs[-1][1]>highs[-2][1]: return "BOS_UP"
     if price<lows[-1][1] and lows[-1][1]<lows[-2][1]: return "BOS_DOWN"
     return None
+
 def full_scan(s,p):
     d5=kl(p,"Min5"); d15=kl(p,"Min15")
     if not d5 or not d15: return
@@ -151,10 +169,8 @@ def full_scan(s,p):
     price=c[-1]
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
-    vp=volume_pressure(o,h,l,c,v)
-    if vp["vol_x"] < 0.4:
-        print(f"{s} VOL KILL {vp['vol_x']:.2f}x", flush=True)
-        return
+
+    # #1 - 62-38 / 25-75 FIRST
     fbs_up=None; fbs_down=None
     fbs_msg_up=""; fbs_msg_down=""
     for tf_data, tf_name in [(d5,"5m"),(d15,"15m")]:
@@ -164,12 +180,20 @@ def full_scan(s,p):
     if not fbs_up and not fbs_down:
         print(f"{s} SNIPER:0 - No 62% breakout", flush=True)
         return
+
+    # #2 - VOL KILL SECOND
+    vp=volume_pressure(o,h,l,c,v)
+    if vp["vol_x"] < 0.4:
+        print(f"{s} VOL KILL {vp['vol_x']:.2f}x - but 62% OK {fbs_up or fbs_down}", flush=True)
+        return
+
     buy_v, sell_v = volume_delta(o,c,v,10)
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
     if pat=="none": pat=pattern(d15["h"],d15["l"])
     phase, _ = get_volume_phase(p, vp["vol_x"], price)
     is_whale = "WHALE" in phase
+
     for is_buy in [True, False]:
         fbs_res = fbs_up if is_buy else fbs_down
         fbs_msg = fbs_msg_up if is_buy else fbs_msg_down
@@ -207,7 +231,8 @@ def full_scan(s,p):
         emoji = "🟢" if is_buy else "🔴"
         phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
         tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f}\nTP2: {tp2:.6f}\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
-print("=== BOT V28.8.1 DUAL SIDE + VOL 0.4x ===", flush=True)
+
+print("=== BOT V28.8.2 62% FIRST + VOL 0.4x SECOND ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
