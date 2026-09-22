@@ -1,4 +1,4 @@
-# V28.9.0 DUAL SIDE - 62% FIRST - VOL 0.01x SECOND - FIXED SPAM + LIQ TP + FBS IMAGE + COUNTER-TREND BLOCK
+# V28.9.1 DUAL SIDE - FBS IMAGE LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + VOL 0.01x + ANTI-SPAM + LIQ TP + COUNTER-TREND BLOCK
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -56,76 +56,63 @@ def kl(sym,interval):
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
 
-# === V28.9.0 NEW FBS IMAGE LOGIC ===
-def fbs_62_first(h,l,c):
+# === FBS IMAGE LOGIC - LEFT 25/75 BLOCK + RIGHT 62/38 ENTER ===
+def fbs_62_first(h,l,c,o):
     if len(c)<3: return None, "no data", 0, 50
-    prev_high = h[-2]; prev_low = l[-2]
-    prev_open = c[-3] # approx, better use o if available but keep old sig
-    # Need o for weak check - we get it from global d but here we have only h,l,c
-    # So use c[-2] vs c[-3] for prev direction
-    curr_close = c[-1]; curr_low = l[-1]; curr_high = h[-1]
+    prev_high, prev_low = h[-2], l[-2]
     prev_range = prev_high - prev_low
-    if prev_range == 0: return None, "no range", 0, 50
-
+    if prev_range==0: return None, "no range", 0, 50
+    pc, po = c[-2], o[-2]
+    cc, co, ch, cl = c[-1], o[-1], h[-1], l[-1]
     l75 = prev_low + prev_range*0.75
     l62 = prev_low + prev_range*0.62
     l38 = prev_low + prev_range*0.38
     l25 = prev_low + prev_range*0.25
+    pct = (cc - prev_low)/prev_range*100
+    prev_bull = pc > po
+    prev_bear = pc < po
+    curr_bull = cc > co
+    curr_bear = cc < co
 
-    close_pct = (curr_close - prev_low) / prev_range * 100
-    high_pct = (curr_high - prev_low) / prev_range * 100
-    low_pct = (curr_low - prev_low) / prev_range * 100
+    # LEFT IMAGE - DO NOT ENTER X
+    if prev_bull and curr_bear:
+        if cc < l75:
+            return None, f"BULLISH WEAK TOP-LEFT {pct:.0f}% <75% DO NOT ENTER X", 0, pct
+    if prev_bear and curr_bull:
+        if cc > l25:
+            return None, f"BEARISH WEAK BTM-LEFT {pct:.0f}% >25% DO NOT ENTER X", 0, pct
 
-    # TOP LEFT - Bullish Weak DO NOT ENTER X (image top-left)
-    if curr_close < l75 and c[-2] > c[-3] and curr_close > prev_high * 0.998:
-        return None, f"BULLISH WEAK TOP-LEFT {close_pct:.0f}% <75% DO NOT ENTER X", 0, close_pct
+    # RIGHT IMAGE - ENTER ✓
+    if prev_bull and curr_bull:
+        if cc > l62 and cl > l38:
+            return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {pct:.0f}% ENTER ✓ {l62:.4f}", l62, pct
+    if prev_bear and curr_bear:
+        if cc < l38 and ch < l62:
+            return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {pct:.0f}% ENTER ✓ {l38:.4f}", l38, pct
 
-    # BOTTOM LEFT - Bearish Weak DO NOT ENTER X (image bottom-left)
-    if curr_close > l25 and c[-2] < c[-3] and curr_close < prev_low * 1.002:
-        return None, f"BEARISH WEAK BTM-LEFT {close_pct:.0f}% >25% DO NOT ENTER X", 0, close_pct
+    return None, f"No breakout {pct:.0f}% H:{(ch-prev_low)/prev_range*100:.0f}% L:{(cl-prev_low)/prev_range*100:.0f}%", 0, pct
 
-    # TOP RIGHT - Strong Breakout ENTER ✓ (image top-right) GRASS 0.4429 case
-    if curr_close > l62 and curr_low > l38 and curr_close > prev_high:
-        return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {close_pct:.0f}% ENTER ✓ {l62:.4f}", l62, close_pct
-
-    # BOTTOM RIGHT - Strong Bearish ENTER ✓ (image bottom-right)
-    if curr_close < l38 and curr_high < l62 and curr_close < prev_low:
-        return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {close_pct:.0f}% ENTER ✓ {l38:.4f}", l38, close_pct
-
-    return None, f"No 62% breakout {close_pct:.0f}%", 0, close_pct
-
-# === V28.9.0 COUNTER-TREND BLOCK ===
 def can_flip(sym, new_side, close_pct):
-    if sym not in ACTIVE:
+    if sym not in [k.split('_')[0] for k in ACTIVE.keys()]:
         return True
-    # ACTIVE key is like GRASSUSDT_BUY or GRASSUSDT_SELL
     active_buy_key = f"{sym}_BUY"
     active_sell_key = f"{sym}_SELL"
     has_buy = active_buy_key in ACTIVE
     has_sell = active_sell_key in ACTIVE
-
     if has_buy and new_side == "SELL":
-        # ACTIVE BUY >62% needs SELL <25% to flip, 38% not enough (your GRASS 0.4270 lesson)
         if close_pct > 25:
-            tg(f"⛔ <b>{sym} COUNTER-TREND BLOCKED</b>\nACTIVE BUY >62% exists\nNew SELL {close_pct:.0f}% (need <25% to flip)\nBlocked - would be like your 0.4270 short into 0.4624 pump")
+            tg(f"⛔ <b>{sym} COUNTER-TREND BLOCKED</b>\nACTIVE BUY >62% exists\nNew SELL {close_pct:.0f}% (need <25% to flip)")
             return False
         else:
             tg(f"🔄 <b>{sym} FLIP ALLOWED</b> BUY->{new_side} {close_pct:.0f}% <25% super strong")
-            if active_buy_key in ACTIVE:
-                del ACTIVE[active_buy_key]
-            save_active()
-            return True
-
+            del ACTIVE[active_buy_key]; save_active(); return True
     if has_sell and new_side == "BUY":
         if close_pct < 75:
             tg(f"⛔ <b>{sym} COUNTER-TREND BLOCKED</b>\nACTIVE SELL <38% exists\nNew BUY {close_pct:.0f}% (need >75% to flip)")
             return False
         else:
-            tg(f"🔄 <b>{sym} FLIP ALLOWED</b> SELL->{new_side} {close_pct:.0f}% >75% super strong")
-            if active_sell_key in ACTIVE:
-                del ACTIVE[active_sell_key]
-            save_active()
-            return True
+            tg(f"🔄 <b>{sym} FLIP ALLOWED</b> SELL->{new_side} {close_pct:.0f}% >75%")
+            del ACTIVE[active_sell_key]; save_active(); return True
     return True
 
 def pattern(h,l):
@@ -168,14 +155,12 @@ def volume_delta(o,c,v,look=10):
     return buy_v, sell_v
 def get_wick_levels(h,l,lookback=20):
     return max(h[-lookback:]), min(l[-lookback:])
-
 def get_liquidity_tps(d5, d15, d60, entry, is_buy):
     try:
         liqs = []
         for tf in [d5, d15, d60]:
             if not tf: continue
-            hi = max(tf["h"][-20:])
-            lo = min(tf["l"][-20:])
+            hi = max(tf["h"][-20:]); lo = min(tf["l"][-20:])
             liqs.append(hi); liqs.append(lo)
             for i in range(-15,-1):
                 if tf["h"][i] > tf["h"][i-1] * 1.005: liqs.append(tf["h"][i])
@@ -193,7 +178,6 @@ def get_liquidity_tps(d5, d15, d60, entry, is_buy):
             elif len(below) == 1: return below[0], below[0]*0.985, below[0]*0.97
     except: pass
     return None, None, None
-
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5=None, d15=None, d60=None):
     ob_low, ob_high = ob
     ob_50 = (ob_low + ob_high)/2
@@ -243,16 +227,20 @@ def full_scan(s,p):
     if session_name=="OFF": return
     fbs_up=None; fbs_down=None; fbs_msg_up=""; fbs_msg_down=""; top_up=0; top_down=0; pct_up=50; pct_down=50
     for tf_data, tf_name in [(d5,"5m"),(d15,"15m")]:
-        res,msg,top,pct = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"])
+        res,msg,top,pct = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
         if res and "UP" in res and not fbs_up: fbs_up=res; fbs_msg_up=f"{msg} ({tf_name})"; top_up=top; pct_up=pct
         if res and "DOWN" in res and not fbs_down: fbs_down=res; fbs_msg_down=f"{msg} ({tf_name})"; top_down=top; pct_down=pct
         if "WEAK" in msg:
             print(f"{s} {tf_name} {msg}", flush=True)
     if not fbs_up and not fbs_down:
-        # Only print No breakout if not weak
-        d_check = fbs_62_first(d5["h"], d5["l"], d5["c"])
-        if "WEAK" not in d_check[1]:
-            print(f"{s} SNIPER:0 - {d_check[1]}", flush=True)
+        # Check if we had weak - already printed
+        has_weak = False
+        for tf_data in [d5,d15]:
+            _,msg,_,_ = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
+            if "WEAK" in msg: has_weak=True
+        if not has_weak:
+            _,msg,_,_ = fbs_62_first(d5["h"], d5["l"], d5["c"], d5["o"])
+            print(f"{s} SNIPER:0 - {msg}", flush=True)
         return
     vp=volume_pressure(o,h,l,c,v)
     if vp["vol_x"] < 0.01:
@@ -272,11 +260,8 @@ def full_scan(s,p):
         if not fbs_res: continue
         side="BUY" if is_buy else "SELL"
         key=f"{s}_{side}"
-
-        # COUNTER-TREND BLOCK CHECK
         if not can_flip(s, side, close_pct):
             continue
-
         last_top_key = f"{s}_{side}"
         if last_top_key in LAST_TOP:
             last_top, last_time = LAST_TOP[last_top_key]
@@ -284,7 +269,6 @@ def full_scan(s,p):
             if same_liq and (time.time() - last_time) < COOLDOWN_SAME_LIQ:
                 print(f"{s} {side} SAME LIQ SKIP {int((COOLDOWN_SAME_LIQ-(time.time()-last_time))//60)}m Top:{top_level:.4f}", flush=True)
                 continue
-
         if key in ACTIVE:
             age = int((time.time() - ACTIVE[key].get("t",0))//60)
             print(f"{s} {side} ACTIVE SKIP {age}m", flush=True)
@@ -327,7 +311,7 @@ def full_scan(s,p):
         phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
         tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-print("=== BOT V28.9.0 62% FIRST + VOL 0.01x + ANTI-SPAM + LIQ TP + FBS IMAGE + COUNTER-TREND ===", flush=True)
+print("=== BOT V28.9.1 LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + COUNTER-TREND ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
