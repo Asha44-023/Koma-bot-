@@ -1,4 +1,4 @@
-# V28.9.1 DUAL SIDE - FBS IMAGE LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + VOL 0.01x + ANTI-SPAM + LIQ TP + COUNTER-TREND BLOCK
+# V28.9.2 DUAL SIDE - FBS IMAGE LEFT 25/75 BLOCK (INSIDE ONLY) + RIGHT 62/38 ENTER + VOL 0.01x + ANTI-SPAM + LIQ TP + COUNTER-TREND BLOCK
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -56,7 +56,7 @@ def kl(sym,interval):
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
 
-# === FBS IMAGE LOGIC - LEFT 25/75 BLOCK + RIGHT 62/38 ENTER ===
+# === V28.9.2 FIXED 143% BUG - LEFT INSIDE ONLY ===
 def fbs_62_first(h,l,c,o):
     if len(c)<3: return None, "no data", 0, 50
     prev_high, prev_low = h[-2], l[-2]
@@ -74,12 +74,12 @@ def fbs_62_first(h,l,c,o):
     curr_bull = cc > co
     curr_bear = cc < co
 
-    # LEFT IMAGE - DO NOT ENTER X
+    # LEFT IMAGE - DO NOT ENTER X - ONLY IF INSIDE 25-75
     if prev_bull and curr_bear:
-        if cc < l75:
+        if l25 < cc < l75:
             return None, f"BULLISH WEAK TOP-LEFT {pct:.0f}% <75% DO NOT ENTER X", 0, pct
     if prev_bear and curr_bull:
-        if cc > l25:
+        if l25 < cc < l75:
             return None, f"BEARISH WEAK BTM-LEFT {pct:.0f}% >25% DO NOT ENTER X", 0, pct
 
     # RIGHT IMAGE - ENTER ✓
@@ -233,7 +233,6 @@ def full_scan(s,p):
         if "WEAK" in msg:
             print(f"{s} {tf_name} {msg}", flush=True)
     if not fbs_up and not fbs_down:
-        # Check if we had weak - already printed
         has_weak = False
         for tf_data in [d5,d15]:
             _,msg,_,_ = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
@@ -311,7 +310,7 @@ def full_scan(s,p):
         phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
         tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-print("=== BOT V28.9.1 LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + COUNTER-TREND ===", flush=True)
+print("=== BOT V28.9.2 LEFT 25/75 INSIDE ONLY + RIGHT 62/38 ENTER + COUNTER-TREND ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
