@@ -1,4 +1,4 @@
-# V28.9.3 DUAL SIDE - CLAMPED 0-100% FIX 168% BUG + LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + VOL 0.4x + RR2.0 + PAPER + DAILY LOSS
+# V28.9.4 DUAL SIDE - CLAMPED 0-100% FIX 168% BUG + LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + NO VOL BLOCK + NO PRESSURE BLOCK + NO RR BLOCK
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -294,9 +294,10 @@ def full_scan(s,p):
             print(f"{s} SNIPER:0 - {msg}", flush=True)
         return
     vp=volume_pressure(o,h,l,c,v)
-    if vp["vol_x"] < 0.4:
-        print(f"{s} SNIPER:0 VOL KILL {vp['vol_x']:.2f}x <0.4x WEAK - SKIP", flush=True)
-        return
+    # === REMOVED VOL 0.4x BLOCK FOR PURE FBS - GRASS PUMP FIX ===
+    # if vp["vol_x"] < 0.4:
+    # print(f"{s} SNIPER:0 VOL KILL {vp['vol_x']:.2f}x <0.4x WEAK - SKIP", flush=True)
+    # return
     buy_v, sell_v = volume_delta(o,c,v,10)
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
@@ -339,20 +340,22 @@ def full_scan(s,p):
                 continue
             print(f"{s} {side} FILE CD SKIP {int((cd_need-(now-last_t))//60)}m", flush=True)
             continue
-        if is_buy and vp["buy_pct"] < 60:
-            print(f"{s} BUY PRESSURE LOW {vp['buy_pct']:.0f}%", flush=True)
-            continue
-        if not is_buy and vp["sell_pct"] < 60:
-            print(f"{s} SELL PRESSURE LOW {vp['sell_pct']:.0f}%", flush=True)
-            continue
+        # === REMOVED PRESSURE 60% BLOCK FOR PURE FBS ===
+        # if is_buy and vp["buy_pct"] < 60:
+        # print(f"{s} BUY PRESSURE LOW {vp['buy_pct']:.0f}%", flush=True)
+        # continue
+        # if not is_buy and vp["sell_pct"] < 60:
+        # print(f"{s} SELL PRESSURE LOW {vp['sell_pct']:.0f}%", flush=True)
+        # continue
         if is_buy and pat in ["double_top","triple_top"]: continue
         if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
         if not ob: ob = (min(l[-15:]), max(h[-15:]))
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5, d15, d60)
-        if rr2 < 2.0:
-            print(f"{s} {side} RR LOW {rr2:.1f} <2.0 SKIP", flush=True)
-            continue
+        # === REMOVED RR 2.0 BLOCK FOR PURE FBS - GRASS PUMP FIX ===
+        # if rr2 < 2.0:
+        # print(f"{s} {side} RR LOW {rr2:.1f} <2.0 SKIP", flush=True)
+        # continue
 
         mode_tag = "📄 PAPER" if PAPER_MODE else "💰 REAL"
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal","session":session_name,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}
@@ -366,7 +369,7 @@ def full_scan(s,p):
         phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
         tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name} {mode_tag}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-print("=== BOT V28.9.3 CLAMPED 0-100% + VOL 0.4x RR2.0 + PAPER + DAILY LOSS ===", flush=True)
+print("=== BOT V28.9.4 PURE FBS - NO VOL/PRESSURE/RR BLOCK - CLAMPED 0-100% ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
