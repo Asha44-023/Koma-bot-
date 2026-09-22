@@ -1,7 +1,12 @@
-# V28.9.2 DUAL SIDE - FBS IMAGE LEFT 25/75 BLOCK (INSIDE ONLY) + RIGHT 62/38 ENTER + VOL 0.01x + ANTI-SPAM + LIQ TP + COUNTER-TREND BLOCK
+# V28.9.3 DUAL SIDE - CLAMPED 0-100% FIX 168% BUG + LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + VOL 0.4x + RR2.0 + PAPER + DAILY LOSS
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+# === SAFETY SETTINGS - CHANGE HERE ===
+PAPER_MODE = True # True = paper signals only, no real trade
+DAILY_MAX_LOSS_R = 2.0 # stop trading after -2R loss per day
+DAILY_LOSS_FILE = "daily_loss.json"
 
 SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","TAOUSDT":"TAO_USDT","SANDUSDT":"SAND_USDT","SENTUSDT":"SENT_USDT","FARTCOINUSDT":"FARTCOIN_USDT","JASMYUSDT":"JASMY_USDT","KOMAUSDT":"KOMA_USDT",}
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
@@ -18,8 +23,33 @@ if os.path.exists(COOLDOWN_FILE):
 if os.path.exists(ACTIVE_FILE):
     try: ACTIVE=json.load(open(ACTIVE_FILE))
     except: ACTIVE={}
+
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
+
+# Daily loss tracking
+def get_daily_loss():
+    if not os.path.exists(DAILY_LOSS_FILE): return {"date": str(datetime.now().date()), "loss_r": 0.0}
+    try:
+        data = json.load(open(DAILY_LOSS_FILE))
+        if data.get("date")!= str(datetime.now().date()):
+            return {"date": str(datetime.now().date()), "loss_r": 0.0}
+        return data
+    except: return {"date": str(datetime.now().date()), "loss_r": 0.0}
+
+def add_daily_loss(r_loss):
+    data = get_daily_loss()
+    data["loss_r"] += r_loss
+    data["date"] = str(datetime.now().date())
+    open(DAILY_LOSS_FILE,"w").write(json.dumps(data))
+    return data["loss_r"]
+
+def check_daily_limit():
+    data = get_daily_loss()
+    if data["loss_r"] >= DAILY_MAX_LOSS_R:
+        return False, data["loss_r"]
+    return True, data["loss_r"]
+
 STATS={"touched":0,"sniper":0,"xxx":0}
 WHALE_TRACKER={}
 LAST_TOP = {}
@@ -31,16 +61,19 @@ def tg(msg):
     if tok and chat:
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
+
 COOLDOWN_NORMAL=60*60
 COOLDOWN_AFTER_SL=90*60
 COOLDOWN_WHALE_FLASH=10*60
 COOLDOWN_SAME_LIQ=30*60
+
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
     if 0<=h<7: return "ASIAN","🟡"
     if 7<=h<12: return "LONDON","🔵"
     if 12<=h<21: return "NY","🟢"
     return "OFF","⚫"
+
 def kl(sym,interval):
     try:
         r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}", params={"interval":interval}, timeout=10).json()
@@ -56,7 +89,7 @@ def kl(sym,interval):
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
 
-# === V28.9.2 FIXED 143% BUG - LEFT INSIDE ONLY ===
+# === V28.9.3 FIXED 168% BUG - CLAMPED 0-100% ===
 def fbs_62_first(h,l,c,o):
     if len(c)<3: return None, "no data", 0, 50
     prev_high, prev_low = h[-2], l[-2]
@@ -68,13 +101,20 @@ def fbs_62_first(h,l,c,o):
     l62 = prev_low + prev_range*0.62
     l38 = prev_low + prev_range*0.38
     l25 = prev_low + prev_range*0.25
-    pct = (cc - prev_low)/prev_range*100
+
+    def clamp_pct(price):
+        raw = (price - prev_low)/prev_range*100 if prev_range else 50
+        return max(0.0, min(100.0, raw))
+
+    pct = clamp_pct(cc)
+    pct_high = clamp_pct(ch)
+    pct_low = clamp_pct(cl)
+
     prev_bull = pc > po
     prev_bear = pc < po
     curr_bull = cc > co
     curr_bear = cc < co
 
-    # LEFT IMAGE - DO NOT ENTER X - ONLY IF INSIDE 25-75
     if prev_bull and curr_bear:
         if l25 < cc < l75:
             return None, f"BULLISH WEAK TOP-LEFT {pct:.0f}% <75% DO NOT ENTER X", 0, pct
@@ -82,15 +122,14 @@ def fbs_62_first(h,l,c,o):
         if l25 < cc < l75:
             return None, f"BEARISH WEAK BTM-LEFT {pct:.0f}% >25% DO NOT ENTER X", 0, pct
 
-    # RIGHT IMAGE - ENTER ✓
     if prev_bull and curr_bull:
         if cc > l62 and cl > l38:
-            return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {pct:.0f}% ENTER ✓ {l62:.4f}", l62, pct
+            return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {pct:.0f}% ENTER ✓ {l62:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l62, pct
     if prev_bear and curr_bear:
         if cc < l38 and ch < l62:
-            return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {pct:.0f}% ENTER ✓ {l38:.4f}", l38, pct
+            return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {pct:.0f}% ENTER ✓ {l38:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l38, pct
 
-    return None, f"No breakout {pct:.0f}% H:{(ch-prev_low)/prev_range*100:.0f}% L:{(cl-prev_low)/prev_range*100:.0f}%", 0, pct
+    return None, f"No breakout {pct:.0f}% H:{pct_high:.0f}% L:{pct_low:.0f}%", 0, pct
 
 def can_flip(sym, new_side, close_pct):
     if sym not in [k.split('_')[0] for k in ACTIVE.keys()]:
@@ -137,6 +176,7 @@ def pattern(h,l):
         if bots[-1][0]-bots[-2][0]>=5:
             if abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
     return "none"
+
 def get_last_ob(o,h,l,c,bullish=True,lookback=60):
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     for i in range(len(c)-2, len(c)-lookback, -1):
@@ -144,17 +184,21 @@ def get_last_ob(o,h,l,c,bullish=True,lookback=60):
         if bullish and c[i]<o[i] and is_impulse and c[i+1]>o[i+1]: return (l[i],h[i])
         if not bullish and c[i]>o[i] and is_impulse and c[i+1]<o[i+1]: return (l[i],h[i])
     return None
+
 def volume_pressure(o,h,l,c,v,n=20):
     if len(v)<n: return {"vol_x":1,"buy_pct":50,"sell_pct":50}
     avg=statistics.mean(v[-n:]); cur=v[-1]; bp=sp=0
     for i in range(-n,0): rng=h[i]-l[i] or 1e-9; delta=(c[i]-o[i])/rng*v[i]; bp+=delta if delta>0 else 0; sp+=-delta if delta<0 else 0
     total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
+
 def volume_delta(o,c,v,look=10):
     buy_v=sum(v[i] for i in range(-look,0) if c[i]>o[i])
     sell_v=sum(v[i] for i in range(-look,0) if c[i]<o[i])
     return buy_v, sell_v
+
 def get_wick_levels(h,l,lookback=20):
     return max(h[-lookback:]), min(l[-lookback:])
+
 def get_liquidity_tps(d5, d15, d60, entry, is_buy):
     try:
         liqs = []
@@ -178,6 +222,7 @@ def get_liquidity_tps(d5, d15, d60, entry, is_buy):
             elif len(below) == 1: return below[0], below[0]*0.985, below[0]*0.97
     except: pass
     return None, None, None
+
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5=None, d15=None, d60=None):
     ob_low, ob_high = ob
     ob_50 = (ob_low + ob_high)/2
@@ -196,6 +241,7 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5=None, d15=None, d60=None):
         tp3 = tp3_liq if tp3_liq else tp2 * 0.98
     risk = abs(entry - sl); rr2 = abs(tp2 - entry)/(risk or 1e-9)
     return entry, sl, tp1, tp2, tp3, rr2
+
 def get_volume_phase(p, vol_x, price):
     now=time.time()
     if vol_x >= 1.7:
@@ -206,6 +252,7 @@ def get_volume_phase(p, vol_x, price):
             return "WHALE_FLASH_ACTIVE", now - WHALE_TRACKER[p]["enter_time"]
     if vol_x >= 1.0: return "BUILDING", 0
     return "WATCH", 0
+
 def detect_bos(h,l,c):
     highs=[]; lows=[]; look=3; n=len(h)
     for i in range(look,n-look):
@@ -218,6 +265,11 @@ def detect_bos(h,l,c):
     return None
 
 def full_scan(s,p):
+    ok, loss = check_daily_limit()
+    if not ok:
+        print(f"⛔ DAILY LOSS LIMIT HIT {loss:.1f}R >= {DAILY_MAX_LOSS_R}R - STOP TRADING TODAY", flush=True)
+        return
+
     d5=kl(p,"Min5"); d15=kl(p,"Min15"); d60=kl(p,"Min60")
     if not d5 or not d15: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
@@ -242,8 +294,8 @@ def full_scan(s,p):
             print(f"{s} SNIPER:0 - {msg}", flush=True)
         return
     vp=volume_pressure(o,h,l,c,v)
-    if vp["vol_x"] < 0.01:
-        print(f"{s} VOL KILL {vp['vol_x']:.2f}x - but 62% OK {fbs_up or fbs_down}", flush=True)
+    if vp["vol_x"] < 0.4:
+        print(f"{s} SNIPER:0 VOL KILL {vp['vol_x']:.2f}x <0.4x WEAK - SKIP", flush=True)
         return
     buy_v, sell_v = volume_delta(o,c,v,10)
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
@@ -298,28 +350,32 @@ def full_scan(s,p):
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
         if not ob: ob = (min(l[-15:]), max(h[-15:]))
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5, d15, d60)
-        if rr2 < 1.0:
-            print(f"{s} {side} RR LOW {rr2:.1f}", flush=True)
+        if rr2 < 2.0:
+            print(f"{s} {side} RR LOW {rr2:.1f} <2.0 SKIP", flush=True)
             continue
+
+        mode_tag = "📄 PAPER" if PAPER_MODE else "💰 REAL"
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal","session":session_name,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}
         save()
         LAST_TOP[f"{s}_{side}"] = (top_level, now)
-        ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
-        save_active(); STATS["sniper"]+=1
+        if not PAPER_MODE:
+            ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
+            save_active()
+        STATS["sniper"]+=1
         emoji = "🟢" if is_buy else "🔴"
         phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
-        tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
+        tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name} {mode_tag}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-print("=== BOT V28.9.2 LEFT 25/75 INSIDE ONLY + RIGHT 62/38 ENTER + COUNTER-TREND ===", flush=True)
+print("=== BOT V28.9.3 CLAMPED 0-100% + VOL 0.4x RR2.0 + PAPER + DAILY LOSS ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(e, flush=True)
-    print(f"STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())}", flush=True)
+    print(f"STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())} PAPER:{PAPER_MODE}", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
             try: full_scan(s,p)
             except Exception as e: print(e, flush=True)
-        print(f"Sleep 60s... ACTIVE:{list(ACTIVE.keys())}", flush=True)
+        print(f"Sleep 60s... ACTIVE:{list(ACTIVE.keys())} PAPER:{PAPER_MODE} DailyLoss:{get_daily_loss()['loss_r']:.1f}R", flush=True)
         time.sleep(60)
