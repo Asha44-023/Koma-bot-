@@ -1,4 +1,4 @@
-# BOT V30.8 - PER IMAGE 62/38 DUAL-TF REVERSAL - TP1 1H / TP2 Daily - RR 1.5-8
+# BOT V30.9 - PER IMAGE DUAL-TF + 0.5% HOLD FILTER - RR 1.5-8
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -141,9 +141,12 @@ def full_scan(s,p):
                 tg(f"⚠️ <b>REVERSAL {s}</b> 🔴 38% BREAKDOWN per image (5m+15m)\nClose BUY {c[-1]:.6f}")
                 del ACTIVE[buy_key]; save_active(); return
         prev_high=ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
+        last_hold_profit=ACTIVE[buy_key].get("last_hold_profit",0)
         if c[-1] > prev_high and fbs_res and "UP" in fbs_res:
             profit=(c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
-            tg(f"💎 <b>HOLD BUY {s}</b> | +{profit:.2f}%\nNew high {c[-1]:.6f} 🟢")
+            if profit - last_hold_profit >= 0.5:
+                tg(f"💎 <b>HOLD BUY {s}</b> | +{profit:.2f}%\nNew high {c[-1]:.6f} 🟢")
+                ACTIVE[buy_key]["last_hold_profit"]=profit
             ACTIVE[buy_key]["highest"]=c[-1]; save_active()
         return
 
@@ -155,9 +158,12 @@ def full_scan(s,p):
                 tg(f"⚠️ <b>REVERSAL {s}</b> 🟢 62% BREAKOUT per image (5m+15m)\nClose SELL {c[-1]:.6f}")
                 del ACTIVE[sell_key]; save_active(); return
         prev_low=ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
+        last_hold_profit=ACTIVE[sell_key].get("last_hold_profit",0)
         if c[-1] < prev_low and fbs_res and "DOWN" in fbs_res:
             profit=(ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
-            tg(f"💎 <b>HOLD SELL {s}</b> | +{profit:.2f}%\nNew low {c[-1]:.6f} 🔴")
+            if profit - last_hold_profit >= 0.5:
+                tg(f"💎 <b>HOLD SELL {s}</b> | +{profit:.2f}%\nNew low {c[-1]:.6f} 🔴")
+                ACTIVE[sell_key]["last_hold_profit"]=profit
             ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
 
@@ -189,12 +195,12 @@ def full_scan(s,p):
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
     LAST_TOP[f"{s}_{side}"]=(top_level,now)
-    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"highest":entry,"lowest":entry}; save_active()
+    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
 
     if is_buy: tg(f"🟢 <b>BUY {s}</b> | 62% ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 1H {tp1:.6f} ({rr1:.1f}R) | TP2 D {tp2:.6f} ({rr2:.1f}R)")
     else: tg(f"🔴 <b>SELL {s}</b> | 38% ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 1H {tp1:.6f} ({rr1:.1f}R) | TP2 D {tp2:.6f} ({rr2:.1f}R)")
 
-print("=== BOT V30.8 PER IMAGE DUAL-TF ===",flush=True)
+print("=== BOT V30.9 0.5% HOLD FILTER ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
