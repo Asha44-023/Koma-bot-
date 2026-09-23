@@ -27,7 +27,8 @@ jobs:
           python3 -c "
           import json,time,os
           now=time.time()
-          for fname, expire in [('cooldown.json', 43200, 'signals'), ('active.json', 7200, None), ('daily_loss.json', 86400, None)]:
+          files = [('cooldown.json', 43200), ('active.json', 7200), ('daily_loss.json', 86400)]
+          for fname, expire in files:
               if not os.path.exists(fname):
                   if 'cooldown' in fname:
                       open(fname,'w').write(json.dumps({'signals':{}}))
@@ -41,7 +42,7 @@ jobs:
                       open(fname,'w').write(json.dumps({'signals':c}))
                       print(f'{fname} kept {len(c)}')
                   elif 'active' in fname:
-                      if d and '_' not in list(d.keys())[0]:
+                      if d and len(d)>0 and '_' not in list(d.keys())[0]:
                           print('Old ACTIVE format wipe')
                           d={}
                       else:
