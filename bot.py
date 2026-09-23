@@ -1,4 +1,4 @@
-# V30.5 MARKET DRIVEN HOLD/REVERSAL
+# BOT V30.6 - 62/38 ONLY - NO SPAM - MARKET HOLD/REVERSAL - TP1 1H / TP2 DAILY
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -96,27 +96,31 @@ def get_daily_levels(perp):
         d1=kl(perp,"Day1")
         if d1 and len(d1["h"])>=2 and d1["h"][-2]>0: return d1["h"][-2],d1["l"][-2]
     except: pass
+    return None,None
+
+def get_1h_levels(perp):
     try:
         h1=kl(perp,"Min60")
-        if h1 and len(h1["h"])>=24: return max(h1["h"][-24:]),min(h1["l"][-24:])
+        if h1 and len(h1["h"])>=24: return max(h1["h"][-24:]), min(h1["l"][-24:])
     except: pass
     return None,None
 
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=None):
     ob_low,ob_high=ob; entry=(ob_low+ob_high)/2
     daily_high,daily_low=get_daily_levels(perp) if perp else (None,None)
+    h1_high,h1_low=get_1h_levels(perp) if perp else (None,None)
     if is_buy:
         sl=min(min(l[-7:]),ob_low)*0.997
-        if daily_high: tp1=daily_high*1.003; tp2=daily_high*1.012
-        else: tp1=max(h[-20:])*1.008; tp2=max(h[-20:])*1.018
-        tp1=max(tp1,entry*1.006); tp2=max(tp2,tp1*1.006)
+        tp1=h1_high*1.002 if h1_high else max(h[-20:])*1.008
+        tp2=daily_high*1.012 if daily_high else tp1*1.008
+        tp1=max(tp1,entry*1.004); tp2=max(tp2,tp1*1.006)
     else:
         sl=max(max(h[-7:]),ob_high)*1.003
-        if daily_low: tp1=daily_low*0.997; tp2=daily_low*0.988
-        else: tp1=min(l[-20:])*0.992; tp2=min(l[-20:])*0.982
-        tp1=min(tp1,entry*0.994); tp2=min(tp2,tp1*0.994)
-    risk=abs(entry-sl); rr2=abs(tp2-entry)/(risk or 1e-9)
-    return entry,sl,tp1,tp2,rr2
+        tp1=h1_low*0.998 if h1_low else min(l[-20:])*0.992
+        tp2=daily_low*0.988 if daily_low else tp1*0.992
+        tp1=min(tp1,entry*0.996); tp2=min(tp2,tp1*0.994)
+    risk=abs(entry-sl); rr1=abs(tp1-entry)/(risk or 1e-9); rr2=abs(tp2-entry)/(risk or 1e-9)
+    return entry,sl,tp1,tp2,rr1,rr2
 
 def full_scan(s,p):
     d5=kl(p,"Min5"); d15=kl(p,"Min15")
@@ -125,24 +129,19 @@ def full_scan(s,p):
     if len(c)<30: return
     if get_session()[0]=="OFF": return
     now=time.time()
-
-    # ACTIVE TRADE - MARKET DRIVEN
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
 
+    # ACTIVE - MARKET DRIVEN HOLD/REVERSAL
     if buy_key in ACTIVE:
-        # Check reversal first - market tells reversal via opposite BOS
         fbs_res,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "DOWN" in fbs_res:
             tg(f"⚠️ <b>REVERSAL {s}</b> 🔴\nBUY active -> SELL BOS detected\nClose BUY now! Price {c[-1]:.6f}")
             del ACTIVE[buy_key]; save_active(); return
-
-        # Check continuation - market makes new high with bullish BOS
-        cur_high = max(h[-3:]) # market structure high
-        prev_high = ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
+        prev_high=ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
         if c[-1] > prev_high and fbs_res and "UP" in fbs_res:
-            profit = (c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
-            tg(f"💎 <b>HOLD BUY {s}</b> | +{profit:.2f}%\nMarket continuation -> new high {c[-1]:.6f}\nBOS_UP still strong 🟢")
-            ACTIVE[buy_key]["highest"] = c[-1]; save_active()
+            profit=(c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
+            tg(f"💎 <b>HOLD BUY {s}</b> | +{profit:.2f}%\nMarket continuation new high {c[-1]:.6f} 🟢")
+            ACTIVE[buy_key]["highest"]=c[-1]; save_active()
         return
 
     if sell_key in ACTIVE:
@@ -150,16 +149,14 @@ def full_scan(s,p):
         if fbs_res and "UP" in fbs_res:
             tg(f"⚠️ <b>REVERSAL {s}</b> 🟢\nSELL active -> BUY BOS detected\nClose SELL now! Price {c[-1]:.6f}")
             del ACTIVE[sell_key]; save_active(); return
-
-        cur_low = min(l[-3:])
-        prev_low = ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
+        prev_low=ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
         if c[-1] < prev_low and fbs_res and "DOWN" in fbs_res:
-            profit = (ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
-            tg(f"💎 <b>HOLD SELL {s}</b> | +{profit:.2f}%\nMarket continuation -> new low {c[-1]:.6f}\nBOS_DOWN still strong 🔴")
-            ACTIVE[sell_key]["lowest"] = c[-1]; save_active()
+            profit=(ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
+            tg(f"💎 <b>HOLD SELL {s}</b> | +{profit:.2f}%\nMarket continuation new low {c[-1]:.6f} 🔴")
+            ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
 
-    # NEW ENTRY
+    # NEW ENTRY - ONLY 62/38 NO 25/75
     fbs_res=None; top_level=0; tf_used=""
     for tf_data,tf_name in [(d5,"5m"),(d15,"15m")]:
         res,top=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
@@ -181,20 +178,20 @@ def full_scan(s,p):
 
     ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
     if not ob: ob=(min(l[-15:]),max(h[-15:]))
-    entry,sl,tp1,tp2,rr2=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=p)
+    entry,sl,tp1,tp2,rr1,rr2=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=p)
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
     LAST_TOP[f"{s}_{side}"]=(top_level,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"highest":entry,"lowest":entry}; save_active()
 
-    if is_buy: tg(f"🟢 <b>BUY {s}</b> | STRONG 62% BREAKOUT ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} | TP2 {tp2:.6f} | RR {rr2:.1f}R")
-    else: tg(f"🔴 <b>SELL {s}</b> | STRONG 38% BREAKDOWN ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} | TP2 {tp2:.6f} | RR {rr2:.1f}R")
+    if is_buy: tg(f"🟢 <b>BUY {s}</b> | 62% BREAKOUT ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 1H {tp1:.6f} ({rr1:.1f}R) | TP2 Daily {tp2:.6f} ({rr2:.1f}R)")
+    else: tg(f"🔴 <b>SELL {s}</b> | 38% BREAKDOWN ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 1H {tp1:.6f} ({rr1:.1f}R) | TP2 Daily {tp2:.6f} ({rr2:.1f}R)")
 
-print("=== BOT V30.5 MARKET DRIVEN ===",flush=True)
+print("=== BOT V30.6 62/38 TP1-1H TP2-DAILY ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
-        except: pass
+        except Exception as e: print(f"{s} err {e}")
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
