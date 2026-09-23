@@ -1,4 +1,4 @@
-# BOT V31.2 FINAL - INSTANT FLIP + ANTI-DUP + IMAGE LOGIC
+# BOT V31.3 - FLIP + 12% DAY LIMIT FOR VOLATILE
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -125,7 +125,6 @@ def full_scan(s,p):
     now=time.time()
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
 
-    # --- ACTIVE BUY - check reversal ---
     if buy_key in ACTIVE:
         fbs_res,_,brp = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "DOWN_STRONG" in fbs_res:
@@ -133,18 +132,15 @@ def full_scan(s,p):
             if fbs_15 and "DOWN_STRONG" in fbs_15:
                 tg(f"⚠️ <b>REVERSAL {s}</b> 🔴 STRONG 38% BREAKDOWN (5m+15m)\nClose BUY {c[-1]:.6f}")
                 del ACTIVE[buy_key]; save_active()
-                # INSTANT FLIP SELL
                 is_vol = s in VOLATILE_SYMS or max(brp,brp15) > 2.5
-                entry = c[-1]
-                sl_pct = 0.028 if is_vol else 0.012
+                entry = c[-1]; sl_pct = 0.028 if is_vol else 0.012
                 tp1_pct,tp2_pct,tp3_pct = (0.03,0.06,0.09) if is_vol else (0.015,0.025,0.04)
                 sl = entry * (1 + sl_pct); tp1 = entry * (1 - tp1_pct); tp2 = entry * (1 - tp2_pct); tp3 = entry * (1 - tp3_pct)
                 key = f"{s}_SELL"
                 COOLDOWN["signals"][key]={"t":now,"dir":False,"top":res15_top,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":False,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
-                vol_tag = "10% VOL" if is_vol else "4% STABLE"
-                tg(f"🔄 <b>FLIP SELL {s}</b> | 38% BREAKDOWN FLIP ({vol_tag})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f}\nImage logic 5m+15m BOS_DOWN")
+                tg(f"🔄 <b>FLIP SELL {s}</b> | 38% BREAKDOWN FLIP\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f}")
                 return
         prev_high=ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
         last_hold_profit=ACTIVE[buy_key].get("last_hold_profit",0)
@@ -156,7 +152,6 @@ def full_scan(s,p):
             ACTIVE[buy_key]["highest"]=c[-1]; save_active()
         return
 
-    # --- ACTIVE SELL - check reversal ---
     if sell_key in ACTIVE:
         fbs_res,_,brp = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "UP_STRONG" in fbs_res:
@@ -164,10 +159,8 @@ def full_scan(s,p):
             if fbs_15 and "UP_STRONG" in fbs_15:
                 tg(f"⚠️ <b>REVERSAL {s}</b> 🟢 STRONG 62% BREAKOUT (5m+15m)\nClose SELL {c[-1]:.6f}")
                 del ACTIVE[sell_key]; save_active()
-                # INSTANT FLIP BUY - catches +8% pump like GRASS
                 is_vol = s in VOLATILE_SYMS or max(brp,brp15) > 2.5
-                entry = c[-1]
-                sl_pct = 0.028 if is_vol else 0.012
+                entry = c[-1]; sl_pct = 0.028 if is_vol else 0.012
                 tp1_pct,tp2_pct,tp3_pct = (0.03,0.06,0.09) if is_vol else (0.015,0.025,0.04)
                 sl = entry * (1 - sl_pct); tp1 = entry * (1 + tp1_pct); tp2 = entry * (1 + tp2_pct); tp3 = entry * (1 + tp3_pct)
                 key = f"{s}_BUY"
@@ -175,7 +168,7 @@ def full_scan(s,p):
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":True,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
                 vol_tag = "10% VOL" if is_vol else "4% STABLE"
-                tg(f"🔄 <b>FLIP BUY {s}</b> | 62% BREAKOUT FLIP ({vol_tag})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f}\nImage logic 5m+15m BOS_UP - caught pump")
+                tg(f"🔄 <b>FLIP BUY {s}</b> | 62% BREAKOUT FLIP ({vol_tag})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f}\nCaught +7% pump")
                 return
         prev_low=ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
         last_hold_profit=ACTIVE[sell_key].get("last_hold_profit",0)
@@ -187,7 +180,6 @@ def full_scan(s,p):
             ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
 
-    # --- NEW ENTRY ---
     fbs_res=None; top_level=0; tf_used=""; big_range_pct=0
     for tf_data,tf_name in [(d5,"5m"),(d15,"15m")]:
         res,top,brp=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
@@ -197,12 +189,13 @@ def full_scan(s,p):
     if not fbs_res: return
     vp=volume_pressure(o,h,l,c,v); pat=pattern(d5["h"],d5["l"])
     is_buy="UP" in fbs_res; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
-    if key in ACTIVE: return # ANTI-DUP
+    if key in ACTIVE: return
     try:
         day=kl(p,"Day1")
         if day and len(day["c"])>=2:
             day_pct = (day["c"][-1]-day["c"][-2])/(day["c"][-2] or 1)*100
-            if abs(day_pct) > 7.0: return
+            limit = 12.0 if s in VOLATILE_SYMS else 7.0
+            if abs(day_pct) > limit: return
     except: pass
     if f"{s}_{side}" in LAST_TOP:
         last_top,last_time=LAST_TOP[f"{s}_{side}"]
@@ -226,7 +219,7 @@ def full_scan(s,p):
     if is_buy: tg(f"🟢 <b>BUY {s}</b> | 62% STRONG ({tf_used}) {vol_tag}\nRange {big_range_pct:.2f}% | Entry {entry:.6f} | SL {sl:.6f} ({abs(entry-sl)/entry*100:.1f}%)\nTP1 {tp1:.6f} ({rr1:.1f}R) | TP2 {tp2:.6f} ({rr2:.1f}R) | TP3 {tp3:.6f} ({rr3:.1f}R)")
     else: tg(f"🔴 <b>SELL {s}</b> | 38% STRONG ({tf_used}) {vol_tag}\nRange {big_range_pct:.2f}% | Entry {entry:.6f} | SL {sl:.6f} ({abs(entry-sl)/entry*100:.1f}%)\nTP1 {tp1:.6f} ({rr1:.1f}R) | TP2 {tp2:.6f} ({rr2:.1f}R) | TP3 {tp3:.6f} ({rr3:.1f}R)")
 
-print("=== BOT V31.2 FLIP + ANTI-DUP ===",flush=True)
+print("=== BOT V31.3 FLIP + 12% LIMIT ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
