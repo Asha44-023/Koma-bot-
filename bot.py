@@ -1,11 +1,10 @@
-# V28.9.4 DUAL SIDE - CLAMPED 0-100% FIX 168% BUG + LEFT 25/75 BLOCK + RIGHT 62/38 ENTER + NO VOL BLOCK + NO PRESSURE BLOCK + NO RR BLOCK
+# V28.9.5 PURE FBS + ANTI-SPAM FIX + TREND/HOLD/REVERSAL
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# === SAFETY SETTINGS - CHANGE HERE ===
-PAPER_MODE = True # True = paper signals only, no real trade
-DAILY_MAX_LOSS_R = 2.0 # stop trading after -2R loss per day
+PAPER_MODE = True
+DAILY_MAX_LOSS_R = 2.0
 DAILY_LOSS_FILE = "daily_loss.json"
 
 SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","TAOUSDT":"TAO_USDT","SANDUSDT":"SAND_USDT","SENTUSDT":"SENT_USDT","FARTCOINUSDT":"FARTCOIN_USDT","JASMYUSDT":"JASMY_USDT","KOMAUSDT":"KOMA_USDT",}
@@ -27,7 +26,6 @@ if os.path.exists(ACTIVE_FILE):
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
 
-# Daily loss tracking
 def get_daily_loss():
     if not os.path.exists(DAILY_LOSS_FILE): return {"date": str(datetime.now().date()), "loss_r": 0.0}
     try:
@@ -62,10 +60,10 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 
-COOLDOWN_NORMAL=60*60
+COOLDOWN_NORMAL=120*60 # 2h anti-spam
 COOLDOWN_AFTER_SL=90*60
 COOLDOWN_WHALE_FLASH=10*60
-COOLDOWN_SAME_LIQ=30*60
+COOLDOWN_SAME_LIQ=60*60 # 1h same liq block
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
@@ -89,7 +87,6 @@ def kl(sym,interval):
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
 
-# === V28.9.3 FIXED 168% BUG - CLAMPED 0-100% ===
 def fbs_62_first(h,l,c,o):
     if len(c)<3: return None, "no data", 0, 50
     prev_high, prev_low = h[-2], l[-2]
@@ -101,34 +98,28 @@ def fbs_62_first(h,l,c,o):
     l62 = prev_low + prev_range*0.62
     l38 = prev_low + prev_range*0.38
     l25 = prev_low + prev_range*0.25
-
     def clamp_pct(price):
         raw = (price - prev_low)/prev_range*100 if prev_range else 50
         return max(0.0, min(100.0, raw))
-
     pct = clamp_pct(cc)
     pct_high = clamp_pct(ch)
     pct_low = clamp_pct(cl)
-
     prev_bull = pc > po
     prev_bear = pc < po
     curr_bull = cc > co
     curr_bear = cc < co
-
     if prev_bull and curr_bear:
         if l25 < cc < l75:
-            return None, f"BULLISH WEAK TOP-LEFT {pct:.0f}% <75% DO NOT ENTER X", 0, pct
+            return None, f"BULLISH WEAK TOP-LEFT {pct:.0f}% <75% HOLD X", 0, pct
     if prev_bear and curr_bull:
         if l25 < cc < l75:
-            return None, f"BEARISH WEAK BTM-LEFT {pct:.0f}% >25% DO NOT ENTER X", 0, pct
-
+            return None, f"BEARISH WEAK BTM-LEFT {pct:.0f}% >25% HOLD X", 0, pct
     if prev_bull and curr_bull:
         if cc > l62 and cl > l38:
-            return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {pct:.0f}% ENTER ✓ {l62:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l62, pct
+            return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {pct:.0f}% PUMP ✓ {l62:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l62, pct
     if prev_bear and curr_bear:
         if cc < l38 and ch < l62:
-            return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {pct:.0f}% ENTER ✓ {l38:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l38, pct
-
+            return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {pct:.0f}% DUMP ✓ {l38:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l38, pct
     return None, f"No breakout {pct:.0f}% H:{pct_high:.0f}% L:{pct_low:.0f}%", 0, pct
 
 def can_flip(sym, new_side, close_pct):
@@ -140,17 +131,17 @@ def can_flip(sym, new_side, close_pct):
     has_sell = active_sell_key in ACTIVE
     if has_buy and new_side == "SELL":
         if close_pct > 25:
-            tg(f"⛔ <b>{sym} COUNTER-TREND BLOCKED</b>\nACTIVE BUY >62% exists\nNew SELL {close_pct:.0f}% (need <25% to flip)")
+            tg(f"⛔ <b>{sym} HOLD</b>\nACTIVE BUY >62% exists\nNew SELL {close_pct:.0f}% (need <25% to REVERSAL)")
             return False
         else:
-            tg(f"🔄 <b>{sym} FLIP ALLOWED</b> BUY->{new_side} {close_pct:.0f}% <25% super strong")
+            tg(f"🔄 <b>{sym} REVERSAL</b> BUY->SELL {close_pct:.0f}% <25% DUMP")
             del ACTIVE[active_buy_key]; save_active(); return True
     if has_sell and new_side == "BUY":
         if close_pct < 75:
-            tg(f"⛔ <b>{sym} COUNTER-TREND BLOCKED</b>\nACTIVE SELL <38% exists\nNew BUY {close_pct:.0f}% (need >75% to flip)")
+            tg(f"⛔ <b>{sym} HOLD</b>\nACTIVE SELL <38% exists\nNew BUY {close_pct:.0f}% (need >75% to REVERSAL)")
             return False
         else:
-            tg(f"🔄 <b>{sym} FLIP ALLOWED</b> SELL->{new_side} {close_pct:.0f}% >75%")
+            tg(f"🔄 <b>{sym} REVERSAL</b> SELL->BUY {close_pct:.0f}% >75% PUMP")
             del ACTIVE[active_sell_key]; save_active(); return True
     return True
 
@@ -269,7 +260,6 @@ def full_scan(s,p):
     if not ok:
         print(f"⛔ DAILY LOSS LIMIT HIT {loss:.1f}R >= {DAILY_MAX_LOSS_R}R - STOP TRADING TODAY", flush=True)
         return
-
     d5=kl(p,"Min5"); d15=kl(p,"Min15"); d60=kl(p,"Min60")
     if not d5 or not d15: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
@@ -283,7 +273,7 @@ def full_scan(s,p):
         if res and "UP" in res and not fbs_up: fbs_up=res; fbs_msg_up=f"{msg} ({tf_name})"; top_up=top; pct_up=pct
         if res and "DOWN" in res and not fbs_down: fbs_down=res; fbs_msg_down=f"{msg} ({tf_name})"; top_down=top; pct_down=pct
         if "WEAK" in msg:
-            print(f"{s} {tf_name} {msg}", flush=True)
+            print(f"{s} {tf_name} {msg} -> HOLD", flush=True)
     if not fbs_up and not fbs_down:
         has_weak = False
         for tf_data in [d5,d15]:
@@ -291,13 +281,9 @@ def full_scan(s,p):
             if "WEAK" in msg: has_weak=True
         if not has_weak:
             _,msg,_,_ = fbs_62_first(d5["h"], d5["l"], d5["c"], d5["o"])
-            print(f"{s} SNIPER:0 - {msg}", flush=True)
+            print(f"{s} HOLD - {msg}", flush=True)
         return
     vp=volume_pressure(o,h,l,c,v)
-    # === REMOVED VOL 0.4x BLOCK FOR PURE FBS - GRASS PUMP FIX ===
-    # if vp["vol_x"] < 0.4:
-    # print(f"{s} SNIPER:0 VOL KILL {vp['vol_x']:.2f}x <0.4x WEAK - SKIP", flush=True)
-    # return
     buy_v, sell_v = volume_delta(o,c,v,10)
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
@@ -319,11 +305,11 @@ def full_scan(s,p):
             last_top, last_time = LAST_TOP[last_top_key]
             same_liq = abs(top_level - last_top) / (last_top or 1) < 0.005
             if same_liq and (time.time() - last_time) < COOLDOWN_SAME_LIQ:
-                print(f"{s} {side} SAME LIQ SKIP {int((COOLDOWN_SAME_LIQ-(time.time()-last_time))//60)}m Top:{top_level:.4f}", flush=True)
+                print(f"{s} {side} SAME LIQ HOLD {int((COOLDOWN_SAME_LIQ-(time.time()-last_time))//60)}m Top:{top_level:.4f}", flush=True)
                 continue
         if key in ACTIVE:
             age = int((time.time() - ACTIVE[key].get("t",0))//60)
-            print(f"{s} {side} ACTIVE SKIP {age}m", flush=True)
+            print(f"{s} {side} TREND CONTINUING HOLD {age}m", flush=True)
             continue
         prev=COOLDOWN["signals"].get(key,{})
         now=time.time(); last_t=prev.get("t",0)
@@ -338,38 +324,25 @@ def full_scan(s,p):
                 COOLDOWN["signals"][key]["t"]=now - cd_need + 300
                 save()
                 continue
-            print(f"{s} {side} FILE CD SKIP {int((cd_need-(now-last_t))//60)}m", flush=True)
+            print(f"{s} {side} COOLDOWN HOLD {int((cd_need-(now-last_t))//60)}m", flush=True)
             continue
-        # === REMOVED PRESSURE 60% BLOCK FOR PURE FBS ===
-        # if is_buy and vp["buy_pct"] < 60:
-        # print(f"{s} BUY PRESSURE LOW {vp['buy_pct']:.0f}%", flush=True)
-        # continue
-        # if not is_buy and vp["sell_pct"] < 60:
-        # print(f"{s} SELL PRESSURE LOW {vp['sell_pct']:.0f}%", flush=True)
-        # continue
-        if is_buy and pat in ["double_top","triple_top"]: continue
-        if not is_buy and pat in ["double_bottom","triple_bottom"]: continue
         ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
         if not ob: ob = (min(l[-15:]), max(h[-15:]))
         entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5, d15, d60)
-        # === REMOVED RR 2.0 BLOCK FOR PURE FBS - GRASS PUMP FIX ===
-        # if rr2 < 2.0:
-        # print(f"{s} {side} RR LOW {rr2:.1f} <2.0 SKIP", flush=True)
-        # continue
 
         mode_tag = "📄 PAPER" if PAPER_MODE else "💰 REAL"
         COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal","session":session_name,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}
         save()
         LAST_TOP[f"{s}_{side}"] = (top_level, now)
-        if not PAPER_MODE:
-            ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
-            save_active()
+        ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
+        save_active()
         STATS["sniper"]+=1
         emoji = "🟢" if is_buy else "🔴"
         phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
-        tg(f"{emoji} <b>{s} {side}</b> {session_emoji} {session_name} {mode_tag}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
+        trend_type = "PUMP" if is_buy else "DUMP"
+        tg(f"{emoji} <b>{s} {side} {trend_type}</b> {session_emoji} {session_name} {mode_tag}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
 
-print("=== BOT V28.9.4 PURE FBS - NO VOL/PRESSURE/RR BLOCK - CLAMPED 0-100% ===", flush=True)
+print("=== BOT V28.9.5 PURE FBS ANTI-SPAM - PUMP/DUMP + TREND/HOLD/REVERSAL ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
