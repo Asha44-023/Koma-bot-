@@ -1,4 +1,4 @@
-# V28.9.5 PURE FBS + ANTI-SPAM FIX + TREND/HOLD/REVERSAL
+# V28.9.7 SIMPLE PUMP/DUMP - DAILY WICK TP + NO DOUBLE PRINT
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -35,21 +35,13 @@ def get_daily_loss():
         return data
     except: return {"date": str(datetime.now().date()), "loss_r": 0.0}
 
-def add_daily_loss(r_loss):
-    data = get_daily_loss()
-    data["loss_r"] += r_loss
-    data["date"] = str(datetime.now().date())
-    open(DAILY_LOSS_FILE,"w").write(json.dumps(data))
-    return data["loss_r"]
-
 def check_daily_limit():
     data = get_daily_loss()
     if data["loss_r"] >= DAILY_MAX_LOSS_R:
         return False, data["loss_r"]
     return True, data["loss_r"]
 
-STATS={"touched":0,"sniper":0,"xxx":0}
-WHALE_TRACKER={}
+STATS={"sniper":0}
 LAST_TOP = {}
 
 def tg(msg):
@@ -60,10 +52,9 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 
-COOLDOWN_NORMAL=120*60 # 2h anti-spam
+COOLDOWN_NORMAL=120*60
 COOLDOWN_AFTER_SL=90*60
-COOLDOWN_WHALE_FLASH=10*60
-COOLDOWN_SAME_LIQ=60*60 # 1h same liq block
+COOLDOWN_SAME_LIQ=60*60
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
@@ -94,55 +85,49 @@ def fbs_62_first(h,l,c,o):
     if prev_range==0: return None, "no range", 0, 50
     pc, po = c[-2], o[-2]
     cc, co, ch, cl = c[-1], o[-1], h[-1], l[-1]
-    l75 = prev_low + prev_range*0.75
     l62 = prev_low + prev_range*0.62
     l38 = prev_low + prev_range*0.38
     l25 = prev_low + prev_range*0.25
+    l75 = prev_low + prev_range*0.75
     def clamp_pct(price):
         raw = (price - prev_low)/prev_range*100 if prev_range else 50
         return max(0.0, min(100.0, raw))
     pct = clamp_pct(cc)
-    pct_high = clamp_pct(ch)
-    pct_low = clamp_pct(cl)
     prev_bull = pc > po
     prev_bear = pc < po
     curr_bull = cc > co
     curr_bear = cc < co
     if prev_bull and curr_bear:
         if l25 < cc < l75:
-            return None, f"BULLISH WEAK TOP-LEFT {pct:.0f}% <75% HOLD X", 0, pct
+            return None, f"HOLD WEAK TOP-LEFT {pct:.0f}%", 0, pct
     if prev_bear and curr_bull:
         if l25 < cc < l75:
-            return None, f"BEARISH WEAK BTM-LEFT {pct:.0f}% >25% HOLD X", 0, pct
+            return None, f"HOLD WEAK BTM-LEFT {pct:.0f}%", 0, pct
     if prev_bull and curr_bull:
         if cc > l62 and cl > l38:
-            return "BOS_UP_STRONG", f"STRONG BUY Top-Right >62% {pct:.0f}% PUMP ✓ {l62:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l62, pct
+            return "BOS_UP_STRONG", f"PUMP >62% {pct:.0f}%", l62, pct
     if prev_bear and curr_bear:
         if cc < l38 and ch < l62:
-            return "BOS_DOWN_STRONG", f"STRONG SELL Btm-Right <38% {pct:.0f}% DUMP ✓ {l38:.4f} ({pct_low:.0f}-{pct_high:.0f}%)", l38, pct
-    return None, f"No breakout {pct:.0f}% H:{pct_high:.0f}% L:{pct_low:.0f}%", 0, pct
+            return "BOS_DOWN_STRONG", f"DUMP <38% {pct:.0f}%", l38, pct
+    return None, f"HOLD {pct:.0f}%", 0, pct
 
 def can_flip(sym, new_side, close_pct):
-    if sym not in [k.split('_')[0] for k in ACTIVE.keys()]:
-        return True
-    active_buy_key = f"{sym}_BUY"
-    active_sell_key = f"{sym}_SELL"
-    has_buy = active_buy_key in ACTIVE
-    has_sell = active_sell_key in ACTIVE
+    has_buy = f"{sym}_BUY" in ACTIVE
+    has_sell = f"{sym}_SELL" in ACTIVE
     if has_buy and new_side == "SELL":
         if close_pct > 25:
-            tg(f"⛔ <b>{sym} HOLD</b>\nACTIVE BUY >62% exists\nNew SELL {close_pct:.0f}% (need <25% to REVERSAL)")
+            print(f"{sym} HOLD ACTIVE BUY exists, need <25% to REVERSAL", flush=True)
             return False
         else:
-            tg(f"🔄 <b>{sym} REVERSAL</b> BUY->SELL {close_pct:.0f}% <25% DUMP")
-            del ACTIVE[active_buy_key]; save_active(); return True
+            print(f"{sym} REVERSAL BUY->SELL {close_pct:.0f}%", flush=True)
+            del ACTIVE[f"{sym}_BUY"]; save_active(); return True
     if has_sell and new_side == "BUY":
         if close_pct < 75:
-            tg(f"⛔ <b>{sym} HOLD</b>\nACTIVE SELL <38% exists\nNew BUY {close_pct:.0f}% (need >75% to REVERSAL)")
+            print(f"{sym} HOLD ACTIVE SELL exists, need >75% to REVERSAL", flush=True)
             return False
         else:
-            tg(f"🔄 <b>{sym} REVERSAL</b> SELL->BUY {close_pct:.0f}% >75% PUMP")
-            del ACTIVE[active_sell_key]; save_active(); return True
+            print(f"{sym} REVERSAL SELL->BUY {close_pct:.0f}%", flush=True)
+            del ACTIVE[f"{sym}_SELL"]; save_active(); return True
     return True
 
 def pattern(h,l):
@@ -152,20 +137,10 @@ def pattern(h,l):
             tops.append((i,h[i]))
         if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]:
             bots.append((i,l[i]))
-    if len(tops)>=3:
-        if tops[-1][0]-tops[-2][0]>=5 and tops[-2][0]-tops[-3][0]>=5:
-            prices=[tops[-1][1],tops[-2][1],tops[-3][1]]
-            if max(prices)-min(prices)<sum(prices)/3*0.008: return "triple_top"
-    if len(tops)>=2:
-        if tops[-1][0]-tops[-2][0]>=5:
-            if abs(tops[-1][1]-tops[-2][1])/tops[-2][1]<0.008: return "double_top"
-    if len(bots)>=3:
-        if bots[-1][0]-bots[-2][0]>=5 and bots[-2][0]-bots[-3][0]>=5:
-            prices=[bots[-1][1],bots[-2][1],bots[-3][1]]
-            if max(prices)-min(prices)<sum(prices)/3*0.008: return "triple_bottom"
-    if len(bots)>=2:
-        if bots[-1][0]-bots[-2][0]>=5:
-            if abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
+    if len(tops)>=2 and tops[-1][0]-tops[-2][0]>=5:
+        if abs(tops[-1][1]-tops[-2][1])/tops[-2][1]<0.008: return "double_top"
+    if len(bots)>=2 and bots[-1][0]-bots[-2][0]>=5:
+        if abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
     return "none"
 
 def get_last_ob(o,h,l,c,bullish=True,lookback=60):
@@ -182,67 +157,40 @@ def volume_pressure(o,h,l,c,v,n=20):
     for i in range(-n,0): rng=h[i]-l[i] or 1e-9; delta=(c[i]-o[i])/rng*v[i]; bp+=delta if delta>0 else 0; sp+=-delta if delta<0 else 0
     total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
 
-def volume_delta(o,c,v,look=10):
-    buy_v=sum(v[i] for i in range(-look,0) if c[i]>o[i])
-    sell_v=sum(v[i] for i in range(-look,0) if c[i]<o[i])
-    return buy_v, sell_v
-
-def get_wick_levels(h,l,lookback=20):
-    return max(h[-lookback:]), min(l[-lookback:])
-
-def get_liquidity_tps(d5, d15, d60, entry, is_buy):
+def get_daily_levels(perp):
     try:
-        liqs = []
-        for tf in [d5, d15, d60]:
-            if not tf: continue
-            hi = max(tf["h"][-20:]); lo = min(tf["l"][-20:])
-            liqs.append(hi); liqs.append(lo)
-            for i in range(-15,-1):
-                if tf["h"][i] > tf["h"][i-1] * 1.005: liqs.append(tf["h"][i])
-                if tf["l"][i] < tf["l"][i-1] * 0.995: liqs.append(tf["l"][i])
-        liqs = sorted(list(set(liqs)))
-        if is_buy:
-            above = [x for x in liqs if x > entry * 1.002]
-            above = sorted(above)
-            if len(above) >= 2: return above[0], above[1], above[0]*1.02
-            elif len(above) == 1: return above[0], above[0]*1.015, above[0]*1.03
-        else:
-            below = [x for x in liqs if x < entry * 0.998]
-            below = sorted(below, reverse=True)
-            if len(below) >= 2: return below[0], below[1], below[0]*0.98
-            elif len(below) == 1: return below[0], below[0]*0.985, below[0]*0.97
-    except: pass
-    return None, None, None
+        d1 = kl(perp, "Day1")
+        if not d1 or len(d1["h"]) < 2: return None, None
+        return d1["h"][-2], d1["l"][-2]
+    except: return None, None
 
-def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5=None, d15=None, d60=None):
+def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, perp=None):
     ob_low, ob_high = ob
-    ob_50 = (ob_low + ob_high)/2
-    recent_high, recent_low = get_wick_levels(h,l,20)
+    entry = (ob_low + ob_high)/2
+    daily_high, daily_low = get_daily_levels(perp) if perp else (None, None)
     if is_buy:
-        entry = ob_50; sl = min(min(l[-7:]), ob_low) * 0.997
-        tp1_liq, tp2_liq, tp3_liq = get_liquidity_tps(d5, d15, d60, entry, True)
-        tp1 = tp1_liq if tp1_liq else recent_high * 0.995
-        tp2 = tp2_liq if tp2_liq else recent_high * 1.01
-        tp3 = tp3_liq if tp3_liq else tp2 * 1.02
+        sl = min(min(l[-7:]), ob_low) * 0.997
+        if daily_high:
+            tp1 = daily_high * 1.003
+            tp2 = daily_high * 1.012
+        else:
+            tp1 = max(h[-20:]) * 1.008
+            tp2 = max(h[-20:]) * 1.018
+        tp1 = max(tp1, entry*1.006)
+        tp2 = max(tp2, tp1*1.006)
     else:
-        entry = ob_50; sl = max(max(h[-7:]), ob_high) * 1.003
-        tp1_liq, tp2_liq, tp3_liq = get_liquidity_tps(d5, d15, d60, entry, False)
-        tp1 = tp1_liq if tp1_liq else recent_low * 1.005
-        tp2 = tp2_liq if tp2_liq else recent_low * 0.99
-        tp3 = tp3_liq if tp3_liq else tp2 * 0.98
-    risk = abs(entry - sl); rr2 = abs(tp2 - entry)/(risk or 1e-9)
-    return entry, sl, tp1, tp2, tp3, rr2
-
-def get_volume_phase(p, vol_x, price):
-    now=time.time()
-    if vol_x >= 1.7:
-        if p not in WHALE_TRACKER or "exit_time" in WHALE_TRACKER[p]:
-            WHALE_TRACKER[p] = {"enter_time": now}
-            return "WHALE_FLASH_ENTER", 0
-        if now - WHALE_TRACKER[p]["enter_time"] <= 15*60:
-            return "WHALE_FLASH_ACTIVE", now - WHALE_TRACKER[p]["enter_time"]
-    if vol_x >= 1.0: return "BUILDING", 0
-    return "WATCH", 0
+        sl = max(max(h[-7:]), ob_high) * 1.003
+        if daily_low:
+            tp1 = daily_low * 0.997
+            tp2 = daily_low * 0.988
+        else:
+            tp1 = min(l[-20:]) * 0.992
+            tp2 = min(l[-20:]) * 0.982
+        tp1 = min(tp1, entry*0.994)
+        tp2 = min(tp2, tp1*0.994)
+    risk = abs(entry - sl)
+    rr2 = abs(tp2 - entry)/(risk or 1e-9)
+    return entry, sl, tp1, tp2, daily_high if is_buy else daily_low, rr2
 
 def detect_bos(h,l,c):
     highs=[]; lows=[]; look=3; n=len(h)
@@ -258,100 +206,96 @@ def detect_bos(h,l,c):
 def full_scan(s,p):
     ok, loss = check_daily_limit()
     if not ok:
-        print(f"⛔ DAILY LOSS LIMIT HIT {loss:.1f}R >= {DAILY_MAX_LOSS_R}R - STOP TRADING TODAY", flush=True)
+        print(f"⛔ DAILY LOSS {loss:.1f}R STOP", flush=True)
         return
-    d5=kl(p,"Min5"); d15=kl(p,"Min15"); d60=kl(p,"Min60")
+    d5=kl(p,"Min5"); d15=kl(p,"Min15")
     if not d5 or not d15: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
     if len(c)<30: return
-    price=c[-1]
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
-    fbs_up=None; fbs_down=None; fbs_msg_up=""; fbs_msg_down=""; top_up=0; top_down=0; pct_up=50; pct_down=50
+
+    # SINGLE SCAN - pick best TF, no double print
+    fbs_res = None; fbs_msg = ""; top_level = 0; pct = 50; tf_used = ""
     for tf_data, tf_name in [(d5,"5m"),(d15,"15m")]:
-        res,msg,top,pct = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
-        if res and "UP" in res and not fbs_up: fbs_up=res; fbs_msg_up=f"{msg} ({tf_name})"; top_up=top; pct_up=pct
-        if res and "DOWN" in res and not fbs_down: fbs_down=res; fbs_msg_down=f"{msg} ({tf_name})"; top_down=top; pct_down=pct
-        if "WEAK" in msg:
-            print(f"{s} {tf_name} {msg} -> HOLD", flush=True)
-    if not fbs_up and not fbs_down:
-        has_weak = False
-        for tf_data in [d5,d15]:
-            _,msg,_,_ = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
-            if "WEAK" in msg: has_weak=True
-        if not has_weak:
-            _,msg,_,_ = fbs_62_first(d5["h"], d5["l"], d5["c"], d5["o"])
-            print(f"{s} HOLD - {msg}", flush=True)
+        res,msg,top,p = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
+        if res and not fbs_res:
+            fbs_res=res; fbs_msg=msg; top_level=top; pct=p; tf_used=tf_name
+            break
+    if not fbs_res:
+        _,msg,_,pct_tmp = fbs_62_first(d5["h"], d5["l"], d5["c"], d5["o"])
+        print(f"{s} HOLD {msg}", flush=True)
         return
+
     vp=volume_pressure(o,h,l,c,v)
-    buy_v, sell_v = volume_delta(o,c,v,10)
     bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
-    if pat=="none": pat=pattern(d15["h"],d15["l"])
-    phase, _ = get_volume_phase(p, vp["vol_x"], price)
-    is_whale = "WHALE" in phase
-    for is_buy in [True, False]:
-        fbs_res = fbs_up if is_buy else fbs_down
-        fbs_msg = fbs_msg_up if is_buy else fbs_msg_down
-        top_level = top_up if is_buy else top_down
-        close_pct = pct_up if is_buy else pct_down
-        if not fbs_res: continue
-        side="BUY" if is_buy else "SELL"
-        key=f"{s}_{side}"
-        if not can_flip(s, side, close_pct):
-            continue
-        last_top_key = f"{s}_{side}"
-        if last_top_key in LAST_TOP:
-            last_top, last_time = LAST_TOP[last_top_key]
-            same_liq = abs(top_level - last_top) / (last_top or 1) < 0.005
-            if same_liq and (time.time() - last_time) < COOLDOWN_SAME_LIQ:
-                print(f"{s} {side} SAME LIQ HOLD {int((COOLDOWN_SAME_LIQ-(time.time()-last_time))//60)}m Top:{top_level:.4f}", flush=True)
-                continue
-        if key in ACTIVE:
-            age = int((time.time() - ACTIVE[key].get("t",0))//60)
-            print(f"{s} {side} TREND CONTINUING HOLD {age}m", flush=True)
-            continue
-        prev=COOLDOWN["signals"].get(key,{})
-        now=time.time(); last_t=prev.get("t",0)
-        cd_need=COOLDOWN_WHALE_FLASH if is_whale else COOLDOWN_NORMAL
-        if prev.get("result")=="SL": cd_need=COOLDOWN_AFTER_SL
-        if now-last_t < cd_need:
-            if prev.get("session") == "ASIAN" and session_name!= "ASIAN" and prev.get("dir")==is_buy:
-                last_entry = prev.get("entry", price)
-                last_tp1 = prev.get("tp1", 0)
-                last_tp2 = prev.get("tp2", 0)
-                tg(f"🟡 <b>{s} {side} TREND CONTINUING</b> {prev.get('session','')}->{session_name}\nLast {side} {top_level:.4f} still >62% holding\nEntry {last_entry:.6f} tapping OB\nTP1 {last_tp1:.6f} TP2 {last_tp2:.6f} | {pat} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%")
-                COOLDOWN["signals"][key]["t"]=now - cd_need + 300
-                save()
-                continue
-            print(f"{s} {side} COOLDOWN HOLD {int((cd_need-(now-last_t))//60)}m", flush=True)
-            continue
-        ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
-        if not ob: ob = (min(l[-15:]), max(h[-15:]))
-        entry, sl, tp1, tp2, tp3, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, d5, d15, d60)
 
-        mode_tag = "📄 PAPER" if PAPER_MODE else "💰 REAL"
-        COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"result":"normal","session":session_name,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}
-        save()
-        LAST_TOP[f"{s}_{side}"] = (top_level, now)
-        ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"side_key":key}
-        save_active()
-        STATS["sniper"]+=1
-        emoji = "🟢" if is_buy else "🔴"
-        phase_txt = f"⚡ WHALE {vp['vol_x']:.1f}x" if is_whale else f"🏗️ BUILD {vp['vol_x']:.1f}x"
-        trend_type = "PUMP" if is_buy else "DUMP"
-        tg(f"{emoji} <b>{s} {side} {trend_type}</b> {session_emoji} {session_name} {mode_tag}\n{phase_txt} {fbs_res} RR:{rr2:.1f}R\n{fbs_msg}\nEntry: {entry:.6f} (50% OB)\nSL: {sl:.6f}\nTP1: {tp1:.6f} (liq tap)\nTP2: {tp2:.6f} (liq sweep)\n{pat} {bos or ''} | {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}% | Δ B:{buy_v:.0f} S:{sell_v:.0f}")
+    is_buy = "UP" in fbs_res
+    side = "BUY" if is_buy else "SELL"
+    key=f"{s}_{side}"
 
-print("=== BOT V28.9.5 PURE FBS ANTI-SPAM - PUMP/DUMP + TREND/HOLD/REVERSAL ===", flush=True)
+    if not can_flip(s, side, pct): return
+
+    if f"{s}_{side}" in LAST_TOP:
+        last_top, last_time = LAST_TOP[f"{s}_{side}"]
+        same_liq = abs(top_level - last_top) / (last_top or 1) < 0.005
+        if same_liq and (time.time() - last_time) < COOLDOWN_SAME_LIQ:
+            print(f"{s} {side} SAME LIQ HOLD {int((COOLDOWN_SAME_LIQ-(time.time()-last_time))//60)}m", flush=True)
+            return
+
+    if key in ACTIVE:
+        print(f"{s} {side} TREND CONTINUING HOLD", flush=True)
+        return
+
+    prev=COOLDOWN["signals"].get(key,{}); now=time.time()
+    if now - prev.get("t",0) < COOLDOWN_NORMAL:
+        print(f"{s} {side} COOLDOWN HOLD {int((COOLDOWN_NORMAL-(now-prev.get('t',0)))//60)}m", flush=True)
+        return
+
+    # FALSE PUMP FILTER
+    if is_buy and pat in ["double_top"]:
+        print(f"{s} BUY FALSE PUMP BLOCK {pat} HOLD", flush=True)
+        return
+    if not is_buy and pat in ["double_bottom"]:
+        print(f"{s} SELL FALSE DUMP BLOCK {pat} HOLD", flush=True)
+        return
+
+    if is_buy and vp["buy_pct"] < 55:
+        print(f"{s} BUY PRESSURE LOW {vp['buy_pct']:.0f}% HOLD", flush=True)
+        return
+    if not is_buy and vp["sell_pct"] < 55:
+        print(f"{s} SELL PRESSURE LOW {vp['sell_pct']:.0f}% HOLD", flush=True)
+        return
+
+    ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
+    if not ob: ob = (min(l[-15:]), max(h[-15:]))
+
+    entry, sl, tp1, tp2, daily_level, rr2 = get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, perp=p)
+
+    COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}
+    save()
+    LAST_TOP[f"{s}_{side}"] = (top_level, now)
+    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl}
+    save_active()
+    STATS["sniper"]+=1
+
+    mode_tag = "PAPER" if PAPER_MODE else "REAL"
+    daily_str = f"PrevHigh {daily_level:.6f}" if is_buy and daily_level else f"PrevLow {daily_level:.6f}" if daily_level else f"{tf_used}"
+    if is_buy:
+        tg(f"🟢 <b>BUY {s}</b> {session_emoji} {mode_tag} | {fbs_msg} ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} ({daily_str} +0.3%)\nTP2 {tp2:.6f} (+1.2%) | RR {rr2:.1f}R")
+    else:
+        tg(f"🔴 <b>SELL {s}</b> {session_emoji} {mode_tag} | {fbs_msg} ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} ({daily_str} -0.3%)\nTP2 {tp2:.6f} (-1.2%) | RR {rr2:.1f}R")
+
+print("=== BOT V28.9.7 SIMPLE DAILY WICK TP - NO DOUBLE PRINT ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(e, flush=True)
-    print(f"STATS SNIPER:{STATS['sniper']} ACTIVE:{list(ACTIVE.keys())} PAPER:{PAPER_MODE}", flush=True)
+    print(f"ACTIVE:{list(ACTIVE.keys())}", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
             try: full_scan(s,p)
             except Exception as e: print(e, flush=True)
-        print(f"Sleep 60s... ACTIVE:{list(ACTIVE.keys())} PAPER:{PAPER_MODE} DailyLoss:{get_daily_loss()['loss_r']:.1f}R", flush=True)
         time.sleep(60)
