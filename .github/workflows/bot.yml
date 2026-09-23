@@ -1,4 +1,4 @@
-name: grass-bot-v30-5-market
+name: grass-bot-v31-1-market
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -14,11 +14,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: cooldown-v30-5-market-${{ github.run_id }}
+          key: cooldown-v31-1-market
           restore-keys: |
-            cooldown-v30-5-market-
-            cooldown-v30-3-
-            cooldown-v28-9-7-simple-
+            cooldown-v31-1-market
 
       - run: pip install requests
 
@@ -27,19 +25,18 @@ jobs:
           python3 -c "
           import json,time,os
           now=time.time()
-          files = [('cooldown.json', 43200), ('active.json', 7200)]
-          for fname, expire in files:
+          # FORCE CLEAR OLD CACHE ONCE - delete if signals older than 30min
+          for fname, expire in [('cooldown.json', 1800), ('active.json', 7200)]:
               if not os.path.exists(fname):
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
                   continue
               try:
                   d=json.load(open(fname))
                   if 'cooldown' in fname:
-                      c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire and v.get('t',0) <= now}
+                      c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps({'signals':c}))
                       print(f'{fname} kept {len(c)}')
                   else:
-                      # keep only last 2h active, allow new HOLD tracking fields
                       d={k:v for k,v in d.items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps(d))
                       print(f'{fname} kept {list(d.keys())}')
