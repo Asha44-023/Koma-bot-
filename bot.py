@@ -1,4 +1,4 @@
-# V28.9.7 SIMPLE PUMP/DUMP - DAILY WICK TP + NO DOUBLE PRINT
+# V28.9.8 SIMPLE - DAILY WICK TP FIXED
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -158,11 +158,19 @@ def volume_pressure(o,h,l,c,v,n=20):
     total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
 
 def get_daily_levels(perp):
+    # TRY Day1 first
     try:
         d1 = kl(perp, "Day1")
-        if not d1 or len(d1["h"]) < 2: return None, None
-        return d1["h"][-2], d1["l"][-2]
-    except: return None, None
+        if d1 and len(d1["h"]) >= 2 and d1["h"][-2] > 0:
+            return d1["h"][-2], d1["l"][-2]
+    except: pass
+    # FALLBACK 60m 24h
+    try:
+        h1 = kl(perp, "Min60")
+        if h1 and len(h1["h"]) >= 24:
+            return max(h1["h"][-24:]), min(h1["l"][-24:])
+    except: pass
+    return None, None
 
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, perp=None):
     ob_low, ob_high = ob
@@ -178,6 +186,7 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, perp=None):
             tp2 = max(h[-20:]) * 1.018
         tp1 = max(tp1, entry*1.006)
         tp2 = max(tp2, tp1*1.006)
+        daily_level = daily_high
     else:
         sl = max(max(h[-7:]), ob_high) * 1.003
         if daily_low:
@@ -188,9 +197,10 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy, perp=None):
             tp2 = min(l[-20:]) * 0.982
         tp1 = min(tp1, entry*0.994)
         tp2 = min(tp2, tp1*0.994)
+        daily_level = daily_low
     risk = abs(entry - sl)
     rr2 = abs(tp2 - entry)/(risk or 1e-9)
-    return entry, sl, tp1, tp2, daily_high if is_buy else daily_low, rr2
+    return entry, sl, tp1, tp2, daily_level, rr2
 
 def detect_bos(h,l,c):
     highs=[]; lows=[]; look=3; n=len(h)
@@ -215,12 +225,11 @@ def full_scan(s,p):
     session_name,session_emoji=get_session()
     if session_name=="OFF": return
 
-    # SINGLE SCAN - pick best TF, no double print
     fbs_res = None; fbs_msg = ""; top_level = 0; pct = 50; tf_used = ""
     for tf_data, tf_name in [(d5,"5m"),(d15,"15m")]:
-        res,msg,top,p = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
+        res,msg,top,pc = fbs_62_first(tf_data["h"], tf_data["l"], tf_data["c"], tf_data["o"])
         if res and not fbs_res:
-            fbs_res=res; fbs_msg=msg; top_level=top; pct=p; tf_used=tf_name
+            fbs_res=res; fbs_msg=msg; top_level=top; pct=pc; tf_used=tf_name
             break
     if not fbs_res:
         _,msg,_,pct_tmp = fbs_62_first(d5["h"], d5["l"], d5["c"], d5["o"])
@@ -228,7 +237,6 @@ def full_scan(s,p):
         return
 
     vp=volume_pressure(o,h,l,c,v)
-    bos=detect_bos(d5["h"],d5["l"],d5["c"]) or detect_bos(d15["h"],d15["l"],d15["c"])
     pat=pattern(d5["h"],d5["l"])
 
     is_buy = "UP" in fbs_res
@@ -253,7 +261,6 @@ def full_scan(s,p):
         print(f"{s} {side} COOLDOWN HOLD {int((COOLDOWN_NORMAL-(now-prev.get('t',0)))//60)}m", flush=True)
         return
 
-    # FALSE PUMP FILTER
     if is_buy and pat in ["double_top"]:
         print(f"{s} BUY FALSE PUMP BLOCK {pat} HOLD", flush=True)
         return
@@ -281,13 +288,17 @@ def full_scan(s,p):
     STATS["sniper"]+=1
 
     mode_tag = "PAPER" if PAPER_MODE else "REAL"
-    daily_str = f"PrevHigh {daily_level:.6f}" if is_buy and daily_level else f"PrevLow {daily_level:.6f}" if daily_level else f"{tf_used}"
+    if daily_level:
+        daily_str = f"Daily {daily_level:.4f}"
+    else:
+        daily_str = f"{tf_used} High"
+
     if is_buy:
         tg(f"🟢 <b>BUY {s}</b> {session_emoji} {mode_tag} | {fbs_msg} ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} ({daily_str} +0.3%)\nTP2 {tp2:.6f} (+1.2%) | RR {rr2:.1f}R")
     else:
         tg(f"🔴 <b>SELL {s}</b> {session_emoji} {mode_tag} | {fbs_msg} ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} ({daily_str} -0.3%)\nTP2 {tp2:.6f} (-1.2%) | RR {rr2:.1f}R")
 
-print("=== BOT V28.9.7 SIMPLE DAILY WICK TP - NO DOUBLE PRINT ===", flush=True)
+print("=== BOT V28.9.8 DAILY WICK FIXED ===", flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
