@@ -1,4 +1,4 @@
-name: grass-bot-v28-8-dual
+name: grass-bot-v28-9-7-simple
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -14,49 +14,50 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: cooldown-v28-8-dual-${{ github.run_id }}
+            daily_loss.json
+          key: cooldown-v28-9-7-simple-${{ github.run_id }}
           restore-keys: |
+            cooldown-v28-9-7-simple-
             cooldown-v28-8-dual-
-            cooldown-v28-7-persistent
 
       - run: pip install requests
 
-      - name: Clean expired + migrate to DUAL SIDE
+      - name: Clean expired + migrate
         run: |
           python3 -c "
           import json,time,os
           now=time.time()
-          # cooldown - keep 12h
-          if not os.path.exists('cooldown.json'):
-            open('cooldown.json','w').write(json.dumps({'signals':{}}))
-          else:
-            try:
-              d=json.load(open('cooldown.json'))
-              c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < 43200 and v.get('t',0) <= now}
-              open('cooldown.json','w').write(json.dumps({'signals':c}))
-              print(f'Cooldown kept {len(c)}')
-            except: open('cooldown.json','w').write(json.dumps({'signals':{}}))
-          
-          # active - DUAL SIDE keys have _, expire 2h, wipe old format
-          if not os.path.exists('active.json'):
-            open('active.json','w').write(json.dumps({}))
-          else:
-            try:
-              a=json.load(open('active.json'))
-              # if old format (no _), wipe it for V28.8 migration
-              if a and '_' not in list(a.keys())[0]:
-                print('Old ACTIVE format detected - wiping for DUAL SIDE migration')
-                a={}
-              else:
-                a={k:v for k,v in a.items() if now - v.get('t',0) < 7200}
-              open('active.json','w').write(json.dumps(a))
-              print(f'Active kept {list(a.keys())}')
-            except Exception as e:
-              print(e)
-              open('active.json','w').write(json.dumps({}))
+          for fname, expire in [('cooldown.json', 43200, 'signals'), ('active.json', 7200, None), ('daily_loss.json', 86400, None)]:
+              if not os.path.exists(fname):
+                  if 'cooldown' in fname:
+                      open(fname,'w').write(json.dumps({'signals':{}}))
+                  else:
+                      open(fname,'w').write(json.dumps({}))
+                  continue
+              try:
+                  d=json.load(open(fname))
+                  if 'cooldown' in fname:
+                      c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire and v.get('t',0) <= now}
+                      open(fname,'w').write(json.dumps({'signals':c}))
+                      print(f'{fname} kept {len(c)}')
+                  elif 'active' in fname:
+                      if d and '_' not in list(d.keys())[0]:
+                          print('Old ACTIVE format wipe')
+                          d={}
+                      else:
+                          d={k:v for k,v in d.items() if now - v.get('t',0) < expire}
+                      open(fname,'w').write(json.dumps(d))
+                      print(f'{fname} kept {list(d.keys())}')
+              except Exception as e:
+                  print(f'{fname} error {e} - reset')
+                  if 'cooldown' in fname:
+                      open(fname,'w').write(json.dumps({'signals':{}}))
+                  else:
+                      open(fname,'w').write(json.dumps({}))
           "
           cat cooldown.json
           cat active.json
+          cat daily_loss.json 2>/dev/null || echo "no daily loss yet"
 
       - env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -67,3 +68,4 @@ jobs:
           echo "=== FINAL ==="
           cat cooldown.json
           cat active.json
+          cat daily_loss.json 2>/dev/null || echo "no daily file"
