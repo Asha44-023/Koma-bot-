@@ -1,11 +1,11 @@
-# BOT V31 - FBS 2-CANDLE CONFIRMATION + % TP/SL + 10% VOLATILE FIX
+# BOT V31.1 - FBS 2-CANDLE + % TP/SL FIXED RR FOR 10% COINS
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","TAOUSDT":"TAO_USDT","SANDUSDT":"SAND_USDT","SENTUSDT":"SENT_USDT","FARTCOINUSDT":"FARTCOIN_USDT","JASMYUSDT":"JASMY_USDT","KOMAUSDT":"KOMA_USDT",}
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
-VOLATILE_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","LABUSDT","VELVETUSDT"] # 10% coins
+VOLATILE_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","LABUSDT","VELVETUSDT"]
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
 COOLDOWN={"signals":{}}; ACTIVE={}
 if os.path.exists(COOLDOWN_FILE):
@@ -27,7 +27,7 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 
-COOLDOWN_NORMAL=120*60; COOLDOWN_SAME_LIQ=60*60
+COOLDOWN_NORMAL=30*60; COOLDOWN_SAME_LIQ=60*60
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
@@ -53,7 +53,6 @@ def kl(sym,interval):
 
 def fbs_image_logic(h,l,c,o):
     if len(c)<3: return None,0,0
-    # Big breakout candle = -2, Confirmation = -1
     ph,pl,po,pc = h[-2],l[-2],o[-2],c[-2]
     ch,cl,co,cc = h[-1],l[-1],o[-1],c[-1]
     prange = ph-pl
@@ -62,36 +61,28 @@ def fbs_image_logic(h,l,c,o):
     p62 = pl + prange*0.62
     p38 = pl + prange*0.38
     p25 = pl + prange*0.25
-
     big_range_pct = (ph-pl)/(pl or 1)*100
     body = abs(pc-po)
     upper_wick = ph - max(pc,po)
     lower_wick = min(pc,po) - pl
-    # Sweep detection
     is_sweep_up = upper_wick > body*1.5
     is_sweep_down = lower_wick > body*1.5
-
-    # BULLISH
-    if pc > po: # big green
+    if pc > po:
         if is_sweep_up:
-            # Wick grab = actually weak bullish, likely reversal to sell
             if cc < p75: return "WEAK_BULL_TRAP", ph, big_range_pct
-        if pc >= p62: # close in top 38%
-            if cc >= p38 and cl >= p25 and cc > co: # holds above 38%, next is green
+        if pc >= p62:
+            if cc >= p38 and cl >= p25 and cc > co:
                 return "BOS_UP_STRONG", ph, big_range_pct
             elif cc < p25 or (cc < co and cc < p38):
-                return "BOS_UP_WEAK", ph, big_range_pct # failed, DO NOT BUY
-
-    # BEARISH
-    if pc < po: # big red
+                return "BOS_UP_WEAK", ph, big_range_pct
+    if pc < po:
         if is_sweep_down:
             if cc > p25: return "WEAK_BEAR_TRAP", pl, big_range_pct
-        if pc <= p38: # close in bottom 38%
-            if cc <= p62 and ch <= p75 and cc < co: # holds below 62%
+        if pc <= p38:
+            if cc <= p62 and ch <= p75 and cc < co:
                 return "BOS_DOWN_STRONG", pl, big_range_pct
             elif cc > p75 or (cc > co and cc > p62):
                 return "BOS_DOWN_WEAK", pl, big_range_pct
-
     return None,0,big_range_pct
 
 def pattern(h,l):
@@ -123,35 +114,22 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,big_range_pct,symbol,perp=None):
     ob_low,ob_high=ob
     is_volatile = symbol in VOLATILE_SYMS or big_range_pct > 2.5
     prange = ob_high-ob_low
-
     if is_buy:
-        # Entry 50-62% retrace for volatile, 38-50% for stable
         entry = ob_low + prange* (0.56 if is_volatile else 0.44)
-        if is_volatile:
-            sl_pct = 0.028
-            tp1_pct, tp2_pct, tp3_pct = 0.03, 0.06, 0.09
-        else:
-            sl_pct = 0.012
-            tp1_pct, tp2_pct, tp3_pct = 0.015, 0.025, 0.04
+        sl_pct = 0.028 if is_volatile else 0.012
+        tp1_pct, tp2_pct, tp3_pct = (0.03,0.06,0.09) if is_volatile else (0.015,0.025,0.04)
         sl = entry * (1 - sl_pct)
-        sl = min(sl, ob_low*0.997) # below OB
         tp1 = entry * (1 + tp1_pct)
         tp2 = entry * (1 + tp2_pct)
         tp3 = entry * (1 + tp3_pct)
     else:
         entry = ob_high - prange* (0.56 if is_volatile else 0.44)
-        if is_volatile:
-            sl_pct = 0.028
-            tp1_pct, tp2_pct, tp3_pct = 0.03, 0.06, 0.09
-        else:
-            sl_pct = 0.012
-            tp1_pct, tp2_pct, tp3_pct = 0.015, 0.025, 0.04
+        sl_pct = 0.028 if is_volatile else 0.012
+        tp1_pct, tp2_pct, tp3_pct = (0.03,0.06,0.09) if is_volatile else (0.015,0.025,0.04)
         sl = entry * (1 + sl_pct)
-        sl = max(sl, ob_high*1.003)
         tp1 = entry * (1 - tp1_pct)
         tp2 = entry * (1 - tp2_pct)
         tp3 = entry * (1 - tp3_pct)
-
     risk=abs(entry-sl)
     rr1=abs(tp1-entry)/(risk or 1e-9); rr2=abs(tp2-entry)/(risk or 1e-9); rr3=abs(tp3-entry)/(risk or 1e-9)
     return entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_volatile
@@ -164,8 +142,6 @@ def full_scan(s,p):
     if get_session()[0]=="OFF": return
     now=time.time()
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
-
-    # HOLD/REVERSAL LOGIC - now uses STRONG only
     if buy_key in ACTIVE:
         fbs_res,_,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "DOWN_STRONG" in fbs_res:
@@ -182,7 +158,6 @@ def full_scan(s,p):
                 ACTIVE[buy_key]["last_hold_profit"]=profit
             ACTIVE[buy_key]["highest"]=c[-1]; save_active()
         return
-
     if sell_key in ACTIVE:
         fbs_res,_,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "UP_STRONG" in fbs_res:
@@ -199,30 +174,22 @@ def full_scan(s,p):
                 ACTIVE[sell_key]["last_hold_profit"]=profit
             ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
-
     fbs_res=None; top_level=0; tf_used=""; big_range_pct=0
     for tf_data,tf_name in [(d5,"5m"),(d15,"15m")]:
         res,top,brp=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
-        # ONLY take STRONG signals
         if res and "STRONG" in res:
             fbs_res=res; top_level=top; tf_used=tf_name; big_range_pct=brp; break
-        # If WEAK found, skip this symbol completely
         if res and "WEAK" in res:
             return
-
     if not fbs_res: return
-
     vp=volume_pressure(o,h,l,c,v); pat=pattern(d5["h"],d5["l"])
     is_buy="UP" in fbs_res; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
-
-    # Daily % filter - skip if already stretched 7%
     try:
         day=kl(p,"Day1")
         if day and len(day["c"])>=2:
             day_pct = (day["c"][-1]-day["c"][-2])/(day["c"][-2] or 1)*100
             if abs(day_pct) > 7.0: return
     except: pass
-
     if f"{s}_{side}" in LAST_TOP:
         last_top,last_time=LAST_TOP[f"{s}_{side}"]
         if abs(top_level-last_top)/(last_top or 1)<0.005 and (now-last_time)<COOLDOWN_SAME_LIQ: return
@@ -232,23 +199,21 @@ def full_scan(s,p):
     if not is_buy and pat=="double_bottom": return
     if is_buy and vp["buy_pct"]<55: return
     if not is_buy and vp["sell_pct"]<55: return
-
     ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
     if not ob: ob=(min(l[-15:]),max(h[-15:]))
     entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,big_range_pct,s,p)
-
-    if rr1 < 1.5 or rr1 > 8.0: return
-    if rr2 < 2.0: return
-
+    min_rr1 = 1.0 if is_vol else 1.2
+    min_rr2 = 1.8 if is_vol else 2.0
+    if rr1 < min_rr1 or rr1 > 8.0: return
+    if rr2 < min_rr2: return
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
     LAST_TOP[f"{s}_{side}"]=(top_level,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
-
     vol_tag = "10% VOL" if is_vol else "4% STABLE"
     if is_buy: tg(f"🟢 <b>BUY {s}</b> | 62% STRONG ({tf_used}) {vol_tag}\nRange {big_range_pct:.2f}% | Entry {entry:.6f} | SL {sl:.6f} ({abs(entry-sl)/entry*100:.1f}%)\nTP1 {tp1:.6f} ({rr1:.1f}R) | TP2 {tp2:.6f} ({rr2:.1f}R) | TP3 {tp3:.6f} ({rr3:.1f}R)")
     else: tg(f"🔴 <b>SELL {s}</b> | 38% STRONG ({tf_used}) {vol_tag}\nRange {big_range_pct:.2f}% | Entry {entry:.6f} | SL {sl:.6f} ({abs(entry-sl)/entry*100:.1f}%)\nTP1 {tp1:.6f} ({rr1:.1f}R) | TP2 {tp2:.6f} ({rr2:.1f}R) | TP3 {tp3:.6f} ({rr3:.1f}R)")
 
-print("=== BOT V31 2-CANDLE FBS + % TP/SL ===",flush=True)
+print("=== BOT V31.1 FIXED RR + % TP/SL ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
