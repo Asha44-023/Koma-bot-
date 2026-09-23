@@ -1,4 +1,4 @@
-name: grass-bot-v28-9-7-simple
+name: grass-bot-v30-5-market
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -14,11 +14,11 @@ jobs:
           path: |
             cooldown.json
             active.json
-            daily_loss.json
-          key: cooldown-v28-9-7-simple-${{ github.run_id }}
+          key: cooldown-v30-5-market-${{ github.run_id }}
           restore-keys: |
+            cooldown-v30-5-market-
+            cooldown-v30-3-
             cooldown-v28-9-7-simple-
-            cooldown-v28-8-dual-
 
       - run: pip install requests
 
@@ -27,13 +27,10 @@ jobs:
           python3 -c "
           import json,time,os
           now=time.time()
-          files = [('cooldown.json', 43200), ('active.json', 7200), ('daily_loss.json', 86400)]
+          files = [('cooldown.json', 43200), ('active.json', 7200)]
           for fname, expire in files:
               if not os.path.exists(fname):
-                  if 'cooldown' in fname:
-                      open(fname,'w').write(json.dumps({'signals':{}}))
-                  else:
-                      open(fname,'w').write(json.dumps({}))
+                  open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
                   continue
               try:
                   d=json.load(open(fname))
@@ -41,24 +38,17 @@ jobs:
                       c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire and v.get('t',0) <= now}
                       open(fname,'w').write(json.dumps({'signals':c}))
                       print(f'{fname} kept {len(c)}')
-                  elif 'active' in fname:
-                      if d and len(d)>0 and '_' not in list(d.keys())[0]:
-                          print('Old ACTIVE format wipe')
-                          d={}
-                      else:
-                          d={k:v for k,v in d.items() if now - v.get('t',0) < expire}
+                  else:
+                      # keep only last 2h active, allow new HOLD tracking fields
+                      d={k:v for k,v in d.items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps(d))
                       print(f'{fname} kept {list(d.keys())}')
               except Exception as e:
                   print(f'{fname} error {e} - reset')
-                  if 'cooldown' in fname:
-                      open(fname,'w').write(json.dumps({'signals':{}}))
-                  else:
-                      open(fname,'w').write(json.dumps({}))
+                  open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
           "
-          cat cooldown.json
-          cat active.json
-          cat daily_loss.json 2>/dev/null || echo "no daily loss yet"
+          echo "=== COOLDOWN ==="; cat cooldown.json
+          echo "=== ACTIVE ==="; cat active.json
 
       - env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -69,4 +59,3 @@ jobs:
           echo "=== FINAL ==="
           cat cooldown.json
           cat active.json
-          cat daily_loss.json 2>/dev/null || echo "no daily file"
