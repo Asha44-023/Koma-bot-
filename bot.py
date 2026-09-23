@@ -1,22 +1,14 @@
-# V30 FBS IMAGE LOGIC - PURE
+# V30.5 MARKET DRIVEN HOLD/REVERSAL
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
-DAILY_MAX_LOSS_R = 2.0
-DAILY_LOSS_FILE = "daily_loss.json"
 
 SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","TAOUSDT":"TAO_USDT","SANDUSDT":"SAND_USDT","SENTUSDT":"SENT_USDT","FARTCOINUSDT":"FARTCOIN_USDT","JASMYUSDT":"JASMY_USDT","KOMAUSDT":"KOMA_USDT",}
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
 COOLDOWN={"signals":{}}; ACTIVE={}
 if os.path.exists(COOLDOWN_FILE):
-    try:
-        d=json.load(open(COOLDOWN_FILE))
-        if d.get("signals"):
-            k=list(d["signals"].keys())[0]
-            if "_" not in k: d={"signals":{}}
-        COOLDOWN=d
+    try: COOLDOWN=json.load(open(COOLDOWN_FILE))
     except: COOLDOWN={"signals":{}}
 if os.path.exists(ACTIVE_FILE):
     try: ACTIVE=json.load(open(ACTIVE_FILE))
@@ -24,19 +16,6 @@ if os.path.exists(ACTIVE_FILE):
 
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
-
-def get_daily_loss():
-    if not os.path.exists(DAILY_LOSS_FILE): return {"date": str(datetime.now().date()), "loss_r": 0.0}
-    try:
-        data=json.load(open(DAILY_LOSS_FILE))
-        if data.get("date")!=str(datetime.now().date()): return {"date": str(datetime.now().date()), "loss_r": 0.0}
-        return data
-    except: return {"date": str(datetime.now().date()), "loss_r": 0.0}
-
-def check_daily_limit():
-    data=get_daily_loss()
-    if data["loss_r"]>=DAILY_MAX_LOSS_R: return False,data["loss_r"]
-    return True,data["loss_r"]
 
 LAST_TOP={}
 def tg(msg):
@@ -47,8 +26,7 @@ def tg(msg):
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
         except: pass
 
-COOLDOWN_NORMAL=120*60
-COOLDOWN_SAME_LIQ=60*60
+COOLDOWN_NORMAL=120*60; COOLDOWN_SAME_LIQ=60*60
 
 def get_session():
     h=datetime.now(ZoneInfo("UTC")).hour
@@ -73,58 +51,20 @@ def kl(sym,interval):
     except: return None
 
 def fbs_image_logic(h,l,c,o):
-    # EXACT LOGIC FROM YOUR IMAGE
-    if len(c)<3: return None,"no data",0
-    # prev candle
+    if len(c)<3: return None,0
     ph,pl,po,pc = h[-2],l[-2],o[-2],c[-2]
-    # curr candle
-    ch,cl,co,cc = h[-1],l[-1],o[-1],c[-1]
+    cc,co = c[-1],o[-1]
     prange = ph-pl
-    if prange==0: return None,"no range",0
-
+    if prange==0: return None,0
     p62 = pl + prange*0.62
     p38 = pl + prange*0.38
-    p25 = pl + prange*0.75 # top 25% in image is 25% line from top
-    # But for simplicity: use 75% as top zone
-
-    prev_bull = pc > po
-    prev_bear = pc < po
-    curr_bull = cc > co
-    curr_bear = cc < co
-
-    # BULLISH WEAK - DO NOT ENTER (image top-left)
-    # Big green then small red at top
-    if prev_bull and curr_bear:
-        if cc > pl + prange*0.75: # red in top 25%
-            return None, f"WEAK BULLISH TOP {cc:.4f} DO NOT ENTER", 0
-
-    # BEARISH WEAK - DO NOT ENTER (image bottom-left)
-    if prev_bear and curr_bull:
-        if cc < pl + prange*0.25: # green in bottom 25%
-            return None, f"WEAK BEARISH BTM {cc:.4f} DO NOT ENTER", 0
-
-    # STRONG BREAKOUT BULLISH (image top-right)
-    # Prev green closes above 62%, curr green breaks prev high
-    if prev_bull and curr_bull:
+    if pc > po and cc > co:
         if pc >= p62 and cc > ph:
-            return "BOS_UP_STRONG", f"STRONG BREAKOUT {((pc-pl)/prange*100):.0f}% ENTER", ph
-
-    # STRONG BREAKOUT BEARISH (image bottom-right)
-    # Prev red closes below 38%, curr red breaks prev low
-    if prev_bear and curr_bear:
+            return "BOS_UP_STRONG", ph
+    if pc < po and cc < co:
         if pc <= p38 and cc < pl:
-            return "BOS_DOWN_STRONG", f"WEAK BREAKOUT {((pc-pl)/prange*100):.0f}% ENTER", pl
-
-    return None, f"HOLD {((cc-pl)/prange*100):.0f}%", 0
-
-def can_flip(sym,new_side,price,p_level):
-    has_buy=f"{sym}_BUY" in ACTIVE
-    has_sell=f"{sym}_SELL" in ACTIVE
-    if has_buy and new_side=="SELL":
-        del ACTIVE[f"{sym}_BUY"]; save_active(); return True
-    if has_sell and new_side=="BUY":
-        del ACTIVE[f"{sym}_SELL"]; save_active(); return True
-    return True
+            return "BOS_DOWN_STRONG", pl
+    return None,0
 
 def pattern(h,l):
     tops=[];bots=[]
@@ -163,80 +103,101 @@ def get_daily_levels(perp):
     return None,None
 
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=None):
-    ob_low,ob_high=ob
-    entry=(ob_low+ob_high)/2
+    ob_low,ob_high=ob; entry=(ob_low+ob_high)/2
     daily_high,daily_low=get_daily_levels(perp) if perp else (None,None)
     if is_buy:
         sl=min(min(l[-7:]),ob_low)*0.997
         if daily_high: tp1=daily_high*1.003; tp2=daily_high*1.012
         else: tp1=max(h[-20:])*1.008; tp2=max(h[-20:])*1.018
-        tp1=max(tp1,entry*1.006); tp2=max(tp2,tp1*1.006); daily_level=daily_high
+        tp1=max(tp1,entry*1.006); tp2=max(tp2,tp1*1.006)
     else:
         sl=max(max(h[-7:]),ob_high)*1.003
         if daily_low: tp1=daily_low*0.997; tp2=daily_low*0.988
         else: tp1=min(l[-20:])*0.992; tp2=min(l[-20:])*0.982
-        tp1=min(tp1,entry*0.994); tp2=min(tp2,tp1*0.994); daily_level=daily_low
+        tp1=min(tp1,entry*0.994); tp2=min(tp2,tp1*0.994)
     risk=abs(entry-sl); rr2=abs(tp2-entry)/(risk or 1e-9)
-    return entry,sl,tp1,tp2,daily_level,rr2
+    return entry,sl,tp1,tp2,rr2
 
 def full_scan(s,p):
-    ok,loss=check_daily_limit()
-    if not ok: print(f"⛔ DAILY LOSS {loss:.1f}R STOP",flush=True); return
     d5=kl(p,"Min5"); d15=kl(p,"Min15")
     if not d5 or not d15: return
     c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
     if len(c)<30: return
-    session_name,session_emoji=get_session()
-    if session_name=="OFF": return
+    if get_session()[0]=="OFF": return
+    now=time.time()
 
-    fbs_res=None; fbs_msg=""; top_level=0; tf_used=""
+    # ACTIVE TRADE - MARKET DRIVEN
+    buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
+
+    if buy_key in ACTIVE:
+        # Check reversal first - market tells reversal via opposite BOS
+        fbs_res,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
+        if fbs_res and "DOWN" in fbs_res:
+            tg(f"⚠️ <b>REVERSAL {s}</b> 🔴\nBUY active -> SELL BOS detected\nClose BUY now! Price {c[-1]:.6f}")
+            del ACTIVE[buy_key]; save_active(); return
+
+        # Check continuation - market makes new high with bullish BOS
+        cur_high = max(h[-3:]) # market structure high
+        prev_high = ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
+        if c[-1] > prev_high and fbs_res and "UP" in fbs_res:
+            profit = (c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
+            tg(f"💎 <b>HOLD BUY {s}</b> | +{profit:.2f}%\nMarket continuation -> new high {c[-1]:.6f}\nBOS_UP still strong 🟢")
+            ACTIVE[buy_key]["highest"] = c[-1]; save_active()
+        return
+
+    if sell_key in ACTIVE:
+        fbs_res,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
+        if fbs_res and "UP" in fbs_res:
+            tg(f"⚠️ <b>REVERSAL {s}</b> 🟢\nSELL active -> BUY BOS detected\nClose SELL now! Price {c[-1]:.6f}")
+            del ACTIVE[sell_key]; save_active(); return
+
+        cur_low = min(l[-3:])
+        prev_low = ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
+        if c[-1] < prev_low and fbs_res and "DOWN" in fbs_res:
+            profit = (ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
+            tg(f"💎 <b>HOLD SELL {s}</b> | +{profit:.2f}%\nMarket continuation -> new low {c[-1]:.6f}\nBOS_DOWN still strong 🔴")
+            ACTIVE[sell_key]["lowest"] = c[-1]; save_active()
+        return
+
+    # NEW ENTRY
+    fbs_res=None; top_level=0; tf_used=""
     for tf_data,tf_name in [(d5,"5m"),(d15,"15m")]:
-        res,msg,top=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
-        if res and not fbs_res: fbs_res=res; fbs_msg=msg; top_level=top; tf_used=tf_name; break
-    if not fbs_res:
-        _,msg,_=fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
-        print(f"{s} {msg}",flush=True); return
+        res,top=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
+        if res: fbs_res=res; top_level=top; tf_used=tf_name; break
+    if not fbs_res: return
 
     vp=volume_pressure(o,h,l,c,v); pat=pattern(d5["h"],d5["l"])
     is_buy="UP" in fbs_res; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
 
     if f"{s}_{side}" in LAST_TOP:
         last_top,last_time=LAST_TOP[f"{s}_{side}"]
-        same_liq=abs(top_level-last_top)/(last_top or 1)<0.005
-        if same_liq and (time.time()-last_time)<COOLDOWN_SAME_LIQ:
-            print(f"{s} {side} SAME LIQ HOLD",flush=True); return
-    if key in ACTIVE: print(f"{s} {side} TREND HOLD",flush=True); return
-    prev=COOLDOWN["signals"].get(key,{}); now=time.time()
-    if now-prev.get("t",0)<COOLDOWN_NORMAL: print(f"{s} {side} COOLDOWN HOLD",flush=True); return
-
-    if is_buy and pat in ["double_top"]: print(f"{s} FALSE PUMP BLOCK {pat}",flush=True); return
-    if not is_buy and pat in ["double_bottom"]: print(f"{s} FALSE DUMP BLOCK {pat}",flush=True); return
-    if is_buy and vp["buy_pct"]<55: print(f"{s} BUY PRESSURE LOW {vp['buy_pct']:.0f}% HOLD",flush=True); return
-    if not is_buy and vp["sell_pct"]<55: print(f"{s} SELL PRESSURE LOW {vp['sell_pct']:.0f}% HOLD",flush=True); return
+        if abs(top_level-last_top)/(last_top or 1)<0.005 and (now-last_time)<COOLDOWN_SAME_LIQ: return
+    prev=COOLDOWN["signals"].get(key,{});
+    if now-prev.get("t",0)<COOLDOWN_NORMAL: return
+    if is_buy and pat=="double_top": return
+    if not is_buy and pat=="double_bottom": return
+    if is_buy and vp["buy_pct"]<55: return
+    if not is_buy and vp["sell_pct"]<55: return
 
     ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
     if not ob: ob=(min(l[-15:]),max(h[-15:]))
-
-    entry,sl,tp1,tp2,daily_level,rr2=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=p)
+    entry,sl,tp1,tp2,rr2=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=p)
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top_level,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
     LAST_TOP[f"{s}_{side}"]=(top_level,now)
-    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl}; save_active()
+    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"sl":sl,"highest":entry,"lowest":entry}; save_active()
 
-    if daily_level: daily_str=f"Daily {daily_level:.4f}"
-    else: daily_str=f"{tf_used} High"
+    if is_buy: tg(f"🟢 <b>BUY {s}</b> | STRONG 62% BREAKOUT ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} | TP2 {tp2:.6f} | RR {rr2:.1f}R")
+    else: tg(f"🔴 <b>SELL {s}</b> | STRONG 38% BREAKDOWN ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} | TP2 {tp2:.6f} | RR {rr2:.1f}R")
 
-    if is_buy: tg(f"🟢 <b>BUY {s}</b> {session_emoji} | {fbs_msg} ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} ({daily_str} +0.3%)\nTP2 {tp2:.6f} (+1.2%) | RR {rr2:.1f}R")
-    else: tg(f"🔴 <b>SELL {s}</b> {session_emoji} | {fbs_msg} ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} ({daily_str} -0.3%)\nTP2 {tp2:.6f} (-1.2%) | RR {rr2:.1f}R")
-
-print("=== BOT V30 FBS IMAGE LOGIC ===",flush=True)
+print("=== BOT V30.5 MARKET DRIVEN ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
-        except Exception as e: print(e,flush=True)
+        except: pass
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
             try: full_scan(s,p)
-            except Exception as e: print(e,flush=True)
+            except: pass
         time.sleep(60)
