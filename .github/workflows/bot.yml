@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: grass-bot-v31
+  cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -25,7 +30,6 @@ jobs:
           python3 -c "
           import json,time,os
           now=time.time()
-          # FORCE CLEAR OLD CACHE ONCE - delete if signals older than 30min
           for fname, expire in [('cooldown.json', 1800), ('active.json', 7200)]:
               if not os.path.exists(fname):
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
