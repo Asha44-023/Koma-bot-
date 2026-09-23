@@ -1,4 +1,4 @@
-# BOT V30.7 - BUGFIXED - TP1 1H Scalp / TP2 Daily - RR 1.5-8 filter - NO SPAM
+# BOT V30.8 - PER IMAGE 62/38 DUAL-TF REVERSAL - TP1 1H / TP2 Daily - RR 1.5-8
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -16,8 +16,8 @@ if os.path.exists(ACTIVE_FILE):
 
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
-
 LAST_TOP={}
+
 def tg(msg):
     print(msg,flush=True)
     tok=os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or ""
@@ -109,11 +109,10 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=None):
     h1_high,h1_low=get_1h_levels(perp) if perp else (None,None)
     if is_buy:
         sl=min(min(l[-7:]),ob_low)*0.997
-        # BUGFIX: TP1 must be 1H, fallback to 5m 20-candle NOT daily
         if h1_high and h1_high > entry: tp1=h1_high*1.002
         else: tp1=max(h[-20:])*1.005
         tp2=daily_high*1.012 if daily_high and daily_high>tp1 else tp1*1.015
-        tp1=max(tp1,entry*1.006) # min 0.6%
+        tp1=max(tp1,entry*1.006)
         tp2=max(tp2,tp1*1.008)
     else:
         sl=max(max(h[-7:]),ob_high)*1.003
@@ -137,8 +136,10 @@ def full_scan(s,p):
     if buy_key in ACTIVE:
         fbs_res,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "DOWN" in fbs_res:
-            tg(f"⚠️ <b>REVERSAL {s}</b> 🔴\nBUY -> SELL BOS\nClose BUY {c[-1]:.6f}")
-            del ACTIVE[buy_key]; save_active(); return
+            fbs_15,_ = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
+            if fbs_15 and "DOWN" in fbs_15:
+                tg(f"⚠️ <b>REVERSAL {s}</b> 🔴 38% BREAKDOWN per image (5m+15m)\nClose BUY {c[-1]:.6f}")
+                del ACTIVE[buy_key]; save_active(); return
         prev_high=ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
         if c[-1] > prev_high and fbs_res and "UP" in fbs_res:
             profit=(c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
@@ -149,8 +150,10 @@ def full_scan(s,p):
     if sell_key in ACTIVE:
         fbs_res,_ = fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if fbs_res and "UP" in fbs_res:
-            tg(f"⚠️ <b>REVERSAL {s}</b> 🟢\nSELL -> BUY BOS\nClose SELL {c[-1]:.6f}")
-            del ACTIVE[sell_key]; save_active(); return
+            fbs_15,_ = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
+            if fbs_15 and "UP" in fbs_15:
+                tg(f"⚠️ <b>REVERSAL {s}</b> 🟢 62% BREAKOUT per image (5m+15m)\nClose SELL {c[-1]:.6f}")
+                del ACTIVE[sell_key]; save_active(); return
         prev_low=ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
         if c[-1] < prev_low and fbs_res and "DOWN" in fbs_res:
             profit=(ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
@@ -181,7 +184,6 @@ def full_scan(s,p):
     if not ob: ob=(min(l[-15:]),max(h[-15:]))
     entry,sl,tp1,tp2,rr1,rr2=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,perp=p)
 
-    # RR FILTER - FIXES SAND 11.9R and SENT 1.1R
     if rr1 < 1.5 or rr1 > 8.0: return
     if rr2 < 2.0: return
 
@@ -192,7 +194,7 @@ def full_scan(s,p):
     if is_buy: tg(f"🟢 <b>BUY {s}</b> | 62% ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 1H {tp1:.6f} ({rr1:.1f}R) | TP2 D {tp2:.6f} ({rr2:.1f}R)")
     else: tg(f"🔴 <b>SELL {s}</b> | 38% ({tf_used})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 1H {tp1:.6f} ({rr1:.1f}R) | TP2 D {tp2:.6f} ({rr2:.1f}R)")
 
-print("=== BOT V30.7 BUGFIXED RR 1.5-8 ===",flush=True)
+print("=== BOT V30.8 PER IMAGE DUAL-TF ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
