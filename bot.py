@@ -1,4 +1,4 @@
-# BOT V32 FINAL MANSION SOLID - ADAPTIVE TP + BOTH SIDES + HOLD - SYNTAX FIXED
+# BOT V33 FINAL PERFECT - BTC DOMINANCE FILTER ALIGNED TO YOUR LIST
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -15,6 +15,64 @@ SYMBOL_MAP = {
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
 FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"]
 SLOW_SYMS = ["SANDUSDT","TAOUSDT","JASMYUSDT"]
+
+# === PERFECT DOMINANCE SENSITIVITY ALIGNED TO YOUR COINS ===
+DOM_SENSITIVITY = {
+    "FARTCOINUSDT": 2.5, # Ultra volatile - moves 2.5x BTC.D
+    "GRASSUSDT": 2.2, # Ultra volatile
+    "KOMAUSDT": 2.0, # Very volatile
+    "SENTUSDT": 1.6, # High beta
+    "SANDUSDT": 1.3, # Medium
+    "TAOUSDT": 1.1, # Medium-low, TAO holds better
+    "JASMYUSDT": 1.2, # Medium
+}
+
+# BTC Dominance tracker
+BTC_DOM_CACHE = {"value": 58.5, "history": [], "last_fetch": 0}
+
+def get_btc_dominance():
+    now = time.time()
+    if now - BTC_DOM_CACHE["last_fetch"] < 300: # 5 min cache
+        return BTC_DOM_CACHE["value"], BTC_DOM_CACHE["history"]
+    try:
+        # Free API - CoinGecko global
+        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10).json()
+        btc_d = r["data"]["market_cap_percentage"]["btc"]
+        BTC_DOM_CACHE["value"] = btc_d
+        BTC_DOM_CACHE["history"].append((now, btc_d))
+        # Keep last 4 hours
+        BTC_DOM_CACHE["history"] = [(t,v) for t,v in BTC_DOM_CACHE["history"] if now - t < 14400]
+        BTC_DOM_CACHE["last_fetch"] = now
+        return btc_d, BTC_DOM_CACHE["history"]
+    except:
+        return BTC_DOM_CACHE["value"], BTC_DOM_CACHE["history"]
+
+def check_btc_dominance_filter(symbol,is_buy):
+    btc_d, hist = get_btc_dominance()
+    if len(hist) < 2: return True
+    oldest_dom = hist[0][1]
+    change = btc_d - oldest_dom # + = pumping, - = dumping
+    sensitivity = DOM_SENSITIVITY.get(symbol, 1.0)
+    effective_move = change * sensitivity
+
+    # PERFECT MONEY LOGIC
+    if change >= 0.6 and effective_move >= 0.9:
+        if is_buy:
+            print(f"⛔ DOM +{change:.2f}% (eff +{effective_move:.2f}%) BLOCK BUY {symbol}", flush=True)
+            return False
+        else:
+            return True # Perfect SELL
+    if change <= -0.6 and effective_move <= -0.9:
+        if not is_buy:
+            print(f"⛔ DOM {change:.2f}% (eff {effective_move:.2f}%) BLOCK SELL {symbol}", flush=True)
+            return False
+        else:
+            return True # Perfect BUY
+
+    # Absolute levels safety
+    if btc_d > 60.5 and sensitivity >= 2.0 and is_buy: return False
+    if btc_d < 54.0 and sensitivity >= 2.0 and not is_buy: return False
+    return True
 
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
 COOLDOWN={"signals":{}}; ACTIVE={}
@@ -202,6 +260,7 @@ def full_scan(s,p):
         if fbs_res and "DOWN_STRONG" in fbs_res:
             fbs_15,res15_top,brp15=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
             if fbs_15 and "DOWN_STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,False):
+                if not check_btc_dominance_filter(s, False): return
                 ob_flip=get_last_ob(o,h,l,c,bullish=False,lookback=60)
                 if not ob_flip: ob_flip=(min(l[-15:]),max(h[-15:]))
                 entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol,crt_pct=get_perfect_entry_sl_tp(o,h,l,c,ob_flip,False,max(brp,brp15),s,crt_low,crt_high)
@@ -234,6 +293,7 @@ def full_scan(s,p):
         if fbs_res and "UP_STRONG" in fbs_res:
             fbs_15,res15_top,brp15=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
             if fbs_15 and "UP_STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,True):
+                if not check_btc_dominance_filter(s, True): return
                 ob_flip=get_last_ob(o,h,l,c,bullish=True,lookback=60)
                 if not ob_flip: ob_flip=(min(l[-15:]),max(h[-15:]))
                 entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol,crt_pct=get_perfect_entry_sl_tp(o,h,l,c,ob_flip,True,max(brp,brp15),s,crt_low,crt_high)
@@ -266,6 +326,7 @@ def full_scan(s,p):
     if not detect_foundation(o,h,l,c,is_buy,crt_low,crt_high): return
     if not trendline_break(h,l,c,is_buy): return
     if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy): return
+    if not check_btc_dominance_filter(s, is_buy): return
 
     vp=volume_pressure(o,h,l,c,v); pat=pattern(d5["h"],d5["l"])
     try:
@@ -311,7 +372,7 @@ def full_scan(s,p):
     fbs_l="FBS 62%" if is_buy else "FBS 38%"
     tg(f"{color} {s} {side} {fbs_l} STRONG | {crt_type} {crt_pct:.1f}% | 5m TBS | Foundation+Climb | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
 
-print("=== BOT V32 FINAL MANSION SOLID - FIXED ===",flush=True)
+print("=== BOT V33 PERFECT MONEY - DOM FILTER ALIGNED ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
