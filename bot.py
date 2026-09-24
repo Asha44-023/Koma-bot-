@@ -1,4 +1,4 @@
-# BOT V31.3 - FLIP + 12% DAY LIMIT FOR VOLATILE
+# BOT V31.5 - FBS MANDATORY + BEAUTIFUL + 12HR + FIX DUPLICATE
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -18,6 +18,10 @@ if os.path.exists(ACTIVE_FILE):
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
 LAST_TOP={}
+
+def get_time_12hr():
+    try: return datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%I:%M %p EAT")
+    except: return datetime.now().strftime("%I:%M %p")
 
 def tg(msg):
     print(msg,flush=True)
@@ -61,13 +65,16 @@ def fbs_image_logic(h,l,c,o):
     big_range_pct = (ph-pl)/(pl or 1)*100
     body = abs(pc-po); upper_wick = ph - max(pc,po); lower_wick = min(pc,po) - pl
     is_sweep_up = upper_wick > body*1.5; is_sweep_down = lower_wick > body*1.5
+    # LEFT IMAGES - WEAK DO NOT ENTER
     if pc > po:
         if is_sweep_up and cc < p75: return "WEAK_BULL_TRAP", ph, big_range_pct
+        # RIGHT TOP - STRONG 62% ENTER
         if pc >= p62:
             if cc >= p38 and cl >= p25 and cc > co: return "BOS_UP_STRONG", ph, big_range_pct
             elif cc < p25 or (cc < co and cc < p38): return "BOS_UP_WEAK", ph, big_range_pct
     if pc < po:
         if is_sweep_down and cc > p25: return "WEAK_BEAR_TRAP", pl, big_range_pct
+        # RIGHT BOTTOM - STRONG 38% ENTER
         if pc <= p38:
             if cc <= p62 and ch <= p75 and cc < co: return "BOS_DOWN_STRONG", pl, big_range_pct
             elif cc > p75 or (cc > co and cc > p62): return "BOS_DOWN_WEAK", pl, big_range_pct
@@ -123,6 +130,8 @@ def full_scan(s,p):
     if len(c)<30: return
     if get_session()[0]=="OFF": return
     now=time.time()
+    time_12hr=get_time_12hr()
+    live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
 
     if buy_key in ACTIVE:
@@ -130,24 +139,30 @@ def full_scan(s,p):
         if fbs_res and "DOWN_STRONG" in fbs_res:
             fbs_15,res15_top,brp15 = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
             if fbs_15 and "DOWN_STRONG" in fbs_15:
-                tg(f"⚠️ <b>REVERSAL {s}</b> 🔴 STRONG 38% BREAKDOWN (5m+15m)\nClose BUY {c[-1]:.6f}")
+                ob_flip=get_last_ob(o,h,l,c,bullish=False,lookback=60)
+                if not ob_flip: ob_flip=(min(l[-15:]),max(h[-15:]))
+                entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol=get_perfect_entry_sl_tp(o,h,l,c,ob_flip,False,max(brp,brp15),s,p)
+                if rr1 < (1.0 if is_vol else 1.2) or rr1>8:
+                    del ACTIVE[buy_key]; save_active(); return
+                entry_close=live_price
+                pnl=(entry_close-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
+                emoji="🟢" if pnl>=0 else "🔴"
+                tg(f"<b>REVERSAL {s} CLOSE BUY</b> {emoji} {pnl:+.2f}% {time_12hr} FBS 38% MANDATORY")
                 del ACTIVE[buy_key]; save_active()
-                is_vol = s in VOLATILE_SYMS or max(brp,brp15) > 2.5
-                entry = c[-1]; sl_pct = 0.028 if is_vol else 0.012
-                tp1_pct,tp2_pct,tp3_pct = (0.03,0.06,0.09) if is_vol else (0.015,0.025,0.04)
-                sl = entry * (1 + sl_pct); tp1 = entry * (1 - tp1_pct); tp2 = entry * (1 - tp2_pct); tp3 = entry * (1 - tp3_pct)
                 key = f"{s}_SELL"
                 COOLDOWN["signals"][key]={"t":now,"dir":False,"top":res15_top,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":False,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
-                tg(f"🔄 <b>FLIP SELL {s}</b> | 38% BREAKDOWN FLIP\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f}")
+                vol_tag = "10% VOL" if is_vol else "4% STABLE"
+                sl_pct_display=abs(entry-sl)/entry*100
+                tg(f"🔴 {s} SELL 38% STRONG | {vol_tag} | {time_12hr} | FBS MANDATORY\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} ({sl_pct_display:.1f}%) TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
                 return
         prev_high=ACTIVE[buy_key].get("highest", ACTIVE[buy_key]["entry"])
         last_hold_profit=ACTIVE[buy_key].get("last_hold_profit",0)
         if c[-1] > prev_high and fbs_res and "UP_STRONG" in fbs_res:
             profit=(c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
             if profit - last_hold_profit >= 0.5:
-                tg(f"💎 <b>HOLD BUY {s}</b> | +{profit:.2f}%\nNew high {c[-1]:.6f} 🟢")
+                tg(f"🟡 {s} HOLD BUY +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 62%")
                 ACTIVE[buy_key]["last_hold_profit"]=profit
             ACTIVE[buy_key]["highest"]=c[-1]; save_active()
         return
@@ -157,25 +172,30 @@ def full_scan(s,p):
         if fbs_res and "UP_STRONG" in fbs_res:
             fbs_15,res15_top,brp15 = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
             if fbs_15 and "UP_STRONG" in fbs_15:
-                tg(f"⚠️ <b>REVERSAL {s}</b> 🟢 STRONG 62% BREAKOUT (5m+15m)\nClose SELL {c[-1]:.6f}")
+                ob_flip=get_last_ob(o,h,l,c,bullish=True,lookback=60)
+                if not ob_flip: ob_flip=(min(l[-15:]),max(h[-15:]))
+                entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol=get_perfect_entry_sl_tp(o,h,l,c,ob_flip,True,max(brp,brp15),s,p)
+                if rr1 < (1.0 if is_vol else 1.2) or rr1>8:
+                    del ACTIVE[sell_key]; save_active(); return
+                entry_close=live_price
+                pnl=(ACTIVE[sell_key]["entry"]-entry_close)/ACTIVE[sell_key]["entry"]*100
+                emoji="🟢" if pnl>=0 else "🔴"
+                tg(f"<b>REVERSAL {s} CLOSE SELL</b> {emoji} {pnl:+.2f}% {time_12hr} FBS 62% MANDATORY")
                 del ACTIVE[sell_key]; save_active()
-                is_vol = s in VOLATILE_SYMS or max(brp,brp15) > 2.5
-                entry = c[-1]; sl_pct = 0.028 if is_vol else 0.012
-                tp1_pct,tp2_pct,tp3_pct = (0.03,0.06,0.09) if is_vol else (0.015,0.025,0.04)
-                sl = entry * (1 - sl_pct); tp1 = entry * (1 + tp1_pct); tp2 = entry * (1 + tp2_pct); tp3 = entry * (1 + tp3_pct)
                 key = f"{s}_BUY"
                 COOLDOWN["signals"][key]={"t":now,"dir":True,"top":res15_top,"entry":entry,"tp1":tp1,"tp2":tp2}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":True,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
                 vol_tag = "10% VOL" if is_vol else "4% STABLE"
-                tg(f"🔄 <b>FLIP BUY {s}</b> | 62% BREAKOUT FLIP ({vol_tag})\nEntry {entry:.6f} | SL {sl:.6f}\nTP1 {tp1:.6f} TP2 {tp2:.6f} TP3 {tp3:.6f}\nCaught +7% pump")
+                sl_pct_display=abs(entry-sl)/entry*100
+                tg(f"🟢 {s} BUY 62% STRONG | {vol_tag} | {time_12hr} | FBS MANDATORY\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} ({sl_pct_display:.1f}%) TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
                 return
         prev_low=ACTIVE[sell_key].get("lowest", ACTIVE[sell_key]["entry"])
         last_hold_profit=ACTIVE[sell_key].get("last_hold_profit",0)
         if c[-1] < prev_low and fbs_res and "DOWN_STRONG" in fbs_res:
             profit=(ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
             if profit - last_hold_profit >= 0.5:
-                tg(f"💎 <b>HOLD SELL {s}</b> | +{profit:.2f}%\nNew low {c[-1]:.6f} 🔴")
+                tg(f"🟡 {s} HOLD SELL +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 38%")
                 ACTIVE[sell_key]["last_hold_profit"]=profit
             ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
@@ -216,10 +236,11 @@ def full_scan(s,p):
     LAST_TOP[f"{s}_{side}"]=(top_level,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
     vol_tag = "10% VOL" if is_vol else "4% STABLE"
-    if is_buy: tg(f"🟢 <b>BUY {s}</b> | 62% STRONG ({tf_used}) {vol_tag}\nRange {big_range_pct:.2f}% | Entry {entry:.6f} | SL {sl:.6f} ({abs(entry-sl)/entry*100:.1f}%)\nTP1 {tp1:.6f} ({rr1:.1f}R) | TP2 {tp2:.6f} ({rr2:.1f}R) | TP3 {tp3:.6f} ({rr3:.1f}R)")
-    else: tg(f"🔴 <b>SELL {s}</b> | 38% STRONG ({tf_used}) {vol_tag}\nRange {big_range_pct:.2f}% | Entry {entry:.6f} | SL {sl:.6f} ({abs(entry-sl)/entry*100:.1f}%)\nTP1 {tp1:.6f} ({rr1:.1f}R) | TP2 {tp2:.6f} ({rr2:.1f}R) | TP3 {tp3:.6f} ({rr3:.1f}R)")
+    color="🟢" if is_buy else "🔴"
+    fbs_l="FBS 62%" if is_buy else "FBS 38%"
+    tg(f"{color} {s} {side} {fbs_l} STRONG | {tf_used} | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
 
-print("=== BOT V31.3 FLIP + 12% LIMIT ===",flush=True)
+print("=== BOT V31.5 FBS MANDATORY ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
