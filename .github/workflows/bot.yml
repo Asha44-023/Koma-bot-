@@ -20,9 +20,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v33-7-percoin-${{ hashFiles('bot.py') }}
+          key: bot-cache-v34-diagram-${{ hashFiles('bot.py') }}
           restore-keys: |
-            bot-cache-v33-7-percoin-
+            bot-cache-v34-diagram-
             bot-cache-
       - name: Run bot once
         env:
@@ -36,4 +36,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v33-7-percoin-${{ hashFiles('bot.py') }}-${{ github.run_id }}
+          key: bot-cache-v34-diagram-${{ hashFiles('bot.py') }}-${{ github.run_id }}
