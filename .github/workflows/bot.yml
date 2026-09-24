@@ -1,12 +1,12 @@
-name: grass-bot-v32-final-mansion
+name: grass-bot-v33-1-trend-32-68
 on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
-  group: grass-bot-v32-final
-  cancel-in-progress: true
+  group: grass-bot-v33-1-trend
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -19,18 +19,20 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: cooldown-v32-final-mansion
+          key: cooldown-v33-1-trend-25683268-${{ github.run_id }}
           restore-keys: |
+            cooldown-v33-1-trend-25683268-
             cooldown-v32-final-mansion
 
       - run: pip install requests
 
-      - name: Clean expired + migrate V32
+      - name: Clean expired + migrate V33.1
         run: |
           python3 -c "
           import json,time,os
           now=time.time()
-          for fname, expire in [('cooldown.json', 86400), ('active.json', 86400)]:
+          # KEEP LONGER: 4 days for SLOW, 1 day for FAST
+          for fname, expire in [('cooldown.json', 4*86400), ('active.json', 4*86400)]:
               if not os.path.exists(fname):
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
                   continue
@@ -39,19 +41,20 @@ jobs:
                   if 'cooldown' in fname:
                       c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps({'signals':c}))
-                      print(f'{fname} kept {len(c)} signals')
+                      print(f'{fname} kept {len(c)} signals -> {list(c.keys())}')
                   else:
-                      d={k:v for k,v in d.items() if now - v.get('t',0) < expire}
-                      open(fname,'w').write(json.dumps(d))
-                      print(f'{fname} kept {list(d.keys())} trades')
+                      d2={k:v for k,v in d.items() if now - v.get('t',0) < expire}
+                      open(fname,'w').write(json.dumps(d2))
+                      print(f'{fname} kept {list(d2.keys())} trades')
+                  print('COOLDOWN', open(fname).read()[:500] if 'cooldown' in fname else '')
               except Exception as e:
                   print(f'{fname} error {e} - reset')
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
           "
-          echo "=== COOLDOWN ==="; cat cooldown.json
-          echo "=== ACTIVE ==="; cat active.json
+          echo "=== BEFORE RUN COOLDOWN ==="; cat cooldown.json
+          echo "=== BEFORE RUN ACTIVE ==="; cat active.json
 
-      - name: Run V32 FINAL
+      - name: Run V33.1 TREND PUMP 25,75,32,68
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -63,3 +66,12 @@ jobs:
           cat cooldown.json
           echo "=== FINAL ACTIVE ==="
           cat active.json
+
+      - name: Save cache even if fails
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            cooldown.json
+            active.json
+          key: cooldown-v33-1-trend-25683268-${{ github.run_id }}
