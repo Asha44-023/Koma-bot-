@@ -1,11 +1,11 @@
-name: grass-bot-v31-1-market
+name: grass-bot-v32-final-mansion
 on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
-  group: grass-bot-v31
+  group: grass-bot-v32-final
   cancel-in-progress: true
 
 jobs:
@@ -19,31 +19,34 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: cooldown-v31-1-market
+          key: cooldown-v32-final-mansion
           restore-keys: |
-            cooldown-v31-1-market
+            cooldown-v32-final-mansion
 
       - run: pip install requests
 
-      - name: Clean expired + migrate
+      - name: Clean expired + migrate V32
         run: |
           python3 -c "
           import json,time,os
           now=time.time()
-          for fname, expire in [('cooldown.json', 1800), ('active.json', 7200)]:
+          # V32 cooldowns: FAST 90m same dir, 4h level | SLOW 6h same dir, 24h level
+          # So keep cooldown for 24h, active for 24h to allow HOLD to work
+          for fname, expire in [('cooldown.json', 86400), ('active.json', 86400)]:
               if not os.path.exists(fname):
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
                   continue
               try:
                   d=json.load(open(fname))
                   if 'cooldown' in fname:
+                      # Keep all signals within 24h
                       c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps({'signals':c}))
-                      print(f'{fname} kept {len(c)}')
+                      print(f'{fname} kept {len(c)} signals')
                   else:
                       d={k:v for k,v in d.items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps(d))
-                      print(f'{fname} kept {list(d.keys())}')
+                      print(f'{fname} kept {list(d.keys())} trades')
               except Exception as e:
                   print(f'{fname} error {e} - reset')
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
@@ -51,12 +54,15 @@ jobs:
           echo "=== COOLDOWN ==="; cat cooldown.json
           echo "=== ACTIVE ==="; cat active.json
 
-      - env:
+      - name: Run V32 FINAL
+        env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -u bot.py --once
+        run: python -u bot_v32_final.py --once
 
-      - run: |
-          echo "=== FINAL ==="
+      - name: Show final state
+        run: |
+          echo "=== FINAL COOLDOWN ==="
           cat cooldown.json
+          echo "=== FINAL ACTIVE ==="
           cat active.json
