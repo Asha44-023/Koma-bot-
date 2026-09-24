@@ -1,4 +1,4 @@
-# BOT V33 FINAL PERFECT - BTC DOMINANCE FILTER ALIGNED TO YOUR LIST
+# BOT V33.1 FINAL PERFECT - WITH TREND PUMP 25,75,32,68 RULE
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -16,31 +16,27 @@ SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
 FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"]
 SLOW_SYMS = ["SANDUSDT","TAOUSDT","JASMYUSDT"]
 
-# === PERFECT DOMINANCE SENSITIVITY ALIGNED TO YOUR COINS ===
 DOM_SENSITIVITY = {
-    "FARTCOINUSDT": 2.5, # Ultra volatile - moves 2.5x BTC.D
-    "GRASSUSDT": 2.2, # Ultra volatile
-    "KOMAUSDT": 2.0, # Very volatile
-    "SENTUSDT": 1.6, # High beta
-    "SANDUSDT": 1.3, # Medium
-    "TAOUSDT": 1.1, # Medium-low, TAO holds better
-    "JASMYUSDT": 1.2, # Medium
+    "FARTCOINUSDT": 2.5,
+    "GRASSUSDT": 2.2,
+    "KOMAUSDT": 2.0,
+    "SENTUSDT": 1.6,
+    "SANDUSDT": 1.3,
+    "TAOUSDT": 1.1,
+    "JASMYUSDT": 1.2,
 }
 
-# BTC Dominance tracker
 BTC_DOM_CACHE = {"value": 58.5, "history": [], "last_fetch": 0}
 
 def get_btc_dominance():
     now = time.time()
-    if now - BTC_DOM_CACHE["last_fetch"] < 300: # 5 min cache
+    if now - BTC_DOM_CACHE["last_fetch"] < 300:
         return BTC_DOM_CACHE["value"], BTC_DOM_CACHE["history"]
     try:
-        # Free API - CoinGecko global
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10).json()
         btc_d = r["data"]["market_cap_percentage"]["btc"]
         BTC_DOM_CACHE["value"] = btc_d
         BTC_DOM_CACHE["history"].append((now, btc_d))
-        # Keep last 4 hours
         BTC_DOM_CACHE["history"] = [(t,v) for t,v in BTC_DOM_CACHE["history"] if now - t < 14400]
         BTC_DOM_CACHE["last_fetch"] = now
         return btc_d, BTC_DOM_CACHE["history"]
@@ -51,25 +47,21 @@ def check_btc_dominance_filter(symbol,is_buy):
     btc_d, hist = get_btc_dominance()
     if len(hist) < 2: return True
     oldest_dom = hist[0][1]
-    change = btc_d - oldest_dom # + = pumping, - = dumping
+    change = btc_d - oldest_dom
     sensitivity = DOM_SENSITIVITY.get(symbol, 1.0)
     effective_move = change * sensitivity
-
-    # PERFECT MONEY LOGIC
     if change >= 0.6 and effective_move >= 0.9:
         if is_buy:
             print(f"⛔ DOM +{change:.2f}% (eff +{effective_move:.2f}%) BLOCK BUY {symbol}", flush=True)
             return False
         else:
-            return True # Perfect SELL
+            return True
     if change <= -0.6 and effective_move <= -0.9:
         if not is_buy:
             print(f"⛔ DOM {change:.2f}% (eff {effective_move:.2f}%) BLOCK SELL {symbol}", flush=True)
             return False
         else:
-            return True # Perfect BUY
-
-    # Absolute levels safety
+            return True
     if btc_d > 60.5 and sensitivity >= 2.0 and is_buy: return False
     if btc_d < 54.0 and sensitivity >= 2.0 and not is_buy: return False
     return True
@@ -170,6 +162,40 @@ def fbs_image_logic(h,l,c,o):
             elif cc>p75 or (cc>co and cc>p62): return "BOS_DOWN_WEAK",pl,big_range_pct
     return None,0,big_range_pct
 
+def fbs_trend_pump_logic(h,l,c,o):
+    if len(c)<3: return None,0,0
+    ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]
+    ch,cl,co,cc=h[-1],l[-1],o[-1],c[-1]
+    prange=ph-pl
+    if prange==0: return None,0,0
+    p75=pl+prange*0.75; p68=pl+prange*0.68; p32=pl+prange*0.32; p25=pl+prange*0.25
+    big_range_pct=(ph-pl)/(pl or 1)*100
+    if pc>po:
+        if cc < p75 and cc < co:
+            return "WEAK_BULL_TRAP_TREND",ph,big_range_pct
+        if pc >= p68:
+            if cc >= p32 and cc > p25 and cc > co:
+                return "BOS_UP_TREND_STRONG_32_68",ph,big_range_pct
+    if pc<po:
+        if cc > p25 and cc > co:
+            return "WEAK_BEAR_TRAP_TREND",pl,big_range_pct
+        if pc <= p32:
+            if cc <= p68 and cc < p75 and cc < co:
+                return "BOS_DOWN_TREND_STRONG_32_68",pl,big_range_pct
+    return None,0,big_range_pct
+
+def is_steady_trend_pump(h,l,c,o,v):
+    if len(c)<20: return False
+    up_count = sum(1 for i in range(-12,-1) if c[i] > c[i-1])
+    down_count = sum(1 for i in range(-12,-1) if c[i] < c[i-1])
+    avg_body = sum(abs(c[i]-o[i]) for i in range(-12,-1))/12
+    avg_range = sum(h[i]-l[i] for i in range(-12,-1))/12 or 1e-9
+    small_wicks = avg_body/avg_range > 0.55
+    vol_trend = v[-1] > statistics.mean(v[-12:-2]) * 0.9 if len(v)>=12 else False
+    is_up_trend = up_count >= 8 and small_wicks and vol_trend
+    is_down_trend = down_count >= 8 and small_wicks and vol_trend
+    return is_up_trend or is_down_trend
+
 def build_crt(symbol,h,l):
     if symbol in FAST_SYMS:
         look=min(48,len(h)); crt_high=max(h[-look:]); crt_low=min(l[-look:]); crt_type="4H CRT"
@@ -249,17 +275,21 @@ def full_scan(s,p):
 
     if buy_key in ACTIVE:
         fbs_res,_,brp=fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
+        if not fbs_res or "STRONG" not in fbs_res:
+            fbs_res,_,brp = fbs_trend_pump_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         profit=(c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
         last_profit=ACTIVE[buy_key].get("last_hold_profit",0)
         hold_step=2.0 if s in FAST_SYMS else 1.0
-        if profit-last_profit>=hold_step and fbs_res and "UP_STRONG" in fbs_res:
-            tg(f"🟡 {s} HOLD BUY +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 62% still STRONG {crt_type}")
+        if profit-last_profit>=hold_step and fbs_res and "UP" in fbs_res and "STRONG" in fbs_res:
+            tg(f"🟡 {s} HOLD BUY +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS still STRONG {crt_type}")
             ACTIVE[buy_key]["last_hold_profit"]=profit
             ACTIVE[buy_key]["highest"]=max(ACTIVE[buy_key].get("highest",0),c[-1])
             save_active()
-        if fbs_res and "DOWN_STRONG" in fbs_res:
+        if fbs_res and "DOWN" in fbs_res and "STRONG" in fbs_res:
             fbs_15,res15_top,brp15=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-            if fbs_15 and "DOWN_STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,False):
+            if not fbs_15 or "STRONG" not in fbs_15:
+                fbs_15,res15_top,brp15 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
+            if fbs_15 and "DOWN" in fbs_15 and "STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,False):
                 if not check_btc_dominance_filter(s, False): return
                 ob_flip=get_last_ob(o,h,l,c,bullish=False,lookback=60)
                 if not ob_flip: ob_flip=(min(l[-15:]),max(h[-15:]))
@@ -268,14 +298,14 @@ def full_scan(s,p):
                     del ACTIVE[buy_key]; save_active(); return
                 pnl=(live_price-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
                 emoji="🟢" if pnl>=0 else "🔴"
-                tg(f"<b>REVERSAL {s} CLOSE BUY</b> {emoji} {pnl:+.2f}% {time_12hr} TBS SELL + FBS 38% {crt_type}")
+                tg(f"<b>REVERSAL {s} CLOSE BUY</b> {emoji} {pnl:+.2f}% {time_12hr} TBS SELL + FBS 38%/32% {crt_type}")
                 del ACTIVE[buy_key]; save_active()
                 key=f"{s}_SELL"
                 COOLDOWN["signals"][key]={"t":now,"dir":False,"top":res15_top,"entry":entry}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":False,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
                 vol_tag="10% VOL" if is_vol else "4% STABLE"
-                tg(f"🔴 {s} SELL 38% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
+                tg(f"🔴 {s} SELL 38%/32% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
                 return
         if c[-1]>ACTIVE[buy_key].get("highest",0):
             ACTIVE[buy_key]["highest"]=c[-1]; save_active()
@@ -283,16 +313,20 @@ def full_scan(s,p):
 
     if sell_key in ACTIVE:
         fbs_res,_,brp=fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
+        if not fbs_res or "STRONG" not in fbs_res:
+            fbs_res,_,brp = fbs_trend_pump_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         profit=(ACTIVE[sell_key]["entry"]-c[-1])/ACTIVE[sell_key]["entry"]*100
         last_profit=ACTIVE[sell_key].get("last_hold_profit",0)
         hold_step=2.0 if s in FAST_SYMS else 1.0
-        if profit-last_profit>=hold_step and fbs_res and "DOWN_STRONG" in fbs_res:
-            tg(f"🟡 {s} HOLD SELL +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 38% still STRONG {crt_type}")
+        if profit-last_profit>=hold_step and fbs_res and "DOWN" in fbs_res and "STRONG" in fbs_res:
+            tg(f"🟡 {s} HOLD SELL +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 38%/32% still STRONG {crt_type}")
             ACTIVE[sell_key]["last_hold_profit"]=profit
             ACTIVE[sell_key]["lowest"]=min(ACTIVE[sell_key].get("lowest",999999),c[-1]); save_active()
-        if fbs_res and "UP_STRONG" in fbs_res:
+        if fbs_res and "UP" in fbs_res and "STRONG" in fbs_res:
             fbs_15,res15_top,brp15=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-            if fbs_15 and "UP_STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,True):
+            if not fbs_15 or "STRONG" not in fbs_15:
+                fbs_15,res15_top,brp15 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
+            if fbs_15 and "UP" in fbs_15 and "STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,True):
                 if not check_btc_dominance_filter(s, True): return
                 ob_flip=get_last_ob(o,h,l,c,bullish=True,lookback=60)
                 if not ob_flip: ob_flip=(min(l[-15:]),max(h[-15:]))
@@ -301,30 +335,49 @@ def full_scan(s,p):
                     del ACTIVE[sell_key]; save_active(); return
                 pnl=(ACTIVE[sell_key]["entry"]-live_price)/ACTIVE[sell_key]["entry"]*100
                 emoji="🟢" if pnl>=0 else "🔴"
-                tg(f"<b>REVERSAL {s} CLOSE SELL</b> {emoji} {pnl:+.2f}% {time_12hr} TBS BUY + FBS 62% {crt_type}")
+                tg(f"<b>REVERSAL {s} CLOSE SELL</b> {emoji} {pnl:+.2f}% {time_12hr} TBS BUY + FBS 62%/68% {crt_type}")
                 del ACTIVE[sell_key]; save_active()
                 key=f"{s}_BUY"
                 COOLDOWN["signals"][key]={"t":now,"dir":True,"top":res15_top,"entry":entry}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":True,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
                 vol_tag="10% VOL" if is_vol else "4% STABLE"
-                tg(f"🟢 {s} BUY 62% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
+                tg(f"🟢 {s} BUY 62%/68% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
                 return
         if c[-1]<ACTIVE[sell_key].get("lowest",999999):
             ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
 
-    fbs_res=None; top_level=0; big_range_pct=0
+    fbs_res=None; top_level=0; big_range_pct=0; mode="EXPLOSIVE"
     for tf_data in [d5,d15]:
         res,top,brp=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
         if res and "STRONG" in res:
-            fbs_res=res; top_level=top; big_range_pct=brp; break
-        if res and "WEAK" in res: return
+            fbs_res=res; top_level=top; big_range_pct=brp; mode="EXPLOSIVE_62_38"; break
+        if res and "WEAK" in res:
+            return
+
+    if not fbs_res:
+        for tf_data in [d5,d15]:
+            res,top,brp=fbs_trend_pump_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
+            if res and "STRONG" in res:
+                if not is_steady_trend_pump(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"],tf_data["v"]):
+                    continue
+                fbs_res=res; top_level=top; big_range_pct=brp; mode="TREND_32_68"; break
+            if res and "WEAK" in res and "TREND" in res:
+                return
+
     if not fbs_res: return
     is_buy="UP" in fbs_res; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
     if key in ACTIVE: return
-    if not detect_foundation(o,h,l,c,is_buy,crt_low,crt_high): return
-    if not trendline_break(h,l,c,is_buy): return
+
+    foundation_ok = detect_foundation(o,h,l,c,is_buy,crt_low,crt_high)
+    if not foundation_ok and mode=="TREND_32_68":
+        foundation_ok = True
+
+    if not foundation_ok: return
+    if not trendline_break(h,l,c,is_buy) and mode=="EXPLOSIVE_62_38":
+        if mode!="TREND_32_68":
+            return
     if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy): return
     if not check_btc_dominance_filter(s, is_buy): return
 
@@ -353,8 +406,15 @@ def full_scan(s,p):
     if now-opp_prev.get("t",0)<OPP_CD: return
     if is_buy and pat=="double_top": return
     if not is_buy and pat=="double_bottom": return
-    if is_buy and vp["buy_pct"]<55: return
-    if not is_buy and vp["sell_pct"]<55: return
+
+    if mode=="EXPLOSIVE_62_38":
+        if is_buy and vp["buy_pct"]<55: return
+        if not is_buy and vp["sell_pct"]<55: return
+    else:
+        if is_buy and vp["buy_pct"]<68:
+            if vp["buy_pct"]<60: return
+        if not is_buy and vp["sell_pct"]<68:
+            if vp["sell_pct"]<60: return
 
     ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
     if not ob: ob=(min(l[-15:]),max(h[-15:]))
@@ -369,10 +429,14 @@ def full_scan(s,p):
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
     vol_tag="10% VOL" if is_vol else "4% STABLE"
     color="🟢" if is_buy else "🔴"
-    fbs_l="FBS 62%" if is_buy else "FBS 38%"
-    tg(f"{color} {s} {side} {fbs_l} STRONG | {crt_type} {crt_pct:.1f}% | 5m TBS | Foundation+Climb | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
+    if mode=="EXPLOSIVE_62_38":
+        fbs_l="FBS 62%" if is_buy else "FBS 38%"
+    else:
+        fbs_l="TREND 68%" if is_buy else "TREND 32%"
 
-print("=== BOT V33 PERFECT MONEY - DOM FILTER ALIGNED ===",flush=True)
+    tg(f"{color} {s} {side} {fbs_l} STRONG [{mode}] | {crt_type} {crt_pct:.1f}% | 5m TBS | Foundation+Climb | {vol_tag} | {time_12hr} | Vol {vp['buy_pct']:.0f}%/{vp['sell_pct']:.0f}%\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
+
+print("=== BOT V33.1 PERFECT + TREND PUMP 25,75,32,68 ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
