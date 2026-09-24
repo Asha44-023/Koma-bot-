@@ -1,4 +1,4 @@
-# BOT V32 FINAL MANSION SOLID - ADAPTIVE TP + BOTH SIDES + HOLD
+# BOT V32 FINAL MANSION SOLID - ADAPTIVE TP + BOTH SIDES + HOLD - SYNTAX FIXED
 import time, json, os, requests, sys, statistics
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -13,7 +13,6 @@ SYMBOL_MAP = {
     "JASMYUSDT":"JASMY_USDT",
 }
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
-
 FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"]
 SLOW_SYMS = ["SANDUSDT","TAOUSDT","JASMYUSDT"]
 
@@ -81,17 +80,20 @@ def detect_foundation(o,h,l,c,is_buy,crt_low,crt_high):
 def trendline_break(h,l,c,is_buy):
     if len(c)<20: return False
     if is_buy:
-        recent_highs=h[-12:-2]; is_descending=recent_highs[-1] < recent_highs[0]*1.02
+        recent_highs=h[-12:-2]
+        is_descending=recent_highs[-1] < recent_highs[0]*1.02
         break_up=c[-1] > max(h[-11:-1])*1.002
         return is_descending and break_up
     else:
-        recent_lows=l[-12:-2]; is_ascending=recent_lows[-1] > recent_lows[0]*0.98
+        recent_lows=l[-12:-2]
+        is_ascending=recent_lows[-1] > recent_lows[0]*0.98
         break_down=c[-1] < min(l[-11:-1])*0.998
         return is_ascending and break_down
 
 def fbs_image_logic(h,l,c,o):
     if len(c)<3: return None,0,0
-    ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; ch,cl,co,cc=h[-1],l[-1],o[-1],c[-1]
+    ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]
+    ch,cl,co,cc=h[-1],l[-1],o[-1],c[-1]
     prange=ph-pl
     if prange==0: return None,0,0
     p75=pl+prange*0.75; p62=pl+prange*0.62; p38=pl+prange*0.38; p25=pl+prange*0.25
@@ -123,7 +125,7 @@ def check_tbs(o,h,l,c,crt_low,crt_high,is_buy):
     else: return h[-2]>crt_high and c[-1]<crt_high and c[-1]<o[-1]
 
 def pattern(h,l):
-    tops=[];bots=[]
+    tops=[]; bots=[]
     for i in range(3,len(h)-3):
         if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]: tops.append((i,h[i]))
         if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: bots.append((i,l[i]))
@@ -144,19 +146,28 @@ def get_last_ob(o,h,l,c,bullish=True,lookback=60):
 def volume_pressure(o,h,l,c,v,n=20):
     if len(v)<n: return {"vol_x":1,"buy_pct":50,"sell_pct":50}
     avg=statistics.mean(v[-n:]); cur=v[-1]; bp=sp=0
-    for i in range(-n,0): rng=h[i]-l[i] or 1e-9; delta=(c[i]-o[i])/rng*v[i]; bp+=delta if delta>0 else 0; sp+=-delta if delta<0 else 0
-    total=bp+sp or 1; return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
+    for i in range(-n,0):
+        rng=h[i]-l[i] or 1e-9
+        delta=(c[i]-o[i])/rng*v[i]
+        if delta>0: bp+=delta
+        else: sp+=-delta
+    total=bp+sp or 1
+    return {"vol_x":cur/(avg or 1),"buy_pct":bp/total*100,"sell_pct":sp/total*100}
 
 def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,big_range_pct,symbol,crt_low,crt_high):
-    ob_low,ob_high=ob; prange=ob_high-ob_low
+    ob_low,ob_high=ob
+    prange=ob_high-ob_low
     crt_range_pct=(crt_high-crt_low)/(crt_low or 1)*100
     is_volatile=symbol in FAST_SYMS or big_range_pct>2.5
-    # ADAPTIVE MATH FOR 100% TRENDS
     if symbol in FAST_SYMS:
-        tp1_pct=max(0.03, crt_range_pct*0.30/100); tp2_pct=max(0.06, crt_range_pct*0.60/100); tp3_pct=max(0.09, crt_range_pct*0.90/100)
+        tp1_pct=max(0.03, crt_range_pct*0.30/100)
+        tp2_pct=max(0.06, crt_range_pct*0.60/100)
+        tp3_pct=max(0.09, crt_range_pct*0.90/100)
         sl_pct=max(0.028, crt_range_pct*0.25/100)
     else:
-        tp1_pct=max(0.015, crt_range_pct*0.30/100); tp2_pct=max(0.025, crt_range_pct*0.60/100); tp3_pct=max(0.04, crt_range_pct*0.90/100)
+        tp1_pct=max(0.015, crt_range_pct*0.30/100)
+        tp2_pct=max(0.025, crt_range_pct*0.60/100)
+        tp3_pct=max(0.04, crt_range_pct*0.90/100)
         sl_pct=0.012
     if is_buy:
         entry=ob_low+prange*(0.56 if is_volatile else 0.44)
@@ -164,7 +175,8 @@ def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,big_range_pct,symbol,crt_low,crt_h
     else:
         entry=ob_high-prange*(0.56 if is_volatile else 0.44)
         sl=entry*(1+sl_pct); tp1=entry*(1-tp1_pct); tp2=entry*(1-tp2_pct); tp3=entry*(1-tp3_pct)
-    risk=abs(entry-sl); rr1=abs(tp1-entry)/(risk or 1e-9); rr2=abs(tp2-entry)/(risk or 1e-9); rr3=abs(tp3-entry)/(risk or 1e-9)
+    risk=abs(entry-sl)
+    rr1=abs(tp1-entry)/(risk or 1e-9); rr2=abs(tp2-entry)/(risk or 1e-9); rr3=abs(tp3-entry)/(risk or 1e-9)
     return entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_volatile,crt_range_pct
 
 def full_scan(s,p):
@@ -177,17 +189,16 @@ def full_scan(s,p):
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
     crt_low,crt_high,crt_type=build_crt(s,h,l)
 
-    # ACTIVE HOLD + REVERSAL - BOTH SIDES
     if buy_key in ACTIVE:
         fbs_res,_,brp=fbs_image_logic(d5["h"],d5["l"],d5["c"],d5["o"])
-        # HOLD LOGIC: every 2% FAST / 1% SLOW with FBS still strong
         profit=(c[-1]-ACTIVE[buy_key]["entry"])/ACTIVE[buy_key]["entry"]*100
         last_profit=ACTIVE[buy_key].get("last_hold_profit",0)
         hold_step=2.0 if s in FAST_SYMS else 1.0
         if profit-last_profit>=hold_step and fbs_res and "UP_STRONG" in fbs_res:
             tg(f"🟡 {s} HOLD BUY +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 62% still STRONG {crt_type}")
-            ACTIVE[buy_key]["last_hold_profit"]=profit; ACTIVE[buy_key]["highest"]=max(ACTIVE[buy_key].get("highest",0),c[-1]); save_active()
-        # REVERSAL SELL
+            ACTIVE[buy_key]["last_hold_profit"]=profit
+            ACTIVE[buy_key]["highest"]=max(ACTIVE[buy_key].get("highest",0),c[-1])
+            save_active()
         if fbs_res and "DOWN_STRONG" in fbs_res:
             fbs_15,res15_top,brp15=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
             if fbs_15 and "DOWN_STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,False):
@@ -200,11 +211,12 @@ def full_scan(s,p):
                 emoji="🟢" if pnl>=0 else "🔴"
                 tg(f"<b>REVERSAL {s} CLOSE BUY</b> {emoji} {pnl:+.2f}% {time_12hr} TBS SELL + FBS 38% {crt_type}")
                 del ACTIVE[buy_key]; save_active()
-                key=f"{s}_SELL"; COOLDOWN["signals"][key]={"t":now,"dir":False,"top":res15_top,"entry":entry}; save()
+                key=f"{s}_SELL"
+                COOLDOWN["signals"][key]={"t":now,"dir":False,"top":res15_top,"entry":entry}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":False,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
                 vol_tag="10% VOL" if is_vol else "4% STABLE"
-                tg(f"🔴 {s} SELL 38% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | Foundation+Climb | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
+                tg(f"🔴 {s} SELL 38% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
                 return
         if c[-1]>ACTIVE[buy_key].get("highest",0):
             ACTIVE[buy_key]["highest"]=c[-1]; save_active()
@@ -217,7 +229,8 @@ def full_scan(s,p):
         hold_step=2.0 if s in FAST_SYMS else 1.0
         if profit-last_profit>=hold_step and fbs_res and "DOWN_STRONG" in fbs_res:
             tg(f"🟡 {s} HOLD SELL +{profit:.2f}% | {time_12hr} Price {live_price:.6f} FBS 38% still STRONG {crt_type}")
-            ACTIVE[sell_key]["last_hold_profit"]=profit; ACTIVE[sell_key]["lowest"]=min(ACTIVE[sell_key].get("lowest",999999),c[-1]); save_active()
+            ACTIVE[sell_key]["last_hold_profit"]=profit
+            ACTIVE[sell_key]["lowest"]=min(ACTIVE[sell_key].get("lowest",999999),c[-1]); save_active()
         if fbs_res and "UP_STRONG" in fbs_res:
             fbs_15,res15_top,brp15=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
             if fbs_15 and "UP_STRONG" in fbs_15 and check_tbs(o,h,l,c,crt_low,crt_high,True):
@@ -230,21 +243,22 @@ def full_scan(s,p):
                 emoji="🟢" if pnl>=0 else "🔴"
                 tg(f"<b>REVERSAL {s} CLOSE SELL</b> {emoji} {pnl:+.2f}% {time_12hr} TBS BUY + FBS 62% {crt_type}")
                 del ACTIVE[sell_key]; save_active()
-                key=f"{s}_BUY"; COOLDOWN["signals"][key]={"t":now,"dir":True,"top":res15_top,"entry":entry}; save()
+                key=f"{s}_BUY"
+                COOLDOWN["signals"][key]={"t":now,"dir":True,"top":res15_top,"entry":entry}; save()
                 LAST_TOP[key]=(res15_top,now)
                 ACTIVE[key]={"entry":entry,"is_buy":True,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
                 vol_tag="10% VOL" if is_vol else "4% STABLE"
-                tg(f"🟢 {s} BUY 62% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | Foundation+Climb | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
+                tg(f"🟢 {s} BUY 62% STRONG | {crt_type} CRT {crt_pct:.1f}% | 5m TBS | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
                 return
         if c[-1]<ACTIVE[sell_key].get("lowest",999999):
             ACTIVE[sell_key]["lowest"]=c[-1]; save_active()
         return
 
-    # NEW ENTRY - 4 STAGE MANSION BOTH SIDES
     fbs_res=None; top_level=0; big_range_pct=0
     for tf_data in [d5,d15]:
         res,top,brp=fbs_image_logic(tf_data["h"],tf_data["l"],tf_data["c"],tf_data["o"])
-        if res and "STRONG" in res: fbs_res=res; top_level=top; big_range_pct=brp; break
+        if res and "STRONG" in res:
+            fbs_res=res; top_level=top; big_range_pct=brp; break
         if res and "WEAK" in res: return
     if not fbs_res: return
     is_buy="UP" in fbs_res; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
@@ -262,14 +276,19 @@ def full_scan(s,p):
             if abs(day_pct)>limit: return
     except: pass
 
-    if s in FAST_SYMS: SAME_CD=COOLDOWN_FAST_SAME; OPP_CD=COOLDOWN_FAST_OPP; LVL_CD=COOLDOWN_FAST_LVL
-    else: SAME_CD=COOLDOWN_SLOW_SAME; OPP_CD=COOLDOWN_SLOW_OPP; LVL_CD=COOLDOWN_SLOW_LVL
+    if s in FAST_SYMS:
+        SAME_CD=COOLDOWN_FAST_SAME; OPP_CD=COOLDOWN_FAST_OPP; LVL_CD=COOLDOWN_FAST_LVL
+    else:
+        SAME_CD=COOLDOWN_SLOW_SAME; OPP_CD=COOLDOWN_SLOW_OPP; LVL_CD=COOLDOWN_SLOW_LVL
 
     if f"{s}_{side}" in LAST_TOP:
         last_top,last_time=LAST_TOP[f"{s}_{side}"]
         if abs(top_level-last_top)/(last_top or 1)<0.005 and (now-last_time)<LVL_CD: return
-    prev=COOLDOWN["signals"].get(key,{}); if now-prev.get("t",0)<SAME_CD: return
-    opp_key=f"{s}_{'SELL' if is_buy else 'BUY'}"; opp_prev=COOLDOWN["signals"].get(opp_key,{})
+
+    prev=COOLDOWN["signals"].get(key,{})
+    if now-prev.get("t",0)<SAME_CD: return
+    opp_key=f"{s}_{'SELL' if is_buy else 'BUY'}"
+    opp_prev=COOLDOWN["signals"].get(opp_key,{})
     if now-opp_prev.get("t",0)<OPP_CD: return
     if is_buy and pat=="double_top": return
     if not is_buy and pat=="double_bottom": return
@@ -279,17 +298,20 @@ def full_scan(s,p):
     ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60)
     if not ob: ob=(min(l[-15:]),max(h[-15:]))
     entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol,crt_pct=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,big_range_pct,s,crt_low,crt_high)
-    min_rr1=1.0 if is_vol else 1.2; min_rr2=1.8 if is_vol else 2.0
+    min_rr1=1.0 if is_vol else 1.2
+    min_rr2=1.8 if is_vol else 2.0
     if rr1<min_rr1 or rr1>8.0: return
     if rr2<min_rr2: return
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top_level,"entry":entry}; save()
     LAST_TOP[f"{s}_{side}"]=(top_level,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0}; save_active()
-    vol_tag="10% VOL" if is_vol else "4% STABLE"; color="🟢" if is_buy else "🔴"; fbs_l="FBS 62%" if is_buy else "FBS 38%"
+    vol_tag="10% VOL" if is_vol else "4% STABLE"
+    color="🟢" if is_buy else "🔴"
+    fbs_l="FBS 62%" if is_buy else "FBS 38%"
     tg(f"{color} {s} {side} {fbs_l} STRONG | {crt_type} {crt_pct:.1f}% | 5m TBS | Foundation+Climb | {vol_tag} | {time_12hr}\nPrice: {live_price:.6f} Entry: {entry:.6f} (OB) SL: {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R) TP2 {tp2:.6f} TP3 {tp3:.6f}")
 
-print("=== BOT V32 FINAL MANSION SOLID - ADAPTIVE + BOTH SIDES ===",flush=True)
+print("=== BOT V32 FINAL MANSION SOLID - FIXED ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
