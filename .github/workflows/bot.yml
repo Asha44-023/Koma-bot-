@@ -30,8 +30,6 @@ jobs:
           python3 -c "
           import json,time,os
           now=time.time()
-          # V32 cooldowns: FAST 90m same dir, 4h level | SLOW 6h same dir, 24h level
-          # So keep cooldown for 24h, active for 24h to allow HOLD to work
           for fname, expire in [('cooldown.json', 86400), ('active.json', 86400)]:
               if not os.path.exists(fname):
                   open(fname,'w').write(json.dumps({'signals':{}} if 'cooldown' in fname else {}))
@@ -39,7 +37,6 @@ jobs:
               try:
                   d=json.load(open(fname))
                   if 'cooldown' in fname:
-                      # Keep all signals within 24h
                       c={k:v for k,v in d.get('signals',{}).items() if now - v.get('t',0) < expire}
                       open(fname,'w').write(json.dumps({'signals':c}))
                       print(f'{fname} kept {len(c)} signals')
@@ -58,7 +55,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -u bot_v32_final.py --once
+        run: python -u bot.py --once
 
       - name: Show final state
         run: |
