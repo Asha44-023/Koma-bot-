@@ -1,5 +1,5 @@
-# BOT V33.7 FINAL PER-COIN PRO - 15m FBS=VOLUME + GRAB vs REVERSAL + PER-COIN TP/SL + STRATEGIC COOLDOWN
-import time, json, os, requests, sys, statistics
+# BOT V34 DIAGRAM PRO - 4H Bias -> 1H Structure (Trend/Breaks/OB/FVG/Liq) -> 15m FBS CONFIRM -> 5m ENTRY + PER-COIN TP/SL
+import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -9,22 +9,16 @@ SYMBOL_MAP = {
 }
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
 FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"]
-SLOW_SYMS = ["SANDUSDT","TAOUSDT","JASMYUSDT"]
 
-# === PER-COIN BEST TP/SL BASED ON HOW EACH COIN PLAYS ===
 PER_COIN_TP = {
-    # ULTRA VOLATILE - needs big TP, bigger SL
     "FARTCOINUSDT": {"tp1":0.05, "tp2":0.09, "tp3":0.14, "sl_grab":0.02, "sl_rev":0.035, "sl_bos":0.025},
     "GRASSUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
     "KOMAUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
-    # MEDIUM VOLATILE
     "SENTUSDT": {"tp1":0.035, "tp2":0.065, "tp3":0.10, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
-    # STABLE - needs small TP or never hits
     "SANDUSDT": {"tp1":0.018, "tp2":0.035, "tp3":0.055, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
     "TAOUSDT": {"tp1":0.02, "tp2":0.04, "tp3":0.065, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
     "JASMYUSDT": {"tp1":0.018, "tp2":0.038, "tp3":0.06, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
 }
-
 DOM_SENSITIVITY = {"FARTCOINUSDT":2.5,"GRASSUSDT":2.2,"KOMAUSDT":2.0,"SENTUSDT":1.6,"SANDUSDT":1.3,"TAOUSDT":1.1,"JASMYUSDT":1.2}
 BTC_DOM_CACHE = {"value":58.5,"history":[],"last_fetch":0}
 
@@ -39,14 +33,12 @@ def get_btc_dominance():
         BTC_DOM_CACHE["last_fetch"]=now; return btc_d, BTC_DOM_CACHE["history"]
     except: return BTC_DOM_CACHE["value"], BTC_DOM_CACHE["history"]
 
-def check_btc_dominance_filter(symbol,is_buy):
+def check_btc_filter(sym,is_buy):
     btc_d,hist=get_btc_dominance()
     if len(hist)<2: return True
-    change=btc_d-hist[0][1]; eff=change*DOM_SENSITIVITY.get(symbol,1.0)
-    if change>=0.6 and eff>=0.9 and is_buy: print(f"⛔ DOM +{change:.2f}% BLOCK BUY {symbol}",flush=True); return False
-    if change<=-0.6 and eff<=-0.9 and not is_buy: print(f"⛔ DOM {change:.2f}% BLOCK SELL {symbol}",flush=True); return False
-    if btc_d>60.5 and DOM_SENSITIVITY.get(symbol,1.0)>=2.0 and is_buy: return False
-    if btc_d<54.0 and DOM_SENSITIVITY.get(symbol,1.0)>=2.0 and not is_buy: return False
+    change=btc_d-hist[0][1]; eff=change*DOM_SENSITIVITY.get(sym,1.0)
+    if change>=0.6 and eff>=0.9 and is_buy: return False
+    if change<=-0.6 and eff<=-0.9 and not is_buy: return False
     return True
 
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
@@ -88,16 +80,53 @@ def kl(sym,interval):
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
     except: return None
 
-def detect_foundation(o,h,l,c,is_buy,crt_low,crt_high):
-    for i in range(-20,-1):
-        try:
-            body=abs(c[i]-o[i]); rng=h[i]-l[i] or 1e-9
-            is_doji=body/rng<0.2
-            is_engulf=(is_buy and c[i]>o[i] and c[i-1]<o[i-1]) or (not is_buy and c[i]<o[i] and c[i-1]>o[i-1])
-            near_edge=(is_buy and l[i]<=crt_low*1.015) or (not is_buy and h[i]>=crt_high*0.985)
-            if (is_doji or is_engulf) and near_edge: return True
-        except: pass
-    return False
+# === DIAGRAM FUNCTIONS ===
+def get_4h_bias(d240):
+    # Direction + Key levels + Supply Demand
+    h,l,c=d240["h"],d240["l"],d240["c"]
+    if len(c)<50: return None,0,0,""
+    crt_low=min(l[-48:]); crt_high=max(h[-48:]); mid=(crt_low+crt_high)/2
+    ema50=sum(c[-50:])/50
+    # Direction: price vs mid + ema
+    if c[-1]>mid and c[-1]>ema50: bias="BULL"; key_level=crt_high; sd_zone=(crt_low,mid)
+    elif c[-1]<mid and c[-1]<ema50: bias="BEAR"; key_level=crt_low; sd_zone=(mid,crt_high)
+    else: bias="RANGE"; key_level=mid; sd_zone=(crt_low,crt_high)
+    return bias,crt_low,crt_high,key_level
+
+def detect_fvg(h,l,lookback=20):
+    # Fair Value Gap: 3-candle gap
+    fvg_list=[]
+    for i in range(len(h)-lookback, len(h)-2):
+        # Bull FVG: l[i+2] > h[i]
+        if l[i+2] > h[i]: fvg_list.append({"type":"BULL","top":l[i+2],"bot":h[i],"pct":(l[i+2]-h[i])/h[i]*100})
+        # Bear FVG: h[i+2] < l[i]
+        if h[i+2] < l[i]: fvg_list.append({"type":"BEAR","top":l[i],"bot":h[i+2],"pct":(l[i]-h[i+2])/l[i]*100})
+    return fvg_list[-3:] if fvg_list else []
+
+def get_1h_structure(d60):
+    h,l,c,o=d60["h"],d60["l"],d60["c"],d60["o"]
+    if len(c)<50: return "none","none",None,[],"none"
+    # Trend
+    up=sum(1 for i in range(-20,-1) if c[i]>c[i-1]); down=20-up
+    trend="UP" if up>=13 else "DOWN" if down>=13 else "RANGE"
+    # Breaks
+    last_high=max(h[-20:-1]); last_low=min(l[-20:-1])
+    breaks="BOS_UP" if c[-1]>last_high else "BOS_DOWN" if c[-1]<last_low else "none"
+    # OB
+    atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
+    ob=None
+    for i in range(len(c)-2,len(c)-30,-1):
+        if c[i]<o[i] and c[i+1]>o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: ob=(l[i],h[i],"BULL"); break
+        if c[i]>o[i] and c[i+1]<o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: ob=(l[i],h[i],"BEAR"); break
+    # FVG + Liquidity
+    fvg=detect_fvg(h,l)
+    # Double top/bottom = Reversal
+    tops=[]; bots=[]
+    for i in range(3,len(h)-3):
+        if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]: tops.append(h[i])
+        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: bots.append(l[i])
+    reversal="double_top" if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008 else "double_bottom" if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008 else "none"
+    return trend,breaks,ob,fvg,reversal
 
 def fbs_image_logic(h,l,c,o):
     if len(c)<3: return None,0,0
@@ -128,81 +157,34 @@ def fbs_trend_pump_logic(h,l,c,o):
         if pc <= p32 and cc <= p68 and cc < p75 and cc < co: return "BOS_DOWN_TREND_STRONG_32_68",pl,big_range_pct
     return None,0,big_range_pct
 
-def is_steady_trend_pump(h,l,c,o,v):
-    if len(c)<20: return False
-    up=sum(1 for i in range(-12,-1) if c[i]>c[i-1]); down=sum(1 for i in range(-12,-1) if c[i]<c[i-1])
-    avg_body=sum(abs(c[i]-o[i]) for i in range(-12,-1))/12
-    avg_range=sum(h[i]-l[i] for i in range(-12,-1))/12 or 1e-9
-    return (up>=6 or down>=6) and avg_body/avg_range>0.52
-
-def build_crt(symbol,h,l):
-    look=min(48,len(h)) if symbol in FAST_SYMS else min(288,len(h))
-    crt_type="4H CRT" if symbol in FAST_SYMS else "Day CRT"
-    return min(l[-look:]), max(h[-look:]), crt_type
-
 def check_tbs(o,h,l,c,crt_low,crt_high,is_buy):
     if len(c)<3: return False
     if is_buy: return l[-2]<crt_low and c[-1]>crt_low and c[-1]>o[-1]
     else: return h[-2]>crt_high and c[-1]<crt_high and c[-1]<o[-1]
 
-def pattern(h,l):
-    tops=[]; bots=[]
-    for i in range(3,len(h)-3):
-        if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]: tops.append((i,h[i]))
-        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: bots.append((i,l[i]))
-    if len(tops)>=2 and abs(tops[-1][1]-tops[-2][1])/tops[-2][1]<0.008: return "double_top"
-    if len(bots)>=2 and abs(bots[-1][1]-bots[-2][1])/bots[-2][1]<0.008: return "double_bottom"
-    return "none"
-
-def get_last_ob(o,h,l,c,bullish=True,lookback=60):
-    atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
-    for i in range(len(c)-2,len(c)-lookback,-1):
-        if bullish and c[i]<o[i] and c[i+1]>o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
-        if not bullish and c[i]>o[i] and c[i+1]<o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
-    return None
-
-def get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,big_range_pct,symbol,crt_low,crt_high,setup_type):
-    ob_low,ob_high=ob; prange=ob_high-ob_low
+def get_perfect_entry(o,h,l,c,ob,is_buy,symbol,crt_low,crt_high,setup_type):
+    ob_low,ob_high=ob[0],ob[1]
+    prange=ob_high-ob_low
     crt_range_pct=(crt_high-crt_low)/(crt_low or 1)*100
-    is_volatile=symbol in FAST_SYMS or big_range_pct>2.5
-    coin_cfg = PER_COIN_TP.get(symbol, PER_COIN_TP["GRASSUSDT"])
-
-    # PER-COIN BASE + CRT ADAPTIVE
-    if setup_type=="LIQUIDITY_GRAB_CONTINUATION":
-        sl_pct=coin_cfg["sl_grab"]
-        tp1_pct=max(coin_cfg["tp1"], crt_range_pct*0.45/100)
-        tp2_pct=max(coin_cfg["tp2"], crt_range_pct*0.85/100)
-        tp3_pct=max(coin_cfg["tp3"], crt_range_pct*1.30/100)
-    elif setup_type=="REVERSAL":
-        sl_pct=coin_cfg["sl_rev"]
-        tp1_pct=max(coin_cfg["tp1"]*0.85, crt_range_pct*0.35/100) # tighter for reversal
-        tp2_pct=max(coin_cfg["tp2"]*0.85, crt_range_pct*0.65/100)
-        tp3_pct=max(coin_cfg["tp3"]*0.85, crt_range_pct*1.0/100)
-    else: # BOS_CONTINUATION
-        sl_pct=coin_cfg["sl_bos"]
-        tp1_pct=max(coin_cfg["tp1"], crt_range_pct*0.40/100)
-        tp2_pct=max(coin_cfg["tp2"], crt_range_pct*0.75/100)
-        tp3_pct=max(coin_cfg["tp3"], crt_range_pct*1.15/100)
-
+    cfg=PER_COIN_TP.get(symbol, PER_COIN_TP["GRASSUSDT"])
+    if setup_type=="GRAB": sl_pct=cfg["sl_grab"]; tp1_pct=max(cfg["tp1"], crt_range_pct*0.45/100); tp2_pct=max(cfg["tp2"], crt_range_pct*0.85/100); tp3_pct=max(cfg["tp3"], crt_range_pct*1.30/100)
+    elif setup_type=="REVERSAL": sl_pct=cfg["sl_rev"]; tp1_pct=max(cfg["tp1"]*0.85, crt_range_pct*0.35/100); tp2_pct=max(cfg["tp2"]*0.85, crt_range_pct*0.65/100); tp3_pct=max(cfg["tp3"]*0.85, crt_range_pct*1.0/100)
+    else: sl_pct=cfg["sl_bos"]; tp1_pct=max(cfg["tp1"], crt_range_pct*0.40/100); tp2_pct=max(cfg["tp2"], crt_range_pct*0.75/100); tp3_pct=max(cfg["tp3"], crt_range_pct*1.15/100)
     if is_buy:
-        entry=ob_low+prange*(0.56 if is_volatile else 0.44)
-        sl=entry*(1-sl_pct); tp1=entry*(1+tp1_pct); tp2=entry*(1+tp2_pct); tp3=entry*(1+tp3_pct)
+        entry=ob_low+prange*0.56; sl=entry*(1-sl_pct); tp1=entry*(1+tp1_pct); tp2=entry*(1+tp2_pct); tp3=entry*(1+tp3_pct)
     else:
-        entry=ob_high-prange*(0.56 if is_volatile else 0.44)
-        sl=entry*(1+sl_pct); tp1=entry*(1-tp1_pct); tp2=entry*(1-tp2_pct); tp3=entry*(1-tp3_pct)
-    risk=abs(entry-sl); rr1=abs(tp1-entry)/(risk or 1e-9); rr2=abs(tp2-entry)/(risk or 1e-9); rr3=abs(tp3-entry)/(risk or 1e-9)
-    return entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_volatile,crt_range_pct
+        entry=ob_high-prange*0.56; sl=entry*(1+sl_pct); tp1=entry*(1-tp1_pct); tp2=entry*(1-tp2_pct); tp3=entry*(1-tp3_pct)
+    risk=abs(entry-sl); rr1=abs(tp1-entry)/(risk or 1e-9)
+    return entry,sl,tp1,tp2,tp3,rr1,crt_range_pct
 
 def full_scan(s,p):
-    d5=kl(p,"Min5"); d15=kl(p,"Min15")
-    if not d5 or not d15: return
-    c,o,h,l,v=d5["c"],d5["o"],d5["h"],d5["l"],d5["v"]
-    if len(c)<60: return
+    d240=kl(p,"Min240"); d60=kl(p,"Min60"); d15=kl(p,"Min15"); d5=kl(p,"Min5")
+    if not d240 or not d60 or not d15 or not d5: return
+    c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
-    crt_low,crt_high,crt_type=build_crt(s,d15["h"],d15["l"])
 
-    # STRATEGIC 1: ACTIVE BLOCK - no double message while in trade
+    # === ACTIVE HOLD LOGIC ===
     if buy_key in ACTIVE or sell_key in ACTIVE:
         active_key=buy_key if buy_key in ACTIVE else sell_key
         is_active_buy=ACTIVE[active_key]["is_buy"]
@@ -211,26 +193,22 @@ def full_scan(s,p):
         profit=(c[-1]-ACTIVE[active_key]["entry"])/ACTIVE[active_key]["entry"]*100 if is_active_buy else (ACTIVE[active_key]["entry"]-c[-1])/ACTIVE[active_key]["entry"]*100
         if fbs15 and ("UP" in fbs15 if is_active_buy else "DOWN" in fbs15) and "STRONG" in fbs15:
             if profit-ACTIVE[active_key].get("last_hold_profit",0)>= (2.0 if s in FAST_SYMS else 1.0):
-                tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr} 15m {fbs15} {crt_type}")
+                tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr}")
                 ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
-        if fbs15 and ("DOWN" in fbs15 if is_active_buy else "UP" in fbs15) and "STRONG" in fbs15:
-            if check_tbs(o,h,l,c,crt_low,crt_high,not is_active_buy) and check_btc_dominance_filter(s, not is_active_buy):
-                ob=get_last_ob(o,h,l,c,bullish=not is_active_buy,lookback=60) or (min(l[-15:]),max(h[-15:]))
-                entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol,crt_pct=get_perfect_entry_sl_tp(o,h,l,c,ob,not is_active_buy,0,s,crt_low,crt_high,"REVERSAL")
-                if rr1>=1.0 and rr1<=8:
-                    tg(f"<b>REVERSAL CLOSE {s}</b> {profit:+.2f}% {time_12hr} | 15m {fbs15} {crt_type}")
-                    del ACTIVE[active_key]; save_active()
-                    key=f"{s}_{'SELL' if is_active_buy else 'BUY'}"
-                    COOLDOWN["signals"][key]={"t":now,"dir":not is_active_buy,"top":0,"entry":entry}; save()
-                    LAST_TOP[key]=(0,now)
-                    ACTIVE[key]={"entry":entry,"is_buy":not is_active_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":"REVERSAL"}; save_active()
-                    tg(f"{'🔴' if not is_active_buy else '🟢'} {s} REVERSAL {fbs15} | {crt_type} CRT {crt_pct:.1f}% | SL {sl:.6f} TP1 {tp1:.6f} ({rr1:.1f}R)")
-                    return
-        if is_active_buy and c[-1]>ACTIVE[active_key].get("highest",0): ACTIVE[active_key]["highest"]=c[-1]; save_active()
-        if not is_active_buy and c[-1]<ACTIVE[active_key].get("lowest",999999): ACTIVE[active_key]["lowest"]=c[-1]; save_active()
         return
 
-    # 15m FBS PRIMARY = VOLUME
+    # === 1. 4H ANALYSIS: Direction + Key levels + Supply Demand (FROM DIAGRAM) ===
+    bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
+    if not bias_4h: return
+    # Use 1H CRT for entry too (more precise)
+    crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
+
+    # === 2. 1H ANALYSIS: Trend / Breaks / OB / FVG / Liquidity / Reversal (FROM DIAGRAM) ===
+    trend_1h,breaks_1h,ob_1h,fvg_1h,reversal_1h=get_1h_structure(d60)
+    has_fvg=len(fvg_1h)>0
+    has_ob=ob_1h is not None
+
+    # === 3. 15MIN ANALYSIS: Confirmation (FROM DIAGRAM) ===
     fbs15, top15, brp15 = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
     if not fbs15 or "STRONG" not in fbs15:
         fbs15, top15, brp15 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
@@ -238,44 +216,60 @@ def full_scan(s,p):
 
     is_buy="UP" in fbs15; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
 
-    # STRATEGIC 2: LEVEL DUPLICATE BLOCK - no same level spam
-    if key in LAST_TOP:
-        last_top,last_time=LAST_TOP[key]
-        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): return
+    # === FILTERS FROM DIAGRAM ===
+    # 4H Direction must match 15m
+    if bias_4h=="BULL" and not is_buy: return
+    if bias_4h=="BEAR" and is_buy: return
+    # 1H Trend must match (if RANGE allow both)
+    if trend_1h=="UP" and not is_buy: return
+    if trend_1h=="DOWN" and is_buy: return
+    # Must have at least OB or FVG (diagram says OB, FVG, Liquidity)
+    if not has_ob and not has_fvg:
+        # allow if strong BOS + liquidity grab
+        if "TREND" not in fbs15: return
 
-    # STRATEGIC 3: TIME COOLDOWN
+    # Strategic cooldown
     SAME_CD=150*60 if s in FAST_SYMS else 8*3600
     OPP_CD=90*60 if s in FAST_SYMS else 4*3600
     if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: return
     if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: return
+    if key in LAST_TOP:
+        last_top,last_time=LAST_TOP[key]
+        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): return
 
-    if not detect_foundation(d15["o"],d15["h"],d15["l"],d15["c"],is_buy,crt_low,crt_high):
-        if "TREND" not in fbs15 or not is_steady_trend_pump(d15["h"],d15["l"],d15["c"],d15["o"],d15["v"]): return
-
+    # === 4. 5MIN: TBS CONFIRMATION ===
+    crt_low,crt_high = (crt_low_1h,crt_high_1h) if s in FAST_SYMS else (crt_low_4h,crt_high_4h)
     if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy): return
-    if not check_btc_dominance_filter(s,is_buy): return
-    pat=pattern(d15["h"],d15["l"])
-    if is_buy and pat=="double_top": return
-    if not is_buy and pat=="double_bottom": return
+    if not check_btc_filter(s,is_buy): return
 
-    # GRAB vs REVERSAL
-    setup_type="BOS_CONTINUATION"
-    if is_buy and l[-2]<crt_low*0.998 and fbs15=="BOS_UP_TREND_STRONG_32_68": setup_type="LIQUIDITY_GRAB_CONTINUATION"
-    if not is_buy and h[-2]>crt_high*1.002 and fbs15=="BOS_DOWN_TREND_STRONG_32_68": setup_type="LIQUIDITY_GRAB_CONTINUATION"
-    if pat in ["double_top","double_bottom"]: setup_type="REVERSAL"
+    # Setup type
+    setup_type="BOS"
+    if is_buy and l[-2]<crt_low*0.998 and "TREND" in fbs15: setup_type="GRAB"
+    if not is_buy and h[-2]>crt_high*1.002 and "TREND" in fbs15: setup_type="GRAB"
+    if reversal_1h!="none": setup_type="REVERSAL"
 
-    ob=get_last_ob(o,h,l,c,bullish=is_buy,lookback=60) or (min(l[-15:]),max(h[-15:]))
-    entry,sl,tp1,tp2,tp3,rr1,rr2,rr3,is_vol,crt_pct=get_perfect_entry_sl_tp(o,h,l,c,ob,is_buy,brp15,s,crt_low,crt_high,setup_type)
-    if rr1<1.0 or rr1>8 or rr2<1.8: return
+    # OB for entry: use 1H OB if exists else 5m OB
+    def get_last_ob_5m():
+        atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
+        for i in range(len(c)-2,len(c)-60,-1):
+            if is_buy and c[i]<o[i] and c[i+1]>o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
+            if not is_buy and c[i]>o[i] and c[i+1]<o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
+        return None
+
+    ob_entry = (ob_1h[0],ob_1h[1]) if ob_1h else get_last_ob_5m()
+    if not ob_entry: ob_entry=(min(l[-15:]),max(h[-15:]))
+
+    entry,sl,tp1,tp2,tp3,rr1,crt_pct=get_perfect_entry(o,h,l,c,ob_entry,is_buy,s,crt_low,crt_high,setup_type)
+    if rr1<1.0 or rr1>8: return
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top15,"entry":entry}; save()
     LAST_TOP[key]=(top15,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type}; save_active()
-    tag="GRAB CONTINUES" if "GRAB" in setup_type else ("REVERSAL" if setup_type=="REVERSAL" else "BOS")
-    cfg=PER_COIN_TP[s]
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {tag} | {fbs15} | 15m FBS=VOLUME | {crt_type} {crt_pct:.1f}% | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob[0]:.6f}-{ob[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}% {setup_type}) Per-Coin: GRAB {cfg['sl_grab']*100:.1f}% / REV {cfg['sl_rev']*100:.1f}%\nTP1: {tp1:.6f} ({rr1:.1f}R) TP2: {tp2:.6f} ({rr2:.1f}R) TP3: {tp3:.6f} ({rr3:.1f}R)\nPer-Coin Base: {cfg['tp1']*100:.1f}% / {cfg['tp2']*100:.1f}% / {cfg['tp3']*100:.1f}% | CRT adaptive {crt_pct*0.45:.1f}% | Setup: {setup_type} | Pattern: {pat}")
 
-print("=== BOT V33.7 FINAL PER-COIN PRO ===",flush=True)
+    fvg_txt=" + FVG" if has_fvg else ""
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS=VOLUME | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\nPer-Coin: {PER_COIN_TP[s]['tp1']*100:.1f}%/{PER_COIN_TP[s]['tp2']*100:.1f}%/{PER_COIN_TP[s]['tp3']*100:.1f}%")
+
+print("=== BOT V34 DIAGRAM PRO 4H->1H->15m->5m ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
