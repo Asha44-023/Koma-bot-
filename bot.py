@@ -3,7 +3,7 @@ import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-VERBOSE = False
+VERBOSE = True
 
 SYMBOL_MAP = {
     "GRASSUSDT":"GRASS_USDT","KOMAUSDT":"KOMA_USDT","FARTCOINUSDT":"FARTCOIN_USDT",
