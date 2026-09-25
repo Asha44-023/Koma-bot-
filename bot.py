@@ -1,4 +1,4 @@
-# BOT V36 DIAGRAM PRO - TIMER MODE + 58/35 + 78/22 + TBS OPTIONAL + EXTENDED TP 11.17%/13.3% ALL COINS + SMART WALL 30/10 MIN
+# BOT V37 DIAGRAM PRO - NO TIMER + 65/35 REVERSAL + 78/22 + TBS + EXTENDED TP 11.17%/13.3% ALL COINS + SMART WALL NO TIMER
 import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,18 +25,6 @@ PER_COIN_TP = {
     "JASMYUSDT": {"tp1":0.018, "tp2":0.038, "tp3":0.06, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
 }
 
-PER_COIN_TIMER = {
-    "GRASSUSDT": {"est_mins": 90, "max_mins": 210},
-    "FARTCOINUSDT": {"est_mins": 100, "max_mins": 300},
-    "KOMAUSDT": {"est_mins": 120, "max_mins": 360},
-    "SENTUSDT": {"est_mins": 70, "max_mins": 180},
-    "LABUSDT": {"est_mins": 45, "max_mins": 135},
-    "SIRENUSDT": {"est_mins": 120, "max_mins": 360},
-    "SANDUSDT": {"est_mins": 80, "max_mins": 220},
-    "TAOUSDT": {"est_mins": 60, "max_mins": 180},
-    "JASMYUSDT": {"est_mins": 120, "max_mins": 360},
-}
-
 DOM_SENSITIVITY = {"FARTCOINUSDT":2.5,"GRASSUSDT":2.2,"KOMAUSDT":2.0,"SENTUSDT":1.6,"LABUSDT":2.4,"SIRENUSDT":2.0,"SANDUSDT":1.3,"TAOUSDT":1.1,"JASMYUSDT":1.2}
 BTC_DOM_CACHE = {"value":58.5,"history":[],"last_fetch":0}
 
@@ -59,14 +47,35 @@ def check_btc_filter(sym,is_buy):
     if change<=-0.6 and eff<=-0.9 and not is_buy: return False
     return True
 
-def check_hold_timer(symbol, entry_time_epoch):
-    now = time.time()
-    mins_in = (now - entry_time_epoch) / 60
-    cfg = PER_COIN_TIMER.get(symbol, {"est_mins": 120, "max_mins": 360})
-    est = cfg["est_mins"]; max_hold = cfg["max_mins"]
-    if mins_in >= max_hold: return "CLOSE_MAX_EXCEEDED", mins_in, max_hold
-    elif mins_in >= est: return "MOVE_SL_TO_BE", mins_in, max_hold
-    else: return "HOLD", mins_in, max_hold
+# === NEW 65-35 REVERSAL LOGIC - NO TIMER ===
+def check_65_35_reversal(s, c, h, l, o, v, is_active_buy, entry_price):
+    if len(c) < 6: return "HOLD", 0
+    live = c[-1]
+    profit = (live - entry_price)/entry_price*100 if is_active_buy else (entry_price - live)/entry_price*100
+    body = abs(c[-1] - o[-1])
+    upper_wick = h[-1] - max(c[-1], o[-1])
+    lower_wick = min(c[-1], o[-1]) - l[-1]
+
+    if is_active_buy:
+        if upper_wick > body * 1.5 and profit > 1.0:
+            return "TAKE_HALF_65", profit
+        if c[-1] < l[-2] and profit < 0.5 and profit > -2:
+            return "REVERSAL_65_CONFIRMED", profit
+        if c[-1] < entry_price * 0.985 and lower_wick < body * 0.3:
+            return "BREAK_35_EXIT", profit
+    else:
+        if lower_wick > body * 1.5 and profit > 1.0:
+            return "TAKE_HALF_65", profit
+        if c[-1] > h[-2] and profit < 0.5 and profit > -2:
+            return "REVERSAL_65_CONFIRMED", profit
+        if c[-1] > entry_price * 1.015 and upper_wick < body * 0.3:
+            return "BREAK_35_EXIT", profit
+
+    if len(v) >= 6:
+        avg_vol = sum(v[-6:-1])/5
+        if v[-1] < avg_vol * 0.6 and profit > 0.5:
+            return "HOLD_PROFIT_WEAK_VOL_65", profit
+    return "HOLD_65", profit
 
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; WALL_FILE="wall_alerts.json"
 COOLDOWN={"signals":{}}; ACTIVE={}; WALL_ALERTS={}
@@ -215,65 +224,38 @@ def check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg):
     if is_buy: return l[-2] < crt_low*1.002 and c[-1] > crt_low*0.998 and c[-1] > o[-1]
     else: return h[-2] > crt_high*0.998 and c[-1] < crt_high*1.002 and c[-1] < o[-1]
 
-# === V36 SMART WALL PREDICTOR - 30 MIN + 10 MIN PRE-WARNING - ALL COINS ===
-def check_wall_predictive(s, c, h, crt_high_4h, crt_low_4h):
+# === V37 SMART WALL - NO TIMER, PRICE ONLY ===
+def check_wall_no_timer(s, c, h, crt_high_4h, crt_low_4h):
     live = c[-1]
     if len(c) < 10: return None
-    speed_5m = (c[-1] - c[-6]) / 6 if len(c)>=6 else 0
-    if speed_5m <= 0: return None
-
-    # Find nearest ceiling wall
-    # Round number wall (0.50, 1.00, 0.20 etc)
-    # Use 0.05 steps for low price coins like GRASS
     if live < 1:
-        round_wall = round(live*20)/20 # 0.05 steps
+        round_wall = round(live*20)/20
         if round_wall <= live: round_wall += 0.05
     else:
         round_wall = round(live*2)/2
         if round_wall <= live: round_wall += 0.5
-
-    # Choose closest wall between round and 4H CRT high
     dist_round = abs(round_wall - live)
     dist_crt = abs(crt_high_4h - live) if crt_high_4h > live else 999
     wall = round_wall if dist_round < dist_crt else crt_high_4h
     if wall <= live: return None
-
     dist_to_wall_pct = (wall - live) / live * 100
     if dist_to_wall_pct > 4 or dist_to_wall_pct < 0.15: return None
-
-    speed_pct_per_5m = speed_5m / live * 100
-    if speed_pct_per_5m < 0.03: return None
-    mins_to_wall = (dist_to_wall_pct / speed_pct_per_5m) * 5
-
-    # Weakening detection
-    upper_wick = h[-1] - max(c[-1], 0)
-    vol_weak = (h[-1]-c[-1]) > (c[-1]-min(c[-6:]))*0.5 if len(c)>=6 else False
-
-    dump_target = wall * 0.97 # 3% dump
-    if crt_high_4h > 0 and crt_low_4h > 0:
-        # More accurate dump target = 35% of range
-        dump_target = crt_low_4h + (crt_high_4h - crt_low_4h)*0.35
-
+    dump_target = crt_low_4h + (crt_high_4h - crt_low_4h)*0.35 if crt_high_4h>0 and crt_low_4h>0 else wall*0.97
     now = time.time()
-    key30 = f"{s}_30MIN"
-    key10 = f"{s}_10MIN"
+    keyPrep = f"{s}_PREP"
     keyHit = f"{s}_HIT"
-
-    # 30 MIN WARNING
-    if 25 <= mins_to_wall <= 38:
-        if now - WALL_ALERTS.get(key30,0) > 3600: # once per hour max
-            WALL_ALERTS[key30]=now; save_wall()
-            return f"⏰ 30-MIN WALL PREP {s} | Wall {wall:.5f} in ~{mins_to_wall:.0f}m | Price {live:.5f} (+{dist_to_wall_pct:.2f}%) | Take partials, move SL to BE | Dump target {dump_target:.5f} | {get_time_12hr()}"
-    # 10 MIN WARNING
-    if 8 <= mins_to_wall <= 13:
-        if now - WALL_ALERTS.get(key10,0) > 1800:
-            WALL_ALERTS[key10]=now; save_wall()
-            return f"🔔 10-MIN WALL WARNING {s} | Wall {wall:.5f} in ~{mins_to_wall:.0f}m | EXIT NOW at TOP | Price {live:.5f} | Dump to {dump_target:.5f} in 30-45m | {get_time_12hr()}"
-    # WALL HIT
-    if mins_to_wall < 4 or dist_to_wall_pct < 0.4:
-        if vol_weak and now - WALL_ALERTS.get(keyHit,0) > 1800:
+    upper_wick = h[-1] - max(c[-1], 0)
+    if 0.3 <= dist_to_wall_pct <= 1.5:
+        if now - WALL_ALERTS.get(keyPrep,0) > 1800:
+            WALL_ALERTS[keyPrep]=now; save_wall()
+            return f"🧱 WALL PREP {s} | Roof {wall:.5f} | Now {live:.5f} ({dist_to_wall_pct:.2f}% below) | 65% holds = dump to {dump_target:.5f} | 35% break = exit | Watch wick close | {get_time_12hr()}"
+    if dist_to_wall_pct < 0.35:
+        if now - WALL_ALERTS.get(keyHit,0) > 900:
             WALL_ALERTS[keyHit]=now; save_wall()
-            return f"🧱 WALL HIT NOW {s} {wall:.5f} | Price {live:.5f} | DUMP STARTING to {dump_target:.5f} in 30-60m | CLOSE LONG, wait for {dump_target:.5f} retest | {get_time_12hr()}"
+            if upper_wick > abs(c[-1]-0)*0.5:
+                return f"🧱 WALL HIT + WICK {s} {wall:.5f} | Now {live:.5f} | 65% REVERSAL - Wick reject = HOLD SHORT, dump to {dump_target:.5f} | {get_time_12hr()}"
+            else:
+                return f"🧱 WALL HIT NOW {s} {wall:.5f} | Now {live:.5f} | Check close: below wall = 65% hold, above wall = 35% break exit | Dump target {dump_target:.5f} | {get_time_12hr()}"
     return None
 
 def get_perfect_entry(o,h,l,c,ob,is_buy,symbol,crt_low,crt_high,setup_type,bias_4h):
@@ -308,44 +290,39 @@ def full_scan(s,p):
     d240=kl(p,"Min240"); d60=kl(p,"Min60"); d15=kl(p,"Min15"); d5=kl(p,"Min5")
     if not d240 or not d60 or not d15 or not d5:
         log(f"❌ {s}: NO KLINE DATA -> SKIP"); return
-    c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]
+    c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]; v=d5["v"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
-
-    # === WALL PREDICTOR CHECK FIRST (before active check) ===
     bias_4h_tmp, crt_low_tmp, crt_high_tmp, _ = get_4h_bias(d240)
     if bias_4h_tmp:
-        wall_msg = check_wall_predictive(s, c, h, crt_high_tmp, crt_low_tmp)
+        wall_msg = check_wall_no_timer(s, c, h, crt_high_tmp, crt_low_tmp)
         if wall_msg:
             tg(wall_msg)
             log(wall_msg)
-
     if buy_key in ACTIVE or sell_key in ACTIVE:
         active_key=buy_key if buy_key in ACTIVE else sell_key
         is_active_buy=ACTIVE[active_key]["is_buy"]
-        entry_t = ACTIVE[active_key]["t"]
-        status, mins_in, max_hold = check_hold_timer(s, entry_t)
+        entry_price = ACTIVE[active_key]["entry"]
         fbs15,_br,_=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         if not fbs15: fbs15,_br,_=fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-        profit=(c[-1]-ACTIVE[active_key]["entry"])/ACTIVE[active_key]["entry"]*100 if is_active_buy else (ACTIVE[active_key]["entry"]-c[-1])/ACTIVE[active_key]["entry"]*100
-        log(f"🟡 {s} ACTIVE {active_key} {status} {mins_in:.0f}/{max_hold:.0f}m HOLD {profit:.2f}% | FBS={fbs15}")
-        if status == "CLOSE_MAX_EXCEEDED":
-            if profit < 0:
-                tg(f"❌ {s} TIMER CLOSE {active_key} {profit:.2f}% after {mins_in/60:.1f}H / MAX {max_hold/60:.1f}H - OB FAILED | {time_12hr}")
-                del ACTIVE[active_key]; save_active(); return
-            elif profit < 1.0:
-                tg(f"⚠️ {s} TIMER WEAK CLOSE {active_key} +{profit:.2f}% after {mins_in/60:.1f}H / MAX {max_hold/60:.1f}H | {time_12hr}")
-                del ACTIVE[active_key]; save_active(); return
-        if status == "MOVE_SL_TO_BE" and not ACTIVE[active_key].get("be_moved"):
-            if profit > 0.5:
-                tg(f"🟡 {s} TIMER BE MOVE {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {mins_in/60:.1f}H/{max_hold/60:.1f}H MAX | {time_12hr}\nMove SL to BE, letting run")
-                ACTIVE[active_key]["be_moved"]=True; ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
-        if fbs15 and ("UP" in fbs15 if is_active_buy else "DOWN" in fbs15) and "STRONG" in fbs15:
-            if profit-ACTIVE[active_key].get("last_hold_profit",0)>= (2.0 if s in FAST_SYMS else 1.0):
-                tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr} | Timer {mins_in/60:.1f}H/{max_hold/60:.1f}H")
+        status_6535, profit = check_65_35_reversal(s, c, h, l, o, v, is_active_buy, entry_price)
+        log(f"🟡 {s} ACTIVE {active_key} {status_6535} {profit:.2f}% | FBS={fbs15}")
+        if status_6535 == "TAKE_HALF_65":
+            if not ACTIVE[active_key].get("half_taken"):
+                tg(f"💰 {s} 65% REVERSAL START {active_key} +{profit:.2f}% | {time_12hr}\nWick reject detected - TAKE HALF NOW, move SL to BE\nPrice: {live_price:.5f} | Entry: {entry_price:.5f}")
+                ACTIVE[active_key]["half_taken"]=True; ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
+        elif status_6535 == "REVERSAL_65_CONFIRMED":
+            if not ACTIVE[active_key].get("reversal_flag"):
+                tg(f"✅ {s} 65% REVERSAL CONFIRMED {active_key} +{profit:.2f}% | {time_12hr}\nHold profit - dump/bump starting | Price: {live_price:.5f}")
+                ACTIVE[active_key]["reversal_flag"]=True; save_active()
+        elif status_6535 == "BREAK_35_EXIT":
+            tg(f"🚨 {s} 35% BREAK - EXIT NOW {active_key} {profit:.2f}% | {time_12hr}\nWall broke against us - close small loss | Price: {live_price:.5f}")
+            del ACTIVE[active_key]; save_active(); return
+        elif status_6535 == "HOLD_PROFIT_WEAK_VOL_65":
+            if profit > ACTIVE[active_key].get("last_hold_profit",0) + 1.0:
+                tg(f"🟡 {s} HOLD PROFIT 65% {active_key} +{profit:.2f}% | {time_12hr} | Weak volume - still holding")
                 ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
         return
-
     bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
     if not bias_4h: log(f"❌ {s}: 4H NO BIAS -> SKIP"); return
     crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
@@ -389,19 +366,18 @@ def full_scan(s,p):
     if rr1<1.0 or rr1>8: log(f" -> {s}: RR {rr1:.1f} BAD -> SKIP"); return
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top15,"entry":entry}; save()
     LAST_TOP[key]=(top15,now)
-    cfg_timer = PER_COIN_TIMER.get(s, {"est_mins":120,"max_mins":360})
-    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"tp4":tp4,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type,"be_moved":False,"extended":is_extended}; save_active()
+    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"tp4":tp4,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type,"half_taken":False,"reversal_flag":False,"extended":is_extended}; save_active()
     fvg_txt=" + FVG" if has_fvg else ""
     ext_txt=" EXTENDED 11.17%/13.3%" if is_extended else ""
     tp4_txt=f" | TP4: {tp4:.6f} (+13.3%)" if has_tp4 else ""
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type}{ext_txt} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS V36 58/35 | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f}{tp4_txt} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\n⏱️ TIMER: Est {cfg_timer['est_mins']/60:.1f}H | MAX {cfg_timer['max_mins']/60:.1f}H | Auto close if negative after MAX")
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type}{ext_txt} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS V36 58/35 | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f}{tp4_txt} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\n📊 65-35 LOGIC ACTIVE: 65% hold = reversal profit, 35% break = exit")
 
-print("=== BOT V36 TIMER 58/35 + EXTENDED 11.17/13.3 + WALL 30/10 MIN ===",flush=True)
+print("=== BOT V37 NO TIMER + 65-35 REVERSAL + WALL NO TIMER ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(f"{s} err {e}", flush=True)
-    print("=== SCAN DONE V36 EXTENDED + WALL ===", flush=True)
+    print("=== SCAN DONE V37 NO TIMER ===", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
