@@ -1,7 +1,9 @@
-# BOT V34 DIAGRAM PRO - 4H Bias -> 1H Structure (Trend/Breaks/OB/FVG/Liq) -> 15m FBS CONFIRM -> 5m ENTRY + PER-COIN TP/SL
+# BOT V34 DIAGRAM PRO - VERBOSE LOGS - 4H Bias -> 1H Structure -> 15m FBS CONFIRM -> 5m ENTRY + PER-COIN TP/SL
 import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+VERBOSE = True
 
 SYMBOL_MAP = {
     "GRASSUSDT":"GRASS_USDT","KOMAUSDT":"KOMA_USDT","FARTCOINUSDT":"FARTCOIN_USDT",
@@ -57,19 +59,25 @@ def get_time_12hr():
     try: return datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%I:%M %p EAT")
     except: return datetime.now().strftime("%I:%M %p")
 
+def log(msg):
+    if VERBOSE:
+        print(msg, flush=True)
+
 def tg(msg):
     print(msg,flush=True)
     tok=os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or ""
     chat=os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT") or ""
     if tok and chat:
         try: requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id":chat,"text":msg,"parse_mode":"HTML"}, timeout=10)
-        except: pass
+        except Exception as e: print(f"TG error {e}")
 
 def kl(sym,interval):
     try:
         r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}", params={"interval":interval}, timeout=10).json()
         data=r.get("data",[])
-        if not data: return None
+        if not data:
+            log(f"{sym} {interval} NO DATA")
+            return None
         if isinstance(data,dict):
             def f(x):
                 try: return float(x)
@@ -78,52 +86,44 @@ def kl(sym,interval):
         o,h,l,c,v=[],[],[],[],[]
         for k in data: o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4])); v.append(float(k[5]))
         return {"o":o,"h":h,"l":l,"c":c,"v":v}
-    except: return None
+    except Exception as e:
+        log(f"{sym} {interval} err {e}")
+        return None
 
-# === DIAGRAM FUNCTIONS ===
 def get_4h_bias(d240):
-    # Direction + Key levels + Supply Demand
     h,l,c=d240["h"],d240["l"],d240["c"]
     if len(c)<50: return None,0,0,""
     crt_low=min(l[-48:]); crt_high=max(h[-48:]); mid=(crt_low+crt_high)/2
     ema50=sum(c[-50:])/50
-    # Direction: price vs mid + ema
     if c[-1]>mid and c[-1]>ema50: bias="BULL"; key_level=crt_high; sd_zone=(crt_low,mid)
     elif c[-1]<mid and c[-1]<ema50: bias="BEAR"; key_level=crt_low; sd_zone=(mid,crt_high)
     else: bias="RANGE"; key_level=mid; sd_zone=(crt_low,crt_high)
     return bias,crt_low,crt_high,key_level
 
 def detect_fvg(h,l,lookback=20):
-    # Fair Value Gap: 3-candle gap
     fvg_list=[]
     for i in range(len(h)-lookback, len(h)-2):
-        # Bull FVG: l[i+2] > h[i]
         if l[i+2] > h[i]: fvg_list.append({"type":"BULL","top":l[i+2],"bot":h[i],"pct":(l[i+2]-h[i])/h[i]*100})
-        # Bear FVG: h[i+2] < l[i]
         if h[i+2] < l[i]: fvg_list.append({"type":"BEAR","top":l[i],"bot":h[i+2],"pct":(l[i]-h[i+2])/l[i]*100})
     return fvg_list[-3:] if fvg_list else []
 
 def get_1h_structure(d60):
     h,l,c,o=d60["h"],d60["l"],d60["c"],d60["o"]
     if len(c)<50: return "none","none",None,[],"none"
-    # Trend
     up=sum(1 for i in range(-20,-1) if c[i]>c[i-1]); down=20-up
     trend="UP" if up>=13 else "DOWN" if down>=13 else "RANGE"
-    # Breaks
     last_high=max(h[-20:-1]); last_low=min(l[-20:-1])
     breaks="BOS_UP" if c[-1]>last_high else "BOS_DOWN" if c[-1]<last_low else "none"
-    # OB
     atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
     ob=None
     for i in range(len(c)-2,len(c)-30,-1):
         if c[i]<o[i] and c[i+1]>o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: ob=(l[i],h[i],"BULL"); break
         if c[i]>o[i] and c[i+1]<o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: ob=(l[i],h[i],"BEAR"); break
-    # FVG + Liquidity
     fvg=detect_fvg(h,l)
-    # Double top/bottom = Reversal
     tops=[]; bots=[]
     for i in range(3,len(h)-3):
         if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]: tops.append(h[i])
+        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]>h[i+3]: tops.append(h[i])
         if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: bots.append(l[i])
     reversal="double_top" if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008 else "double_bottom" if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008 else "none"
     return trend,breaks,ob,fvg,reversal
@@ -179,76 +179,93 @@ def get_perfect_entry(o,h,l,c,ob,is_buy,symbol,crt_low,crt_high,setup_type):
 
 def full_scan(s,p):
     d240=kl(p,"Min240"); d60=kl(p,"Min60"); d15=kl(p,"Min15"); d5=kl(p,"Min5")
-    if not d240 or not d60 or not d15 or not d5: return
+    if not d240 or not d60 or not d15 or not d5:
+        log(f"❌ {s}: NO KLINE DATA -> SKIP")
+        return
     c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
 
-    # === ACTIVE HOLD LOGIC ===
     if buy_key in ACTIVE or sell_key in ACTIVE:
         active_key=buy_key if buy_key in ACTIVE else sell_key
         is_active_buy=ACTIVE[active_key]["is_buy"]
         fbs15,_br,_=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         if not fbs15: fbs15,_br,_=fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         profit=(c[-1]-ACTIVE[active_key]["entry"])/ACTIVE[active_key]["entry"]*100 if is_active_buy else (ACTIVE[active_key]["entry"]-c[-1])/ACTIVE[active_key]["entry"]*100
+        log(f"🟡 {s} ACTIVE {active_key} HOLD {profit:.2f}% | FBS={fbs15}")
         if fbs15 and ("UP" in fbs15 if is_active_buy else "DOWN" in fbs15) and "STRONG" in fbs15:
             if profit-ACTIVE[active_key].get("last_hold_profit",0)>= (2.0 if s in FAST_SYMS else 1.0):
                 tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr}")
                 ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
         return
 
-    # === 1. 4H ANALYSIS: Direction + Key levels + Supply Demand (FROM DIAGRAM) ===
     bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
-    if not bias_4h: return
-    # Use 1H CRT for entry too (more precise)
+    if not bias_4h:
+        log(f"❌ {s}: 4H NO BIAS -> SKIP")
+        return
     crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
 
-    # === 2. 1H ANALYSIS: Trend / Breaks / OB / FVG / Liquidity / Reversal (FROM DIAGRAM) ===
     trend_1h,breaks_1h,ob_1h,fvg_1h,reversal_1h=get_1h_structure(d60)
     has_fvg=len(fvg_1h)>0
     has_ob=ob_1h is not None
 
-    # === 3. 15MIN ANALYSIS: Confirmation (FROM DIAGRAM) ===
     fbs15, top15, brp15 = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
     if not fbs15 or "STRONG" not in fbs15:
-        fbs15, top15, brp15 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-    if not fbs15 or "STRONG" not in fbs15: return
+        fbs15_2, top15_2, brp15_2 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
+        if fbs15_2 and "STRONG" in fbs15_2:
+            fbs15, top15, brp15 = fbs15_2, top15_2, brp15_2
+
+    log(f"🔍 {s} | 4H:{bias_4h} Key:{key_level:.4f} | 1H:{trend_1h} {breaks_1h} OB:{has_ob} FVG:{has_fvg} REV:{reversal_1h} | 15m:{fbs15} Range:{brp15:.2f}% | Price:{live_price:.6f}")
+
+    if not fbs15 or "STRONG" not in fbs15:
+        log(f" -> {s}: 15m NO BOS STRONG -> SKIP (market not A+ yet)")
+        return
 
     is_buy="UP" in fbs15; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
 
-    # === FILTERS FROM DIAGRAM ===
-    # 4H Direction must match 15m
-    if bias_4h=="BULL" and not is_buy: return
-    if bias_4h=="BEAR" and is_buy: return
-    # 1H Trend must match (if RANGE allow both)
-    if trend_1h=="UP" and not is_buy: return
-    if trend_1h=="DOWN" and is_buy: return
-    # Must have at least OB or FVG (diagram says OB, FVG, Liquidity)
-    if not has_ob and not has_fvg:
-        # allow if strong BOS + liquidity grab
-        if "TREND" not in fbs15: return
+    if bias_4h=="BULL" and not is_buy:
+        log(f" -> {s}: 4H BULL vs 15m SELL MISMATCH -> SKIP")
+        return
+    if bias_4h=="BEAR" and is_buy:
+        log(f" -> {s}: 4H BEAR vs 15m BUY MISMATCH -> SKIP")
+        return
+    if trend_1h=="UP" and not is_buy:
+        log(f" -> {s}: 1H UP vs SELL MISMATCH -> SKIP")
+        return
+    if trend_1h=="DOWN" and is_buy:
+        log(f" -> {s}: 1H DOWN vs BUY MISMATCH -> SKIP")
+        return
+    if not has_ob and not has_fvg and "TREND" not in fbs15:
+        log(f" -> {s}: NO OB/FVG -> SKIP")
+        return
 
-    # Strategic cooldown
     SAME_CD=150*60 if s in FAST_SYMS else 8*3600
     OPP_CD=90*60 if s in FAST_SYMS else 4*3600
-    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: return
-    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: return
+    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD:
+        log(f" -> {s}: COOLDOWN SAME {SAME_CD/60:.0f}m -> SKIP")
+        return
+    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD:
+        log(f" -> {s}: COOLDOWN OPP {OPP_CD/60:.0f}m -> SKIP")
+        return
     if key in LAST_TOP:
         last_top,last_time=LAST_TOP[key]
-        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): return
+        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600):
+            log(f" -> {s}: SAME TOP PROTECTION -> SKIP")
+            return
 
-    # === 4. 5MIN: TBS CONFIRMATION ===
     crt_low,crt_high = (crt_low_1h,crt_high_1h) if s in FAST_SYMS else (crt_low_4h,crt_high_4h)
-    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy): return
-    if not check_btc_filter(s,is_buy): return
+    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy):
+        log(f" -> {s}: 5m NO TBS (l[-2]={l[-2]:.4f} vs CRT {crt_low:.4f}/{crt_high:.4f}) -> SKIP")
+        return
+    if not check_btc_filter(s,is_buy):
+        log(f" -> {s}: BTC DOM BLOCK -> SKIP")
+        return
 
-    # Setup type
     setup_type="BOS"
     if is_buy and l[-2]<crt_low*0.998 and "TREND" in fbs15: setup_type="GRAB"
     if not is_buy and h[-2]>crt_high*1.002 and "TREND" in fbs15: setup_type="GRAB"
     if reversal_1h!="none": setup_type="REVERSAL"
 
-    # OB for entry: use 1H OB if exists else 5m OB
     def get_last_ob_5m():
         atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
         for i in range(len(c)-2,len(c)-60,-1):
@@ -260,7 +277,9 @@ def full_scan(s,p):
     if not ob_entry: ob_entry=(min(l[-15:]),max(h[-15:]))
 
     entry,sl,tp1,tp2,tp3,rr1,crt_pct=get_perfect_entry(o,h,l,c,ob_entry,is_buy,s,crt_low,crt_high,setup_type)
-    if rr1<1.0 or rr1>8: return
+    if rr1<1.0 or rr1>8:
+        log(f" -> {s}: RR {rr1:.1f} BAD -> SKIP")
+        return
 
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top15,"entry":entry}; save()
     LAST_TOP[key]=(top15,now)
@@ -269,14 +288,15 @@ def full_scan(s,p):
     fvg_txt=" + FVG" if has_fvg else ""
     tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS=VOLUME | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\nPer-Coin: {PER_COIN_TP[s]['tp1']*100:.1f}%/{PER_COIN_TP[s]['tp2']*100:.1f}%/{PER_COIN_TP[s]['tp3']*100:.1f}%")
 
-print("=== BOT V34 DIAGRAM PRO 4H->1H->15m->5m ===",flush=True)
+print("=== BOT V34 DIAGRAM PRO VERBOSE 4H->1H->15m->5m ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
-        except Exception as e: print(f"{s} err {e}")
+        except Exception as e: print(f"{s} err {e}", flush=True)
+    print("=== SCAN DONE - If all SKIP = market not A+ setup yet, bot is alive ===", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
             try: full_scan(s,p)
-            except: pass
+            except Exception as e: print(f"{s} loop err {e}", flush=True)
         time.sleep(60)
