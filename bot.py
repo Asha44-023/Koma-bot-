@@ -1,4 +1,4 @@
-# BOT V34 DIAGRAM PRO - VERBOSE LOGS - 4H Bias -> 1H Structure -> 15m FBS CONFIRM -> 5m ENTRY + PER-COIN TP/SL
+# BOT V34 DIAGRAM PRO - VERBOSE + MEXC FALLBACK FIX
 import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -60,8 +60,7 @@ def get_time_12hr():
     except: return datetime.now().strftime("%I:%M %p")
 
 def log(msg):
-    if VERBOSE:
-        print(msg, flush=True)
+    if VERBOSE: print(msg, flush=True)
 
 def tg(msg):
     print(msg,flush=True)
@@ -72,32 +71,59 @@ def tg(msg):
         except Exception as e: print(f"TG error {e}")
 
 def kl(sym,interval):
-    try:
-        r=requests.get(f"https://contract.mexc.com/api/v1/contract/kline/{sym}", params={"interval":interval}, timeout=10).json()
-        data=r.get("data",[])
-        if not data:
-            log(f"{sym} {interval} NO DATA")
-            return None
-        if isinstance(data,dict):
-            def f(x):
-                try: return float(x)
-                except: return 0.0
-            return {"o":[f(x) for x in data.get("open",[])],"h":[f(x) for x in data.get("high",[])],"l":[f(x) for x in data.get("low",[])],"c":[f(x) for x in data.get("close",[])],"v":[f(x) for x in data.get("vol",[])]}
-        o,h,l,c,v=[],[],[],[],[]
-        for k in data: o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4])); v.append(float(k[5]))
-        return {"o":o,"h":h,"l":l,"c":c,"v":v}
-    except Exception as e:
-        log(f"{sym} {interval} err {e}")
+    def fetch(url_sym, inter):
+        urls = [
+            f"https://contract.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",
+            f"https://futures.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",
+            f"https://api.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",
+        ]
+        for u in urls:
+            try:
+                r=requests.get(u, timeout=10).json()
+                data=r.get("data",[])
+                if not data: continue
+                if isinstance(data,dict):
+                    def f(x):
+                        try: return float(x)
+                        except: return 0.0
+                    if len(data.get("close",[]))>10:
+                        return {"o":[f(x) for x in data.get("open",[])],"h":[f(x) for x in data.get("high",[])],"l":[f(x) for x in data.get("low",[])],"c":[f(x) for x in data.get("close",[])],"v":[f(x) for x in data.get("vol",[])]}
+                else:
+                    o,h,l,c,v=[],[],[],[],[]
+                    for k in data:
+                        try: o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4])); v.append(float(k[5]))
+                        except: continue
+                    if len(c)>10: return {"o":o,"h":h,"l":l,"c":c,"v":v}
+            except: continue
         return None
+    res = fetch(sym, interval)
+    if res: return res
+    if interval=="Min240":
+        log(f"{sym} Min240 empty, building 4H from Min60...")
+        d60 = fetch(sym, "Min60")
+        if not d60 or len(d60["c"])<200: return None
+        o,h,l,c,v=[],[],[],[],[]
+        for i in range(0, len(d60["c"])-3, 4):
+            chunk_c = d60["c"][i:i+4]
+            chunk_o = d60["o"][i:i+4]
+            chunk_h = d60["h"][i:i+4]
+            chunk_l = d60["l"][i:i+4]
+            chunk_v = d60["v"][i:i+4]
+            if len(chunk_c)<4: continue
+            o.append(chunk_o[0]); h.append(max(chunk_h)); l.append(min(chunk_l)); c.append(chunk_c[-1]); v.append(sum(chunk_v))
+        if len(c)>20:
+            log(f"{sym} Built 4H {len(c)} candles from 1H")
+            return {"o":o,"h":h,"l":l,"c":c,"v":v}
+    return None
 
 def get_4h_bias(d240):
     h,l,c=d240["h"],d240["l"],d240["c"]
     if len(c)<50: return None,0,0,""
     crt_low=min(l[-48:]); crt_high=max(h[-48:]); mid=(crt_low+crt_high)/2
     ema50=sum(c[-50:])/50
-    if c[-1]>mid and c[-1]>ema50: bias="BULL"; key_level=crt_high; sd_zone=(crt_low,mid)
-    elif c[-1]<mid and c[-1]<ema50: bias="BEAR"; key_level=crt_low; sd_zone=(mid,crt_high)
-    else: bias="RANGE"; key_level=mid; sd_zone=(crt_low,crt_high)
+    if c[-1]>mid and c[-1]>ema50: bias="BULL"; key_level=crt_high
+    elif c[-1]<mid and c[-1]<ema50: bias="BEAR"; key_level=crt_low
+    else: bias="RANGE"; key_level=mid
     return bias,crt_low,crt_high,key_level
 
 def detect_fvg(h,l,lookback=20):
@@ -123,7 +149,6 @@ def get_1h_structure(d60):
     tops=[]; bots=[]
     for i in range(3,len(h)-3):
         if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]: tops.append(h[i])
-        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]>h[i+3]: tops.append(h[i])
         if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: bots.append(l[i])
     reversal="double_top" if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008 else "double_bottom" if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008 else "none"
     return trend,breaks,ob,fvg,reversal
@@ -185,7 +210,6 @@ def full_scan(s,p):
     c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
-
     if buy_key in ACTIVE or sell_key in ACTIVE:
         active_key=buy_key if buy_key in ACTIVE else sell_key
         is_active_buy=ACTIVE[active_key]["is_buy"]
@@ -198,102 +222,61 @@ def full_scan(s,p):
                 tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr}")
                 ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
         return
-
     bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
     if not bias_4h:
-        log(f"❌ {s}: 4H NO BIAS -> SKIP")
-        return
+        log(f"❌ {s}: 4H NO BIAS -> SKIP"); return
     crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
-
     trend_1h,breaks_1h,ob_1h,fvg_1h,reversal_1h=get_1h_structure(d60)
-    has_fvg=len(fvg_1h)>0
-    has_ob=ob_1h is not None
-
+    has_fvg=len(fvg_1h)>0; has_ob=ob_1h is not None
     fbs15, top15, brp15 = fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
     if not fbs15 or "STRONG" not in fbs15:
         fbs15_2, top15_2, brp15_2 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-        if fbs15_2 and "STRONG" in fbs15_2:
-            fbs15, top15, brp15 = fbs15_2, top15_2, brp15_2
-
+        if fbs15_2 and "STRONG" in fbs15_2: fbs15, top15, brp15 = fbs15_2, top15_2, brp15_2
     log(f"🔍 {s} | 4H:{bias_4h} Key:{key_level:.4f} | 1H:{trend_1h} {breaks_1h} OB:{has_ob} FVG:{has_fvg} REV:{reversal_1h} | 15m:{fbs15} Range:{brp15:.2f}% | Price:{live_price:.6f}")
-
     if not fbs15 or "STRONG" not in fbs15:
-        log(f" -> {s}: 15m NO BOS STRONG -> SKIP (market not A+ yet)")
-        return
-
+        log(f" -> {s}: 15m NO BOS STRONG -> SKIP"); return
     is_buy="UP" in fbs15; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
-
-    if bias_4h=="BULL" and not is_buy:
-        log(f" -> {s}: 4H BULL vs 15m SELL MISMATCH -> SKIP")
-        return
-    if bias_4h=="BEAR" and is_buy:
-        log(f" -> {s}: 4H BEAR vs 15m BUY MISMATCH -> SKIP")
-        return
-    if trend_1h=="UP" and not is_buy:
-        log(f" -> {s}: 1H UP vs SELL MISMATCH -> SKIP")
-        return
-    if trend_1h=="DOWN" and is_buy:
-        log(f" -> {s}: 1H DOWN vs BUY MISMATCH -> SKIP")
-        return
-    if not has_ob and not has_fvg and "TREND" not in fbs15:
-        log(f" -> {s}: NO OB/FVG -> SKIP")
-        return
-
+    if bias_4h=="BULL" and not is_buy: log(f" -> {s}: 4H BULL vs SELL MISMATCH -> SKIP"); return
+    if bias_4h=="BEAR" and is_buy: log(f" -> {s}: 4H BEAR vs BUY MISMATCH -> SKIP"); return
+    if trend_1h=="UP" and not is_buy: log(f" -> {s}: 1H UP vs SELL MISMATCH -> SKIP"); return
+    if trend_1h=="DOWN" and is_buy: log(f" -> {s}: 1H DOWN vs BUY MISMATCH -> SKIP"); return
+    if not has_ob and not has_fvg and "TREND" not in fbs15: log(f" -> {s}: NO OB/FVG -> SKIP"); return
     SAME_CD=150*60 if s in FAST_SYMS else 8*3600
     OPP_CD=90*60 if s in FAST_SYMS else 4*3600
-    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD:
-        log(f" -> {s}: COOLDOWN SAME {SAME_CD/60:.0f}m -> SKIP")
-        return
-    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD:
-        log(f" -> {s}: COOLDOWN OPP {OPP_CD/60:.0f}m -> SKIP")
-        return
+    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: log(f" -> {s}: COOLDOWN SAME {SAME_CD/60:.0f}m -> SKIP"); return
+    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: log(f" -> {s}: COOLDOWN OPP {OPP_CD/60:.0f}m -> SKIP"); return
     if key in LAST_TOP:
         last_top,last_time=LAST_TOP[key]
-        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600):
-            log(f" -> {s}: SAME TOP PROTECTION -> SKIP")
-            return
-
+        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): log(f" -> {s}: SAME TOP PROTECTION -> SKIP"); return
     crt_low,crt_high = (crt_low_1h,crt_high_1h) if s in FAST_SYMS else (crt_low_4h,crt_high_4h)
-    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy):
-        log(f" -> {s}: 5m NO TBS (l[-2]={l[-2]:.4f} vs CRT {crt_low:.4f}/{crt_high:.4f}) -> SKIP")
-        return
-    if not check_btc_filter(s,is_buy):
-        log(f" -> {s}: BTC DOM BLOCK -> SKIP")
-        return
-
+    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy): log(f" -> {s}: 5m NO TBS -> SKIP"); return
+    if not check_btc_filter(s,is_buy): log(f" -> {s}: BTC DOM BLOCK -> SKIP"); return
     setup_type="BOS"
     if is_buy and l[-2]<crt_low*0.998 and "TREND" in fbs15: setup_type="GRAB"
     if not is_buy and h[-2]>crt_high*1.002 and "TREND" in fbs15: setup_type="GRAB"
     if reversal_1h!="none": setup_type="REVERSAL"
-
     def get_last_ob_5m():
         atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
         for i in range(len(c)-2,len(c)-60,-1):
             if is_buy and c[i]<o[i] and c[i+1]>o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
             if not is_buy and c[i]>o[i] and c[i+1]<o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
         return None
-
     ob_entry = (ob_1h[0],ob_1h[1]) if ob_1h else get_last_ob_5m()
     if not ob_entry: ob_entry=(min(l[-15:]),max(h[-15:]))
-
     entry,sl,tp1,tp2,tp3,rr1,crt_pct=get_perfect_entry(o,h,l,c,ob_entry,is_buy,s,crt_low,crt_high,setup_type)
-    if rr1<1.0 or rr1>8:
-        log(f" -> {s}: RR {rr1:.1f} BAD -> SKIP")
-        return
-
+    if rr1<1.0 or rr1>8: log(f" -> {s}: RR {rr1:.1f} BAD -> SKIP"); return
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top15,"entry":entry}; save()
     LAST_TOP[key]=(top15,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type}; save_active()
-
     fvg_txt=" + FVG" if has_fvg else ""
     tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS=VOLUME | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\nPer-Coin: {PER_COIN_TP[s]['tp1']*100:.1f}%/{PER_COIN_TP[s]['tp2']*100:.1f}%/{PER_COIN_TP[s]['tp3']*100:.1f}%")
 
-print("=== BOT V34 DIAGRAM PRO VERBOSE 4H->1H->15m->5m ===",flush=True)
+print("=== BOT V34 DIAGRAM PRO VERBOSE + FIXED 4H->1H->15m->5m ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(f"{s} err {e}", flush=True)
-    print("=== SCAN DONE - If all SKIP = market not A+ setup yet, bot is alive ===", flush=True)
+    print("=== SCAN DONE ===", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
