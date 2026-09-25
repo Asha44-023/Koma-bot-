@@ -1,4 +1,4 @@
-# BOT V34 DIAGRAM PRO - VERBOSE + MEXC FALLBACK FIX
+# BOT V35 DIAGRAM PRO - LOOSENED 58/35 + 78/22 + TBS OPTIONAL IF OB+FVG
 import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -153,18 +153,19 @@ def get_1h_structure(d60):
     reversal="double_top" if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008 else "double_bottom" if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008 else "none"
     return trend,breaks,ob,fvg,reversal
 
+# === V35 LOOSENED 58/35 and 78/22 ===
 def fbs_image_logic(h,l,c,o):
     if len(c)<3: return None,0,0
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; ch,cl,co,cc=h[-1],l[-1],o[-1],c[-1]
     prange=ph-pl
     if prange==0: return None,0,0
-    p75=pl+prange*0.75; p62=pl+prange*0.62; p38=pl+prange*0.38; p25=pl+prange*0.25
+    p78=pl+prange*0.78; p58=pl+prange*0.58; p35=pl+prange*0.35; p22=pl+prange*0.22
     big_range_pct=(ph-pl)/(pl or 1)*100
     body=abs(pc-po); upper_wick=ph-max(pc,po); lower_wick=min(pc,po)-pl
-    if pc>po and upper_wick>body*1.5 and cc<p75: return "WEAK_BULL_TRAP",ph,big_range_pct
-    if pc<po and lower_wick>body*1.5 and cc>p25: return "WEAK_BEAR_TRAP",pl,big_range_pct
-    if pc>=p62 and cc>=p38 and cl>=p25 and cc>co: return "BOS_UP_STRONG",ph,big_range_pct
-    if pc<=p38 and cc<=p62 and ch<=p75 and cc<co: return "BOS_DOWN_STRONG",pl,big_range_pct
+    if pc>po and upper_wick>body*1.2 and cc<p78: return "WEAK_BULL_TRAP",ph,big_range_pct
+    if pc<po and lower_wick>body*1.2 and cc>p22: return "WEAK_BEAR_TRAP",pl,big_range_pct
+    if pc>=p58 and cc>=p35 and cl>=p22 and cc>co: return "BOS_UP_STRONG",ph,big_range_pct
+    if pc<=p35 and cc<=p58 and ch<=p78 and cc<co: return "BOS_DOWN_STRONG",pl,big_range_pct
     return None,0,big_range_pct
 
 def fbs_trend_pump_logic(h,l,c,o):
@@ -172,20 +173,26 @@ def fbs_trend_pump_logic(h,l,c,o):
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; ch,cl,co,cc=h[-1],l[-1],o[-1],c[-1]
     prange=ph-pl
     if prange==0: return None,0,0
-    p75=pl+prange*0.75; p68=pl+prange*0.68; p32=pl+prange*0.32; p25=pl+prange*0.25
+    p78=pl+prange*0.78; p62=pl+prange*0.62; p38=pl+prange*0.38; p22=pl+prange*0.22
+    p68=pl+prange*0.68; p32=pl+prange*0.32
     big_range_pct=(ph-pl)/(pl or 1)*100
     if pc>po:
-        if cc < p75 and cc < co: return "WEAK_BULL_TRAP_TREND",ph,big_range_pct
-        if pc >= p68 and cc >= p32 and cc > p25 and cc > co: return "BOS_UP_TREND_STRONG_32_68",ph,big_range_pct
+        if cc < p78 and cc < co: return "WEAK_BULL_TRAP_TREND",ph,big_range_pct
+        if pc >= p62 and cc >= p32 and cc > p22 and cc > co: return "BOS_UP_TREND_STRONG_32_68",ph,big_range_pct
     if pc<po:
-        if cc > p25 and cc > co: return "WEAK_BEAR_TRAP_TREND",pl,big_range_pct
-        if pc <= p32 and cc <= p68 and cc < p75 and cc < co: return "BOS_DOWN_TREND_STRONG_32_68",pl,big_range_pct
+        if cc > p22 and cc > co: return "WEAK_BEAR_TRAP_TREND",pl,big_range_pct
+        if pc <= p38 and cc <= p68 and cc < p78 and cc < co: return "BOS_DOWN_TREND_STRONG_32_68",pl,big_range_pct
     return None,0,big_range_pct
 
-def check_tbs(o,h,l,c,crt_low,crt_high,is_buy):
+def check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg):
     if len(c)<3: return False
-    if is_buy: return l[-2]<crt_low and c[-1]>crt_low and c[-1]>o[-1]
-    else: return h[-2]>crt_high and c[-1]<crt_high and c[-1]<o[-1]
+    # V35: if we have OB+FVG, allow TBS without exact CRT grab - just need strong close
+    if has_ob and has_fvg:
+        if is_buy and c[-1] > o[-1] and c[-1] > c[-2]: return True
+        if not is_buy and c[-1] < o[-1] and c[-1] < c[-2]: return True
+    # Loosened CRT grab: allow 0.2% buffer
+    if is_buy: return l[-2] < crt_low*1.002 and c[-1] > crt_low*0.998 and c[-1] > o[-1]
+    else: return h[-2] > crt_high*0.998 and c[-1] < crt_high*1.002 and c[-1] < o[-1]
 
 def get_perfect_entry(o,h,l,c,ob,is_buy,symbol,crt_low,crt_high,setup_type):
     ob_low,ob_high=ob[0],ob[1]
@@ -205,8 +212,7 @@ def get_perfect_entry(o,h,l,c,ob,is_buy,symbol,crt_low,crt_high,setup_type):
 def full_scan(s,p):
     d240=kl(p,"Min240"); d60=kl(p,"Min60"); d15=kl(p,"Min15"); d5=kl(p,"Min5")
     if not d240 or not d60 or not d15 or not d5:
-        log(f"❌ {s}: NO KLINE DATA -> SKIP")
-        return
+        log(f"❌ {s}: NO KLINE DATA -> SKIP"); return
     c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
@@ -223,8 +229,7 @@ def full_scan(s,p):
                 ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
         return
     bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
-    if not bias_4h:
-        log(f"❌ {s}: 4H NO BIAS -> SKIP"); return
+    if not bias_4h: log(f"❌ {s}: 4H NO BIAS -> SKIP"); return
     crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
     trend_1h,breaks_1h,ob_1h,fvg_1h,reversal_1h=get_1h_structure(d60)
     has_fvg=len(fvg_1h)>0; has_ob=ob_1h is not None
@@ -233,8 +238,7 @@ def full_scan(s,p):
         fbs15_2, top15_2, brp15_2 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         if fbs15_2 and "STRONG" in fbs15_2: fbs15, top15, brp15 = fbs15_2, top15_2, brp15_2
     log(f"🔍 {s} | 4H:{bias_4h} Key:{key_level:.4f} | 1H:{trend_1h} {breaks_1h} OB:{has_ob} FVG:{has_fvg} REV:{reversal_1h} | 15m:{fbs15} Range:{brp15:.2f}% | Price:{live_price:.6f}")
-    if not fbs15 or "STRONG" not in fbs15:
-        log(f" -> {s}: 15m NO BOS STRONG -> SKIP"); return
+    if not fbs15 or "STRONG" not in fbs15: log(f" -> {s}: 15m NO BOS STRONG -> SKIP"); return
     is_buy="UP" in fbs15; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
     if bias_4h=="BULL" and not is_buy: log(f" -> {s}: 4H BULL vs SELL MISMATCH -> SKIP"); return
     if bias_4h=="BEAR" and is_buy: log(f" -> {s}: 4H BEAR vs BUY MISMATCH -> SKIP"); return
@@ -243,13 +247,13 @@ def full_scan(s,p):
     if not has_ob and not has_fvg and "TREND" not in fbs15: log(f" -> {s}: NO OB/FVG -> SKIP"); return
     SAME_CD=150*60 if s in FAST_SYMS else 8*3600
     OPP_CD=90*60 if s in FAST_SYMS else 4*3600
-    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: log(f" -> {s}: COOLDOWN SAME {SAME_CD/60:.0f}m -> SKIP"); return
-    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: log(f" -> {s}: COOLDOWN OPP {OPP_CD/60:.0f}m -> SKIP"); return
+    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: log(f" -> {s}: COOLDOWN SAME -> SKIP"); return
+    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: log(f" -> {s}: COOLDOWN OPP -> SKIP"); return
     if key in LAST_TOP:
         last_top,last_time=LAST_TOP[key]
         if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): log(f" -> {s}: SAME TOP PROTECTION -> SKIP"); return
     crt_low,crt_high = (crt_low_1h,crt_high_1h) if s in FAST_SYMS else (crt_low_4h,crt_high_4h)
-    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy): log(f" -> {s}: 5m NO TBS -> SKIP"); return
+    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg): log(f" -> {s}: 5m NO TBS -> SKIP"); return
     if not check_btc_filter(s,is_buy): log(f" -> {s}: BTC DOM BLOCK -> SKIP"); return
     setup_type="BOS"
     if is_buy and l[-2]<crt_low*0.998 and "TREND" in fbs15: setup_type="GRAB"
@@ -269,14 +273,14 @@ def full_scan(s,p):
     LAST_TOP[key]=(top15,now)
     ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type}; save_active()
     fvg_txt=" + FVG" if has_fvg else ""
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS=VOLUME | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\nPer-Coin: {PER_COIN_TP[s]['tp1']*100:.1f}%/{PER_COIN_TP[s]['tp2']*100:.1f}%/{PER_COIN_TP[s]['tp3']*100:.1f}%")
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS V35 58/35 | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%")
 
-print("=== BOT V34 DIAGRAM PRO VERBOSE + FIXED 4H->1H->15m->5m ===",flush=True)
+print("=== BOT V35 LOOSENED 58/35 + TBS OPTIONAL ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(f"{s} err {e}", flush=True)
-    print("=== SCAN DONE ===", flush=True)
+    print("=== SCAN DONE V35 ===", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
