@@ -1,4 +1,4 @@
-# BOT V35 DIAGRAM PRO - LOOSENED 58/35 + 78/22 + TBS OPTIONAL IF OB+FVG
+# BOT V36 DIAGRAM PRO - TIMER MODE + 58/35 + 78/22 + TBS OPTIONAL IF OB+FVG
 import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -8,20 +8,37 @@ VERBOSE = False
 SYMBOL_MAP = {
     "GRASSUSDT":"GRASS_USDT","KOMAUSDT":"KOMA_USDT","FARTCOINUSDT":"FARTCOIN_USDT",
     "SENTUSDT":"SENT_USDT","SANDUSDT":"SAND_USDT","TAOUSDT":"TAO_USDT","JASMYUSDT":"JASMY_USDT",
+    "LABUSDT":"LAB_USDT","SIRENUSDT":"SIREN_USDT"
 }
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
-FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"]
+FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT","LABUSDT","SIRENUSDT"]
 
 PER_COIN_TP = {
     "FARTCOINUSDT": {"tp1":0.05, "tp2":0.09, "tp3":0.14, "sl_grab":0.02, "sl_rev":0.035, "sl_bos":0.025},
     "GRASSUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
     "KOMAUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
     "SENTUSDT": {"tp1":0.035, "tp2":0.065, "tp3":0.10, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
+    "LABUSDT": {"tp1":0.05, "tp2":0.09, "tp3":0.14, "sl_grab":0.02, "sl_rev":0.035, "sl_bos":0.025},
+    "SIRENUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
     "SANDUSDT": {"tp1":0.018, "tp2":0.035, "tp3":0.055, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
     "TAOUSDT": {"tp1":0.02, "tp2":0.04, "tp3":0.065, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
     "JASMYUSDT": {"tp1":0.018, "tp2":0.038, "tp3":0.06, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
 }
-DOM_SENSITIVITY = {"FARTCOINUSDT":2.5,"GRASSUSDT":2.2,"KOMAUSDT":2.0,"SENTUSDT":1.6,"SANDUSDT":1.3,"TAOUSDT":1.1,"JASMYUSDT":1.2}
+
+# V36 TIMER TABLE - Based on your 8 charts 25 Sep 2026 3:45-10:31 AM
+PER_COIN_TIMER = {
+    "GRASSUSDT": {"est_mins": 90, "max_mins": 210}, # +8.5% in 6H43M
+    "FARTCOINUSDT": {"est_mins": 100, "max_mins": 300}, # range day
+    "KOMAUSDT": {"est_mins": 120, "max_mins": 360}, # +2.6% in 4H
+    "SENTUSDT": {"est_mins": 70, "max_mins": 180}, # +4% in 1H20M
+    "LABUSDT": {"est_mins": 45, "max_mins": 135}, # +4.7% in 1H20M meme
+    "SIRENUSDT": {"est_mins": 120, "max_mins": 360},
+    "SANDUSDT": {"est_mins": 80, "max_mins": 220}, # +9.3% in 3H50M
+    "TAOUSDT": {"est_mins": 60, "max_mins": 180}, # +3.2% in 1H20M
+    "JASMYUSDT": {"est_mins": 120, "max_mins": 360}, # +2.5% in 4H
+}
+
+DOM_SENSITIVITY = {"FARTCOINUSDT":2.5,"GRASSUSDT":2.2,"KOMAUSDT":2.0,"SENTUSDT":1.6,"LABUSDT":2.4,"SIRENUSDT":2.0,"SANDUSDT":1.3,"TAOUSDT":1.1,"JASMYUSDT":1.2}
 BTC_DOM_CACHE = {"value":58.5,"history":[],"last_fetch":0}
 
 def get_btc_dominance():
@@ -42,6 +59,15 @@ def check_btc_filter(sym,is_buy):
     if change>=0.6 and eff>=0.9 and is_buy: return False
     if change<=-0.6 and eff<=-0.9 and not is_buy: return False
     return True
+
+def check_hold_timer(symbol, entry_time_epoch):
+    now = time.time()
+    mins_in = (now - entry_time_epoch) / 60
+    cfg = PER_COIN_TIMER.get(symbol, {"est_mins": 120, "max_mins": 360})
+    est = cfg["est_mins"]; max_hold = cfg["max_mins"]
+    if mins_in >= max_hold: return "CLOSE_MAX_EXCEEDED", mins_in, max_hold
+    elif mins_in >= est: return "MOVE_SL_TO_BE", mins_in, max_hold
+    else: return "HOLD", mins_in, max_hold
 
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
 COOLDOWN={"signals":{}}; ACTIVE={}
@@ -104,11 +130,7 @@ def kl(sym,interval):
         if not d60 or len(d60["c"])<200: return None
         o,h,l,c,v=[],[],[],[],[]
         for i in range(0, len(d60["c"])-3, 4):
-            chunk_c = d60["c"][i:i+4]
-            chunk_o = d60["o"][i:i+4]
-            chunk_h = d60["h"][i:i+4]
-            chunk_l = d60["l"][i:i+4]
-            chunk_v = d60["v"][i:i+4]
+            chunk_c = d60["c"][i:i+4]; chunk_o = d60["o"][i:i+4]; chunk_h = d60["h"][i:i+4]; chunk_l = d60["l"][i:i+4]; chunk_v = d60["v"][i:i+4]
             if len(chunk_c)<4: continue
             o.append(chunk_o[0]); h.append(max(chunk_h)); l.append(min(chunk_l)); c.append(chunk_c[-1]); v.append(sum(chunk_v))
         if len(c)>20:
@@ -153,7 +175,6 @@ def get_1h_structure(d60):
     reversal="double_top" if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008 else "double_bottom" if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008 else "none"
     return trend,breaks,ob,fvg,reversal
 
-# === V35 LOOSENED 58/35 and 78/22 ===
 def fbs_image_logic(h,l,c,o):
     if len(c)<3: return None,0,0
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; ch,cl,co,cc=h[-1],l[-1],o[-1],c[-1]
@@ -186,11 +207,9 @@ def fbs_trend_pump_logic(h,l,c,o):
 
 def check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg):
     if len(c)<3: return False
-    # V35: if we have OB+FVG, allow TBS without exact CRT grab - just need strong close
     if has_ob and has_fvg:
         if is_buy and c[-1] > o[-1] and c[-1] > c[-2]: return True
         if not is_buy and c[-1] < o[-1] and c[-1] < c[-2]: return True
-    # Loosened CRT grab: allow 0.2% buffer
     if is_buy: return l[-2] < crt_low*1.002 and c[-1] > crt_low*0.998 and c[-1] > o[-1]
     else: return h[-2] > crt_high*0.998 and c[-1] < crt_high*1.002 and c[-1] < o[-1]
 
@@ -216,18 +235,37 @@ def full_scan(s,p):
     c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
     buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
+
+    # === V36 TIMER LOGIC FOR ACTIVE TRADES ===
     if buy_key in ACTIVE or sell_key in ACTIVE:
         active_key=buy_key if buy_key in ACTIVE else sell_key
         is_active_buy=ACTIVE[active_key]["is_buy"]
+        entry_t = ACTIVE[active_key]["t"]
+        status, mins_in, max_hold = check_hold_timer(s, entry_t)
         fbs15,_br,_=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         if not fbs15: fbs15,_br,_=fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         profit=(c[-1]-ACTIVE[active_key]["entry"])/ACTIVE[active_key]["entry"]*100 if is_active_buy else (ACTIVE[active_key]["entry"]-c[-1])/ACTIVE[active_key]["entry"]*100
-        log(f"🟡 {s} ACTIVE {active_key} HOLD {profit:.2f}% | FBS={fbs15}")
+        log(f"🟡 {s} ACTIVE {active_key} {status} {mins_in:.0f}/{max_hold:.0f}m HOLD {profit:.2f}% | FBS={fbs15}")
+
+        if status == "CLOSE_MAX_EXCEEDED":
+            if profit < 0:
+                tg(f"❌ {s} TIMER CLOSE {active_key} {profit:.2f}% after {mins_in/60:.1f}H / MAX {max_hold/60:.1f}H - OB FAILED | {time_12hr}")
+                del ACTIVE[active_key]; save_active(); return
+            elif profit < 1.0:
+                tg(f"⚠️ {s} TIMER WEAK CLOSE {active_key} +{profit:.2f}% after {mins_in/60:.1f}H / MAX {max_hold/60:.1f}H | {time_12hr}")
+                del ACTIVE[active_key]; save_active(); return
+
+        if status == "MOVE_SL_TO_BE" and not ACTIVE[active_key].get("be_moved"):
+            if profit > 0.5:
+                tg(f"🟡 {s} TIMER BE MOVE {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {mins_in/60:.1f}H/{max_hold/60:.1f}H MAX | {time_12hr}\nMove SL to BE, letting run")
+                ACTIVE[active_key]["be_moved"]=True; ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
+
         if fbs15 and ("UP" in fbs15 if is_active_buy else "DOWN" in fbs15) and "STRONG" in fbs15:
             if profit-ACTIVE[active_key].get("last_hold_profit",0)>= (2.0 if s in FAST_SYMS else 1.0):
-                tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr}")
+                tg(f"🟡 {s} HOLD {'BUY' if is_active_buy else 'SELL'} +{profit:.2f}% | {time_12hr} | Timer {mins_in/60:.1f}H/{max_hold/60:.1f}H")
                 ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
         return
+
     bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
     if not bias_4h: log(f"❌ {s}: 4H NO BIAS -> SKIP"); return
     crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
@@ -271,16 +309,17 @@ def full_scan(s,p):
     if rr1<1.0 or rr1>8: log(f" -> {s}: RR {rr1:.1f} BAD -> SKIP"); return
     COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top15,"entry":entry}; save()
     LAST_TOP[key]=(top15,now)
-    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type}; save_active()
+    cfg_timer = PER_COIN_TIMER.get(s, {"est_mins":120,"max_mins":360})
+    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type,"be_moved":False}; save_active()
     fvg_txt=" + FVG" if has_fvg else ""
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS V35 58/35 | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%")
+    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS V36 58/35 | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\n⏱️ TIMER: Est {cfg_timer['est_mins']/60:.1f}H | MAX {cfg_timer['max_mins']/60:.1f}H | Auto close if negative after MAX")
 
-print("=== BOT V35 LOOSENED 58/35 + TBS OPTIONAL ===",flush=True)
+print("=== BOT V36 TIMER 58/35 + TBS OPTIONAL ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(f"{s} err {e}", flush=True)
-    print("=== SCAN DONE V35 ===", flush=True)
+    print("=== SCAN DONE V36 ===", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
