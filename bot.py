@@ -1,33 +1,15 @@
-# BOT V37 DIAGRAM PRO - NO TIMER + 65/35 REVERSAL + 78/22 + TBS + EXTENDED TP 11.17%/13.3% ALL COINS + SMART WALL NO TIMER
+# BOT V38 SIMPLE - BUY SELL HOLD REVERSAL ONLY - NO ACTIVE CONFUSION
 import time, json, os, requests, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 VERBOSE = False
-
-SYMBOL_MAP = {
-    "GRASSUSDT":"GRASS_USDT","KOMAUSDT":"KOMA_USDT","FARTCOINUSDT":"FARTCOIN_USDT",
-    "SENTUSDT":"SENT_USDT","SANDUSDT":"SAND_USDT","TAOUSDT":"TAO_USDT","JASMYUSDT":"JASMY_USDT",
-    "LABUSDT":"LAB_USDT","SIRENUSDT":"SIREN_USDT"
-}
+SYMBOL_MAP = {"GRASSUSDT":"GRASS_USDT","KOMAUSDT":"KOMA_USDT","FARTCOINUSDT":"FARTCOIN_USDT","SENTUSDT":"SENT_USDT","SANDUSDT":"SAND_USDT","TAOUSDT":"TAO_USDT","JASMYUSDT":"JASMY_USDT","LABUSDT":"LAB_USDT","SIRENUSDT":"SIREN_USDT"}
 SYMBOLS=list(SYMBOL_MAP.keys()); PERPS=list(SYMBOL_MAP.values())
 FAST_SYMS = ["GRASSUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT","LABUSDT","SIRENUSDT"]
 
-PER_COIN_TP = {
-    "FARTCOINUSDT": {"tp1":0.05, "tp2":0.09, "tp3":0.14, "sl_grab":0.02, "sl_rev":0.035, "sl_bos":0.025},
-    "GRASSUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
-    "KOMAUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
-    "SENTUSDT": {"tp1":0.035, "tp2":0.065, "tp3":0.10, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
-    "LABUSDT": {"tp1":0.05, "tp2":0.09, "tp3":0.14, "sl_grab":0.02, "sl_rev":0.035, "sl_bos":0.025},
-    "SIRENUSDT": {"tp1":0.04, "tp2":0.08, "tp3":0.12, "sl_grab":0.018, "sl_rev":0.03, "sl_bos":0.022},
-    "SANDUSDT": {"tp1":0.018, "tp2":0.035, "tp3":0.055, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
-    "TAOUSDT": {"tp1":0.02, "tp2":0.04, "tp3":0.065, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
-    "JASMYUSDT": {"tp1":0.018, "tp2":0.038, "tp3":0.06, "sl_grab":0.01, "sl_rev":0.016, "sl_bos":0.012},
-}
-
 DOM_SENSITIVITY = {"FARTCOINUSDT":2.5,"GRASSUSDT":2.2,"KOMAUSDT":2.0,"SENTUSDT":1.6,"LABUSDT":2.4,"SIRENUSDT":2.0,"SANDUSDT":1.3,"TAOUSDT":1.1,"JASMYUSDT":1.2}
 BTC_DOM_CACHE = {"value":58.5,"history":[],"last_fetch":0}
-
 def get_btc_dominance():
     now=time.time()
     if now - BTC_DOM_CACHE["last_fetch"] < 300: return BTC_DOM_CACHE["value"], BTC_DOM_CACHE["history"]
@@ -47,59 +29,22 @@ def check_btc_filter(sym,is_buy):
     if change<=-0.6 and eff<=-0.9 and not is_buy: return False
     return True
 
-# === NEW 65-35 REVERSAL LOGIC - NO TIMER ===
-def check_65_35_reversal(s, c, h, l, o, v, is_active_buy, entry_price):
-    if len(c) < 6: return "HOLD", 0
-    live = c[-1]
-    profit = (live - entry_price)/entry_price*100 if is_active_buy else (entry_price - live)/entry_price*100
-    body = abs(c[-1] - o[-1])
-    upper_wick = h[-1] - max(c[-1], o[-1])
-    lower_wick = min(c[-1], o[-1]) - l[-1]
-
-    if is_active_buy:
-        if upper_wick > body * 1.5 and profit > 1.0:
-            return "TAKE_HALF_65", profit
-        if c[-1] < l[-2] and profit < 0.5 and profit > -2:
-            return "REVERSAL_65_CONFIRMED", profit
-        if c[-1] < entry_price * 0.985 and lower_wick < body * 0.3:
-            return "BREAK_35_EXIT", profit
-    else:
-        if lower_wick > body * 1.5 and profit > 1.0:
-            return "TAKE_HALF_65", profit
-        if c[-1] > h[-2] and profit < 0.5 and profit > -2:
-            return "REVERSAL_65_CONFIRMED", profit
-        if c[-1] > entry_price * 1.015 and upper_wick < body * 0.3:
-            return "BREAK_35_EXIT", profit
-
-    if len(v) >= 6:
-        avg_vol = sum(v[-6:-1])/5
-        if v[-1] < avg_vol * 0.6 and profit > 0.5:
-            return "HOLD_PROFIT_WEAK_VOL_65", profit
-    return "HOLD_65", profit
-
-COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; WALL_FILE="wall_alerts.json"
-COOLDOWN={"signals":{}}; ACTIVE={}; WALL_ALERTS={}
+COOLDOWN_FILE="cooldown.json"; WALL_FILE="wall_alerts.json"
+COOLDOWN={"signals":{}}; WALL_ALERTS={}
 if os.path.exists(COOLDOWN_FILE):
     try: COOLDOWN=json.load(open(COOLDOWN_FILE))
     except: COOLDOWN={"signals":{}}
-if os.path.exists(ACTIVE_FILE):
-    try: ACTIVE=json.load(open(ACTIVE_FILE))
-    except: ACTIVE={}
 if os.path.exists(WALL_FILE):
     try: WALL_ALERTS=json.load(open(WALL_FILE))
     except: WALL_ALERTS={}
 def save(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
-def save_active(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
 def save_wall(): open(WALL_FILE,"w").write(json.dumps(WALL_ALERTS))
 LAST_TOP={}
-
 def get_time_12hr():
     try: return datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%I:%M %p EAT")
     except: return datetime.now().strftime("%I:%M %p")
-
 def log(msg):
     if VERBOSE: print(msg, flush=True)
-
 def tg(msg):
     print(msg,flush=True)
     tok=os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or ""
@@ -110,11 +55,7 @@ def tg(msg):
 
 def kl(sym,interval):
     def fetch(url_sym, inter):
-        urls = [
-            f"https://contract.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",
-            f"https://futures.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",
-            f"https://api.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",
-        ]
+        urls = [f"https://contract.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",f"https://futures.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}",f"https://api.mexc.com/api/v1/contract/kline/{url_sym}?interval={inter}"]
         for u in urls:
             try:
                 r=requests.get(u, timeout=10).json()
@@ -144,8 +85,7 @@ def kl(sym,interval):
             chunk_c = d60["c"][i:i+4]; chunk_o = d60["o"][i:i+4]; chunk_h = d60["h"][i:i+4]; chunk_l = d60["l"][i:i+4]; chunk_v = d60["v"][i:i+4]
             if len(chunk_c)<4: continue
             o.append(chunk_o[0]); h.append(max(chunk_h)); l.append(min(chunk_l)); c.append(chunk_c[-1]); v.append(sum(chunk_v))
-        if len(c)>20:
-            return {"o":o,"h":h,"l":l,"c":c,"v":v}
+        if len(c)>20: return {"o":o,"h":h,"l":l,"c":c,"v":v}
     return None
 
 def get_4h_bias(d240):
@@ -161,8 +101,8 @@ def get_4h_bias(d240):
 def detect_fvg(h,l,lookback=20):
     fvg_list=[]
     for i in range(len(h)-lookback, len(h)-2):
-        if l[i+2] > h[i]: fvg_list.append({"type":"BULL","top":l[i+2],"bot":h[i],"pct":(l[i+2]-h[i])/h[i]*100})
-        if h[i+2] < l[i]: fvg_list.append({"type":"BEAR","top":l[i],"bot":h[i+2],"pct":(l[i]-h[i+2])/l[i]*100})
+        if l[i+2] > h[i]: fvg_list.append({"type":"BULL","top":l[i+2],"bot":h[i]})
+        if h[i+2] < l[i]: fvg_list.append({"type":"BEAR","top":l[i],"bot":h[i+2]})
     return fvg_list[-3:] if fvg_list else []
 
 def get_1h_structure(d60):
@@ -181,7 +121,6 @@ def get_1h_structure(d60):
     tops=[]; bots=[]
     for i in range(3,len(h)-3):
         if h[i]>h[i-1] and h[i]>h[i-2] and h[i]>h[i-3] and h[i]>h[i+1] and h[i]>h[i+2] and h[i]>h[i+3]: tops.append(h[i])
-        if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: tops.append(h[i])
         if l[i]<l[i-1] and l[i]<l[i-2] and l[i]<l[i-3] and l[i]<l[i+1] and l[i]<l[i+2] and l[i]<l[i+3]: bots.append(l[i])
     reversal="double_top" if len(tops)>=2 and abs(tops[-1]-tops[-2])/tops[-2]<0.008 else "double_bottom" if len(bots)>=2 and abs(bots[-1]-bots[-2])/bots[-2]<0.008 else "none"
     return trend,breaks,ob,fvg,reversal
@@ -224,27 +163,19 @@ def check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg):
     if is_buy: return l[-2] < crt_low*1.002 and c[-1] > crt_low*0.998 and c[-1] > o[-1]
     else: return h[-2] > crt_high*0.998 and c[-1] < crt_high*1.002 and c[-1] < o[-1]
 
-# === V37 SMART WALL - NO TIMER, PRICE ONLY ===
 def check_wall_no_timer(s, c, h, crt_high_4h, crt_low_4h):
     live = c[-1]
     if len(c) < 10: return None
-    if live < 1:
-        round_wall = round(live*20)/20
-        if round_wall <= live: round_wall += 0.05
-    else:
-        round_wall = round(live*2)/2
-        if round_wall <= live: round_wall += 0.5
-    dist_round = abs(round_wall - live)
-    dist_crt = abs(crt_high_4h - live) if crt_high_4h > live else 999
+    if live < 1: round_wall = round(live*20)/20;
+    else: round_wall = round(live*2)/2
+    if round_wall <= live: round_wall += 0.05 if live<1 else 0.5
+    dist_round = abs(round_wall - live); dist_crt = abs(crt_high_4h - live) if crt_high_4h > live else 999
     wall = round_wall if dist_round < dist_crt else crt_high_4h
     if wall <= live: return None
     dist_to_wall_pct = (wall - live) / live * 100
     if dist_to_wall_pct > 4 or dist_to_wall_pct < 0.15: return None
     dump_target = crt_low_4h + (crt_high_4h - crt_low_4h)*0.35 if crt_high_4h>0 and crt_low_4h>0 else wall*0.97
-    now = time.time()
-    keyPrep = f"{s}_PREP"
-    keyHit = f"{s}_HIT"
-    upper_wick = h[-1] - max(c[-1], 0)
+    now = time.time(); keyPrep = f"{s}_PREP"; keyHit = f"{s}_HIT"
     if 0.3 <= dist_to_wall_pct <= 1.5:
         if now - WALL_ALERTS.get(keyPrep,0) > 1800:
             WALL_ALERTS[keyPrep]=now; save_wall()
@@ -252,79 +183,31 @@ def check_wall_no_timer(s, c, h, crt_high_4h, crt_low_4h):
     if dist_to_wall_pct < 0.35:
         if now - WALL_ALERTS.get(keyHit,0) > 900:
             WALL_ALERTS[keyHit]=now; save_wall()
-            if upper_wick > abs(c[-1]-0)*0.5:
-                return f"🧱 WALL HIT + WICK {s} {wall:.5f} | Now {live:.5f} | 65% REVERSAL - Wick reject = HOLD SHORT, dump to {dump_target:.5f} | {get_time_12hr()}"
-            else:
-                return f"🧱 WALL HIT NOW {s} {wall:.5f} | Now {live:.5f} | Check close: below wall = 65% hold, above wall = 35% break exit | Dump target {dump_target:.5f} | {get_time_12hr()}"
+            return f"🧱 WALL HIT NOW {s} {wall:.5f} | Now {live:.5f} | Close below = HOLD/SHORT, above = EXIT/LONG break | Dump {dump_target:.5f} | {get_time_12hr()}"
     return None
 
-def get_perfect_entry(o,h,l,c,ob,is_buy,symbol,crt_low,crt_high,setup_type,bias_4h):
-    ob_low,ob_high=ob[0],ob[1]
-    prange=ob_high-ob_low
-    crt_range_pct=(crt_high-crt_low)/(crt_low or 1)*100
-    cfg=PER_COIN_TP.get(symbol, PER_COIN_TP["GRASSUSDT"])
-    is_strong_bull_bos = is_buy and bias_4h=="BULL" and setup_type in ["BOS","GRAB"]
-    is_strong_bear_bos = not is_buy and bias_4h=="BEAR" and setup_type in ["BOS","GRAB"]
-    if is_strong_bull_bos or is_strong_bear_bos:
-        if setup_type=="GRAB": sl_pct=cfg["sl_grab"]
-        elif setup_type=="REVERSAL": sl_pct=cfg["sl_rev"]
-        else: sl_pct=cfg["sl_bos"]
-        tp1_pct=0.0433; tp2_pct=0.0876; tp3_pct=0.1117; tp4_pct=0.133
-        tp1_pct=max(tp1_pct, crt_range_pct*0.45/100)
-        tp2_pct=max(tp2_pct, crt_range_pct*0.85/100)
-        tp3_pct=max(tp3_pct, crt_range_pct*1.15/100)
-        tp4_pct=max(tp4_pct, crt_range_pct*1.35/100)
-        has_tp4=True
-    else:
-        if setup_type=="GRAB": sl_pct=cfg["sl_grab"]; tp1_pct=max(cfg["tp1"], crt_range_pct*0.45/100); tp2_pct=max(cfg["tp2"], crt_range_pct*0.85/100); tp3_pct=max(cfg["tp3"], crt_range_pct*1.30/100); tp4_pct=tp3_pct; has_tp4=False
-        elif setup_type=="REVERSAL": sl_pct=cfg["sl_rev"]; tp1_pct=max(cfg["tp1"]*0.85, crt_range_pct*0.35/100); tp2_pct=max(cfg["tp2"]*0.85, crt_range_pct*0.65/100); tp3_pct=max(cfg["tp3"]*0.85, crt_range_pct*1.0/100); tp4_pct=tp3_pct; has_tp4=False
-        else: sl_pct=cfg["sl_bos"]; tp1_pct=max(cfg["tp1"], crt_range_pct*0.40/100); tp2_pct=max(cfg["tp2"], crt_range_pct*0.75/100); tp3_pct=max(cfg["tp3"], crt_range_pct*1.15/100); tp4_pct=tp3_pct; has_tp4=False
-    if is_buy:
-        entry=ob_low+prange*0.56; sl=entry*(1-sl_pct); tp1=entry*(1+tp1_pct); tp2=entry*(1+tp2_pct); tp3=entry*(1+tp3_pct); tp4=entry*(1+tp4_pct)
-    else:
-        entry=ob_high-prange*0.56; sl=entry*(1+sl_pct); tp1=entry*(1-tp1_pct); tp2=entry*(1-tp2_pct); tp3=entry*(1-tp3_pct); tp4=entry*(1-tp4_pct)
-    risk=abs(entry-sl); rr1=abs(tp1-entry)/(risk or 1e-9)
-    return entry,sl,tp1,tp2,tp3,tp4,rr1,crt_range_pct,has_tp4,is_strong_bull_bos or is_strong_bear_bos
+def check_reversal_now(s, c, h, l, o):
+    if len(c)<5: return None
+    body=abs(c[-1]-o[-1]); up_wick=h[-1]-max(c[-1],o[-1]); low_wick=min(c[-1],o[-1])-l[-1]
+    if up_wick > body*1.5 and c[-1] < o[-1]: return f"✅ REVERSAL {s} BEAR WICK | Now {c[-1]:.5f} | Top reject - SELL/HOLD SHORT | {get_time_12hr()}"
+    if low_wick > body*1.5 and c[-1] > o[-1]: return f"✅ REVERSAL {s} BULL WICK | Now {c[-1]:.5f} | Bottom reject - BUY/HOLD LONG | {get_time_12hr()}"
+    if c[-1] < l[-2] and c[-2] > l[-2]: return f"🟡 HOLD {s} WEAK | Now {c[-1]:.5f} | Lower low - hold profit | {get_time_12hr()}"
+    return None
 
 def full_scan(s,p):
     d240=kl(p,"Min240"); d60=kl(p,"Min60"); d15=kl(p,"Min15"); d5=kl(p,"Min5")
-    if not d240 or not d60 or not d15 or not d5:
-        log(f"❌ {s}: NO KLINE DATA -> SKIP"); return
+    if not d240 or not d60 or not d15 or not d5: return
     c,o,h,l=d5["c"],d5["o"],d5["h"],d5["l"]; v=d5["v"]
     now=time.time(); time_12hr=get_time_12hr(); live_price=c[-1]
-    buy_key=f"{s}_BUY"; sell_key=f"{s}_SELL"
     bias_4h_tmp, crt_low_tmp, crt_high_tmp, _ = get_4h_bias(d240)
     if bias_4h_tmp:
         wall_msg = check_wall_no_timer(s, c, h, crt_high_tmp, crt_low_tmp)
-        if wall_msg:
-            tg(wall_msg)
-            log(wall_msg)
-    if buy_key in ACTIVE or sell_key in ACTIVE:
-        active_key=buy_key if buy_key in ACTIVE else sell_key
-        is_active_buy=ACTIVE[active_key]["is_buy"]
-        entry_price = ACTIVE[active_key]["entry"]
-        fbs15,_br,_=fbs_image_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-        if not fbs15: fbs15,_br,_=fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
-        status_6535, profit = check_65_35_reversal(s, c, h, l, o, v, is_active_buy, entry_price)
-        log(f"🟡 {s} ACTIVE {active_key} {status_6535} {profit:.2f}% | FBS={fbs15}")
-        if status_6535 == "TAKE_HALF_65":
-            if not ACTIVE[active_key].get("half_taken"):
-                tg(f"💰 {s} 65% REVERSAL START {active_key} +{profit:.2f}% | {time_12hr}\nWick reject detected - TAKE HALF NOW, move SL to BE\nPrice: {live_price:.5f} | Entry: {entry_price:.5f}")
-                ACTIVE[active_key]["half_taken"]=True; ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
-        elif status_6535 == "REVERSAL_65_CONFIRMED":
-            if not ACTIVE[active_key].get("reversal_flag"):
-                tg(f"✅ {s} 65% REVERSAL CONFIRMED {active_key} +{profit:.2f}% | {time_12hr}\nHold profit - dump/bump starting | Price: {live_price:.5f}")
-                ACTIVE[active_key]["reversal_flag"]=True; save_active()
-        elif status_6535 == "BREAK_35_EXIT":
-            tg(f"🚨 {s} 35% BREAK - EXIT NOW {active_key} {profit:.2f}% | {time_12hr}\nWall broke against us - close small loss | Price: {live_price:.5f}")
-            del ACTIVE[active_key]; save_active(); return
-        elif status_6535 == "HOLD_PROFIT_WEAK_VOL_65":
-            if profit > ACTIVE[active_key].get("last_hold_profit",0) + 1.0:
-                tg(f"🟡 {s} HOLD PROFIT 65% {active_key} +{profit:.2f}% | {time_12hr} | Weak volume - still holding")
-                ACTIVE[active_key]["last_hold_profit"]=profit; save_active()
-        return
+        if wall_msg: tg(wall_msg)
+        rev_msg = check_reversal_now(s,c,h,l,o)
+        if rev_msg and s in ["GRASSUSDT","TAOUSDT","FARTCOINUSDT","SENTUSDT"]:
+            tg(rev_msg)
     bias_4h,crt_low_4h,crt_high_4h,key_level=get_4h_bias(d240)
-    if not bias_4h: log(f"❌ {s}: 4H NO BIAS -> SKIP"); return
+    if not bias_4h: return
     crt_low_1h=min(d60["l"][-24:]); crt_high_1h=max(d60["h"][-24:])
     trend_1h,breaks_1h,ob_1h,fvg_1h,reversal_1h=get_1h_structure(d60)
     has_fvg=len(fvg_1h)>0; has_ob=ob_1h is not None
@@ -332,52 +215,34 @@ def full_scan(s,p):
     if not fbs15 or "STRONG" not in fbs15:
         fbs15_2, top15_2, brp15_2 = fbs_trend_pump_logic(d15["h"],d15["l"],d15["c"],d15["o"])
         if fbs15_2 and "STRONG" in fbs15_2: fbs15, top15, brp15 = fbs15_2, top15_2, brp15_2
-    log(f"🔍 {s} | 4H:{bias_4h} Key:{key_level:.4f} | 1H:{trend_1h} {breaks_1h} OB:{has_ob} FVG:{has_fvg} REV:{reversal_1h} | 15m:{fbs15} Range:{brp15:.2f}% | Price:{live_price:.6f}")
-    if not fbs15 or "STRONG" not in fbs15: log(f" -> {s}: 15m NO BOS STRONG -> SKIP"); return
+    if not fbs15 or "STRONG" not in fbs15: return
     is_buy="UP" in fbs15; side="BUY" if is_buy else "SELL"; key=f"{s}_{side}"
-    if bias_4h=="BULL" and not is_buy: log(f" -> {s}: 4H BULL vs SELL MISMATCH -> SKIP"); return
-    if bias_4h=="BEAR" and is_buy: log(f" -> {s}: 4H BEAR vs BUY MISMATCH -> SKIP"); return
-    if trend_1h=="UP" and not is_buy: log(f" -> {s}: 1H UP vs SELL MISMATCH -> SKIP"); return
-    if trend_1h=="DOWN" and is_buy: log(f" -> {s}: 1H DOWN vs BUY MISMATCH -> SKIP"); return
-    if not has_ob and not has_fvg and "TREND" not in fbs15: log(f" -> {s}: NO OB/FVG -> SKIP"); return
+    if bias_4h=="BULL" and not is_buy: return
+    if bias_4h=="BEAR" and is_buy: return
+    if trend_1h=="UP" and not is_buy: return
+    if trend_1h=="DOWN" and is_buy: return
+    if not has_ob and not has_fvg and "TREND" not in fbs15: return
     SAME_CD=150*60 if s in FAST_SYMS else 8*3600
     OPP_CD=90*60 if s in FAST_SYMS else 4*3600
-    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: log(f" -> {s}: COOLDOWN SAME -> SKIP"); return
-    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: log(f" -> {s}: COOLDOWN OPP -> SKIP"); return
+    if now-COOLDOWN["signals"].get(key,{}).get("t",0)<SAME_CD: return
+    if now-COOLDOWN["signals"].get(f"{s}_{'SELL' if is_buy else 'BUY'}",{}).get("t",0)<OPP_CD: return
     if key in LAST_TOP:
         last_top,last_time=LAST_TOP[key]
-        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): log(f" -> {s}: SAME TOP PROTECTION -> SKIP"); return
+        if last_top!=0 and abs(top15-last_top)/(last_top or 1)<0.008 and (now-last_time)< (8*3600 if s in FAST_SYMS else 24*3600): return
     crt_low,crt_high = (crt_low_1h,crt_high_1h) if s in FAST_SYMS else (crt_low_4h,crt_high_4h)
-    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg): log(f" -> {s}: 5m NO TBS -> SKIP"); return
-    if not check_btc_filter(s,is_buy): log(f" -> {s}: BTC DOM BLOCK -> SKIP"); return
-    setup_type="BOS"
-    if is_buy and l[-2]<crt_low*0.998 and "TREND" in fbs15: setup_type="GRAB"
-    if not is_buy and h[-2]>crt_high*1.002 and "TREND" in fbs15: setup_type="GRAB"
-    if reversal_1h!="none": setup_type="REVERSAL"
-    def get_last_ob_5m():
-        atr=sum([h[i]-l[i] for i in range(-14,0)])/14 if len(c)>=14 else 0
-        for i in range(len(c)-2,len(c)-60,-1):
-            if is_buy and c[i]<o[i] and c[i+1]>o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
-            if not is_buy and c[i]>o[i] and c[i+1]<o[i+1] and abs(c[i+1]-o[i+1])>atr*0.3: return (l[i],h[i])
-        return None
-    ob_entry = (ob_1h[0],ob_1h[1]) if ob_1h else get_last_ob_5m()
-    if not ob_entry: ob_entry=(min(l[-15:]),max(h[-15:]))
-    entry,sl,tp1,tp2,tp3,tp4,rr1,crt_pct,has_tp4,is_extended=get_perfect_entry(o,h,l,c,ob_entry,is_buy,s,crt_low,crt_high,setup_type,bias_4h)
-    if rr1<1.0 or rr1>8: log(f" -> {s}: RR {rr1:.1f} BAD -> SKIP"); return
-    COOLDOWN["signals"][key]={"t":now,"dir":is_buy,"top":top15,"entry":entry}; save()
+    if not check_tbs(o,h,l,c,crt_low,crt_high,is_buy, has_ob, has_fvg): return
+    if not check_btc_filter(s,is_buy): return
+    COOLDOWN["signals"][key]={"t":now}; save()
     LAST_TOP[key]=(top15,now)
-    ACTIVE[key]={"entry":entry,"is_buy":is_buy,"t":now,"perp":p,"tp1":tp1,"tp2":tp2,"tp3":tp3,"tp4":tp4,"sl":sl,"highest":entry,"lowest":entry,"last_hold_profit":0,"setup":setup_type,"half_taken":False,"reversal_flag":False,"extended":is_extended}; save_active()
     fvg_txt=" + FVG" if has_fvg else ""
-    ext_txt=" EXTENDED 11.17%/13.3%" if is_extended else ""
-    tp4_txt=f" | TP4: {tp4:.6f} (+13.3%)" if has_tp4 else ""
-    tg(f"{'🟢' if is_buy else '🔴'} {s} {side} {setup_type}{ext_txt} | {fbs15} | CONFIRMED\n4H: {bias_4h} Key {key_level:.4f} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Liq:{setup_type} Rev:{reversal_1h} | 15m FBS V36 58/35 | 5m TBS Entry | {time_12hr}\nPrice: {live_price:.6f}\nEntry: {entry:.6f} (OB {ob_entry[0]:.6f}-{ob_entry[1]:.6f})\nSL: {sl:.6f} ({abs(entry-sl)/entry*100:.2f}%) | TP1: {tp1:.6f} | TP2: {tp2:.6f} | TP3: {tp3:.6f}{tp4_txt} | RR {rr1:.1f}R | CRT {crt_pct:.1f}%\n📊 65-35 LOGIC ACTIVE: 65% hold = reversal profit, 35% break = exit")
+    tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s} | {fbs15} | CONFIRMED\n4H: {bias_4h} | 1H: {trend_1h} {breaks_1h} OB:{has_ob} {fvg_txt} Rev:{reversal_1h} | 15m Range:{brp15:.2f}% | {time_12hr}\nPrice: {live_price:.6f} | Entry Zone: {top15:.6f}")
 
-print("=== BOT V37 NO TIMER + 65-35 REVERSAL + WALL NO TIMER ===",flush=True)
+print("=== BOT V38 SIMPLE BUY SELL HOLD REVERSAL ===",flush=True)
 if "--once" in sys.argv:
     for s,p in zip(SYMBOLS,PERPS):
         try: full_scan(s,p)
         except Exception as e: print(f"{s} err {e}", flush=True)
-    print("=== SCAN DONE V37 NO TIMER ===", flush=True)
+    print("=== SCAN DONE V38 ===", flush=True)
 else:
     while True:
         for s,p in zip(SYMBOLS,PERPS):
