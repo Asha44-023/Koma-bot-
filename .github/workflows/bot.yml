@@ -3,6 +3,7 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -11,18 +12,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pytz
-      - run: |
+      - name: Install deps
+        run: pip install requests pytz
+      - name: Ensure files exist
+        run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
-      - uses: actions/cache/restore@v4
+          ls -lh *.json
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
           key: bot-cache-v34-${{ hashFiles('bot.py') }}
-          restore-keys: bot-cache-v34-
-      - run: |
+          restore-keys: |
+            bot-cache-v34-
+      - name: Ensure files after restore
+        run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
       - name: Run bot once
@@ -30,15 +37,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-      - name: TEST - Prove Telegram Works
+      - name: Save cache
         if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python -c "import os,requests; t=os.getenv('TELEGRAM_BOT_TOKEN'); c=os.getenv('TELEGRAM_CHAT_ID'); requests.post(f'https://api.telegram.org/bot{t}/sendMessage', json={'chat_id':c,'text':'✅ V34 TEST OK - Bot alive, scanning every 5m. No signal = market not A+ yet','parse_mode':'Markdown'})"
-      - uses: actions/cache/save@v4
-        if: always()
+        uses: actions/cache/save@v4
         with:
           path: |
             cooldown.json
