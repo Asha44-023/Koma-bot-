@@ -14,6 +14,11 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install requests pytz
+      - name: Ensure cache files exist
+        run: |
+          if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
+          if [ ! -f active.json ]; then echo '{}' > active.json; fi
+          cat cooldown.json
       - name: Restore cooldown cache
         uses: actions/cache/restore@v4
         with:
@@ -24,6 +29,10 @@ jobs:
           restore-keys: |
             bot-cache-v34-diagram-
             bot-cache-
+      - name: Ensure after restore
+        run: |
+          if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
+          if [ ! -f active.json ]; then echo '{}' > active.json; fi
       - name: Run bot once
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
