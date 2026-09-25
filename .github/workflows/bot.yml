@@ -8,29 +8,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install requests pytz
-      - name: Ensure cache files exist
-        run: |
+      - run: pip install requests pytz
+      - run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
-          cat cooldown.json
-      - name: Restore cooldown cache
-        uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v34-diagram-${{ hashFiles('bot.py') }}
-          restore-keys: |
-            bot-cache-v34-diagram-
-            bot-cache-
-      - name: Ensure after restore
-        run: |
+          key: bot-cache-v34-${{ hashFiles('bot.py') }}
+          restore-keys: bot-cache-v34-
+      - run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
       - name: Run bot once
@@ -38,11 +30,17 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-      - name: Save cache even if fails
+      - name: TEST - Prove Telegram Works
         if: always()
-        uses: actions/cache/save@v4
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "import os,requests; t=os.getenv('TELEGRAM_BOT_TOKEN'); c=os.getenv('TELEGRAM_CHAT_ID'); requests.post(f'https://api.telegram.org/bot{t}/sendMessage', json={'chat_id':c,'text':'✅ V34 TEST OK - Bot alive, scanning every 5m. No signal = market not A+ yet','parse_mode':'Markdown'})"
+      - uses: actions/cache/save@v4
+        if: always()
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v34-diagram-${{ hashFiles('bot.py') }}-${{ github.run_id }}
+          key: bot-cache-v34-${{ hashFiles('bot.py') }}-${{ github.run_id }}
