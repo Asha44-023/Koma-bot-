@@ -1,5 +1,5 @@
-# BOT V42.7 FINAL - BOTH 58/35 + TREND FILTER + CLOSE NOW 10MIN
-import time, json, os, requests
+# BOT V42.8 FINAL - BOTH 58/35 + TREND FILTER + CLOSE NOW 10MIN + NO DUPLICATE
+import time, json, os, requests, fcntl
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -17,7 +17,7 @@ PER_COIN_TP={
     "JASMYUSDT":{"sl":0.015,"tp1":0.025,"tp2":0.05,"tp3":0.08,"tp4":0.12},
 }
 
-COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"
+COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; LOCK_FILE="/tmp/bot.lock"
 COOLDOWN={"signals":{}}; ACTIVE={}
 for fp in [COOLDOWN_FILE, ACTIVE_FILE]:
     if os.path.exists(fp):
@@ -26,12 +26,14 @@ for fp in [COOLDOWN_FILE, ACTIVE_FILE]:
             if "cooldown" in fp: COOLDOWN=d
             else: ACTIVE=d
         except: pass
+
 def save_c(): open(COOLDOWN_FILE,"w").write(json.dumps(COOLDOWN))
 def save_a(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
 
 def get_time_12hr():
     try: return datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%I:%M %p EAT")
     except: return datetime.now().strftime("%I:%M %p")
+
 def tg(msg):
     print(msg,flush=True)
     tok=os.getenv("TELEGRAM_BOT_TOKEN") or ""; chat=os.getenv("TELEGRAM_CHAT_ID") or ""
@@ -95,7 +97,7 @@ def is_consolidation_face(h,l,c):
 def range_logic(h,l,c,o):
     if len(c) < 3: return None,None
     ph,pl=h[-2],l[-2]; pr=ph-pl or 1
-    p58=pl+pr*0.58; p35=pl+pr*0.35; p56=pl+pr*0.56; p22=pl+pr*0.22; p78=pl+pr*0.78
+    p58=pl+pr*0.58; p35=pl+pr*0.35; p56=pl+pr*0.56
     cc=c[-1]; co=o[-1]; cl=l[-1]; ch=h[-1]
     if cl < p35 and cc > p35 and cc > co and cc >= p56*0.999:
         return f"RANGE_BEAR_TRAP_BUY 35/58", True
@@ -125,7 +127,6 @@ def is_fake_body(h,l,c,o,is_buy):
     if not is_buy and c[-1] > p58: return True
     return False
 
-# === NEW: CLOSE BOTH WAYS 58/35 ===
 def is_close_now_both_5835(d5, is_buy):
     h,l,c,o=d5["h"],d5["l"],d5["c"],d5["o"]
     if len(c) < 4: return False,""
@@ -141,6 +142,7 @@ def is_close_now_both_5835(d5, is_buy):
     return False,""
 
 def manage_active():
+    global ACTIVE
     if not ACTIVE: return
     now=time.time()
     for s in list(ACTIVE.keys()):
@@ -152,8 +154,6 @@ def manage_active():
         pnl = (cur-entry)/entry if is_buy else (entry-cur)/entry
         pnl_pct=pnl*100
         age_min = (now-pos.get("time",now))/60
-
-        # === CLOSE NOW BOTH 58/35 - 10MIN RULE ===
         rev,reason = is_close_now_both_5835(d5, is_buy)
         if rev and age_min <= 12:
             tg(f"🔵 CLOSE NOW BOTH 58/35 {s} {'BUY' if is_buy else 'SELL'} {pnl_pct:+.1f}% | {reason} | {age_min:.0f}m | {get_time_12hr()}")
@@ -161,18 +161,15 @@ def manage_active():
         if rev and age_min>12 and pnl<0.01:
             tg(f"🔵 CLOSE 10MIN+ BOTH 58/35 {s} {'BUY' if is_buy else 'SELL'} {pnl_pct:+.1f}% | {reason} | {age_min:.0f}m | {get_time_12hr()}")
             del ACTIVE[s]; save_a(); continue
-
         if pos.get("be_price"):
             be=pos["be_price"]
             if (is_buy and cur <= be) or (not is_buy and cur >= be):
                 tg(f"🟡 BE HIT {s} {pos['side']} {pnl_pct:+.1f}% | {get_time_12hr()}")
                 del ACTIVE[s]; save_a(); continue
-
         sl_price = entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
         if (is_buy and cur <= sl_price) or (not is_buy and cur >= sl_price):
             tg(f"🔴 SL HIT {s} {pos['side']} {pnl_pct:.1f}% | {get_time_12hr()}")
             del ACTIVE[s]; save_a(); continue
-
         side="BUY" if is_buy else "SELL"
         if pnl >= cfg["tp4"]:
             tg(f"🟢 TP4 HIT {s} {side} +{pnl_pct:.1f}% CLOSE | {get_time_12hr()}")
@@ -188,6 +185,15 @@ def manage_active():
             pos["tp1"]=True; pos["be_price"]=entry; save_a()
 
 def full_scan():
+    global COOLDOWN, ACTIVE
+    # === FIX 1: RELOAD FROM DISK EVERY LOOP - STOPS DUPLICATES ===
+    if os.path.exists(COOLDOWN_FILE):
+        try: COOLDOWN=json.load(open(COOLDOWN_FILE))
+        except: pass
+    if os.path.exists(ACTIVE_FILE):
+        try: ACTIVE=json.load(open(ACTIVE_FILE))
+        except: pass
+
     manage_active()
     for s in SYMBOLS:
         if s in ACTIVE: continue
@@ -198,9 +204,9 @@ def full_scan():
         fbs,is_buy = fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if not fbs: continue
         now=time.time()
-        if now-COOLDOWN["signals"].get(s,0) < 1800: continue # FIXED 30min no duplicate
+        if now-COOLDOWN["signals"].get(s,0) < 1800: continue
 
-        # === TREND FILTER ALL CORRECTIONS ===
+        # === TREND FILTER STRICT ===
         if bias_4h=="BULL" and not is_buy: continue
         if bias_4h=="BEAR" and is_buy: continue
 
@@ -208,7 +214,6 @@ def full_scan():
         if grab:
             fbs,is_buy = confirm_grab(d5["h"],d5["l"],d5["c"],d5["o"],grab)
             if not fbs: continue
-            # Re-check trend after grab
             if bias_4h=="BULL" and not is_buy: continue
             if bias_4h=="BEAR" and is_buy: continue
         else:
@@ -225,7 +230,12 @@ def full_scan():
         save_a(); COOLDOWN["signals"][s]=now; save_c()
 
 if __name__=="__main__":
-    tg(f"🚀 BOT V42.7 FINAL BOTH 58/35 ALL CORRECTIONS 9coins | {get_time_12hr()}")
+    # === FIX 2: SINGLE INSTANCE LOCK - STOPS x2/x3 DUPLICATES ===
+    lock_fp=open(LOCK_FILE,"w")
+    try: fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except: print("Another bot already running! Run: pkill -9 -f bot"); exit(1)
+
+    tg(f"🚀 BOT V42.8 FINAL BOTH 58/35 ALL CORRECTIONS + NODUP 9coins | {get_time_12hr()}")
     while True:
         try: full_scan()
         except Exception as e: print(e)
