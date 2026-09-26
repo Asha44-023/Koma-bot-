@@ -1,5 +1,5 @@
-# BOT V42.9 MINIMAL - NO HOLD SPAM - NO DUPLICATE - STRICT TREND
-import time, json, os, requests, fcntl
+# BOT V42.9.1 FINAL - MINIMAL + TELEGRAM + --ONCE
+import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -30,8 +30,16 @@ def save_a(): open(ACTIVE_FILE,"w").write(json.dumps(ACTIVE))
 def get_time():
     try: return datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%I:%M %p EAT")
     except: return datetime.now().strftime("%I:%M %p")
+
 def tg(msg):
     print(msg,flush=True)
+    # TELEGRAM SEND
+    try:
+        token=os.getenv("TELEGRAM_BOT_TOKEN")
+        chat=os.getenv("TELEGRAM_CHAT_ID")
+        if token and chat:
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id":chat,"text":msg}, timeout=10)
+    except: pass
 
 def kl(sym,interval):
     try:
@@ -58,7 +66,7 @@ def get_bias(d):
 def fbs_logic(h,l,c,o):
     if len(c)<3: return None,None
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; cc=c[-1]; co=o[-1]
-    pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35; p22=pl+pr*0.22; p78=pl+pr*0.78
+    pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35
     if pc>=p58 and cc>=p35 and cc>co: return "BOS_UP",True
     if pc<=p35 and cc<=p58 and cc<co: return "BOS_DOWN",False
     return None,None
@@ -66,7 +74,7 @@ def fbs_logic(h,l,c,o):
 def is_close(d5,is_buy):
     if len(d5["c"])<4: return False,""
     ph,pl=d5["h"][-2],d5["l"][-2]; pr=ph-pl or 1
-    p58=pl+pr*0.58; p56=pl+pr*0.56; p35=pl+pr*0.35; cc=d5["c"][-1]
+    p58=pl+pr*0.58; p35=pl+pr*0.35; cc=d5["c"][-1]
     if is_buy and cc<p35: return True,f"lost p35 {cc:.5f}<{p35:.5f}"
     if not is_buy and cc>p58: return True,f"lost p58 {cc:.5f}>{p58:.5f}"
     return False,""
@@ -109,7 +117,6 @@ def scan():
         bias=get_bias(d240)
         fbs,is_buy=fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if not fbs: continue
-        # STRICT TREND - NO SELL IN BULL, NO BUY IN BEAR
         if bias=="BULL" and not is_buy: continue
         if bias=="BEAR" and is_buy: continue
         entry=d5["l"][-2]+(d5["h"][-2]-d5["l"][-2])*0.56
@@ -122,10 +129,9 @@ def scan():
         COOLDOWN["signals"][s]=time.time(); save_c()
 
 if __name__=="__main__":
-    import sys
     fp=open(LOCK_FILE,"w")
     try: fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except: 
+    except:
         if "--once" not in sys.argv:
             print("Bot already running"); exit(1)
     tg(f"🚀 BOT V42.9 MINIMAL | {get_time()}")
