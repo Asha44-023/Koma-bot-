@@ -1,4 +1,4 @@
-# BOT V43 FULL - 4H -> 1H OB/FVG/LIQ -> 15M 58/35 BOS - NO SPAM
+# BOT V44 FULL - 4H -> 1H OB/FVG/LIQ/BREAKER -> 15M 58/35 BOS - NO SPAM
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -54,7 +54,7 @@ def kl(sym,interval):
     except: return None
     return None
 
-# --- 4H BIAS (Direction + Supply/Demand) ---
+# --- 4H BIAS ---
 def get_bias_4h(d):
     if len(d["c"])<50: return "RANGE",""
     LOOKBACK=48
@@ -63,9 +63,8 @@ def get_bias_4h(d):
     if d["c"][-1]<mid and d["c"][-1]<ema: return "BEAR",f"Below 4H SD mid+EMA"
     return "RANGE","4H Range"
 
-# --- 1H SMC: OB, FVG, Liquidity ---
+# --- 1H SMC: OB, FVG, Liquidity, BREAKER ---
 def detect_fvg_1h(d):
-    # FVG: gap between candle 3 high/low and candle 1 low/high
     bull_fvg=False; bear_fvg=False
     if len(d["c"])<10: return False,False
     for i in range(-10,-2):
@@ -74,10 +73,8 @@ def detect_fvg_1h(d):
     return bull_fvg, bear_fvg
 
 def detect_ob_1h(d):
-    # OB: last opposite color before strong move
     bull_ob=False; bear_ob=False
     if len(d["c"])<10: return False,False
-    # bullish OB = bearish candle then strong bullish close above its high
     for i in range(-6,-1):
         body = abs(d["c"][i]-d["o"][i]); rng = d["h"][i]-d["l"][i] or 1
         if d["c"][i] < d["o"][i] and d["c"][-1] > d["h"][i] and body/rng>0.4:
@@ -87,35 +84,60 @@ def detect_ob_1h(d):
     return bull_ob, bear_ob
 
 def detect_liquidity_1h(d):
-    # Liquidity sweep: took recent high/low then closed back
     bull_liq=False; bear_liq=False
     if len(d["c"])<20: return False,False
     recent_high=max(d["h"][-20:-2]); recent_low=min(d["l"][-20:-2])
-    if d["h"][-2] > recent_high and d["c"][-1] < recent_high: bear_liq=True # sweep highs = bearish reversal liquidity
-    if d["l"][-2] < recent_low and d["c"][-1] > recent_low: bull_liq=True # sweep lows = bullish
+    if d["h"][-2] > recent_high and d["c"][-1] < recent_high: bear_liq=True
+    if d["l"][-2] < recent_low and d["c"][-1] > recent_low: bull_liq=True
     return bull_liq, bear_liq
+
+def detect_breaker_1h(d):
+    # From your screenshot: OB Failed -> Breaker Block retest
+    bull_breaker=False; bear_breaker=False
+    if len(d["c"])<20: return False,False
+    # Scan for failed bearish OB in last 15 candles
+    for i in range(-18,-5):
+        ob_high=d["h"][i]; ob_low=d["l"][i]
+        # bearish OB (red) that got broken
+        if d["c"][i] < d["o"][i]:
+            # check if it was broken after
+            broken=False
+            for j in range(i+1, -2):
+                if d["c"][j] > ob_high:
+                    broken=True; break
+            # if broken and now price is back inside it = bullish breaker retest
+            if broken and d["l"][-1] <= ob_high and d["l"][-1] >= ob_low*0.995:
+                bull_breaker=True
+        # bullish OB failed -> bearish breaker
+        if d["c"][i] > d["o"][i]:
+            broken=False
+            for j in range(i+1, -2):
+                if d["c"][j] < ob_low:
+                    broken=True; break
+            if broken and d["h"][-1] >= ob_low and d["h"][-1] <= ob_high*1.005:
+                bear_breaker=True
+    return bull_breaker, bear_breaker
 
 def check_1h_confluence(d1, is_buy):
     bull_fvg, bear_fvg = detect_fvg_1h(d1)
     bull_ob, bear_ob = detect_ob_1h(d1)
     bull_liq, bear_liq = detect_liquidity_1h(d1)
+    bull_brk, bear_brk = detect_breaker_1h(d1)
 
     if is_buy:
-        # For BUY need at least 2 of 3: bullish FVG, bullish OB, bullish LIQ sweep
-        score = int(bull_fvg) + int(bull_ob) + int(bull_liq)
-        reason = f"FVG:{bull_fvg} OB:{bull_ob} LIQ:{bull_liq}"
-        return score>=1, reason # 1 confluence enough to not be too strict
+        score = int(bull_fvg) + int(bull_ob) + int(bull_liq) + int(bull_brk)*2 # breaker = 2 points
+        reason = f"FVG:{bull_fvg} OB:{bull_ob} LIQ:{bull_liq} BREAKER:{bull_brk}"
+        return score>=1, reason
     else:
-        score = int(bear_fvg) + int(bear_ob) + int(bear_liq)
-        reason = f"FVG:{bear_fvg} OB:{bear_ob} LIQ:{bear_liq}"
+        score = int(bear_fvg) + int(bear_ob) + int(bear_liq) + int(bear_brk)*2
+        reason = f"FVG:{bear_fvg} OB:{bear_ob} LIQ:{bear_liq} BREAKER:{bear_brk}"
         return score>=1, reason
 
-# --- 15M FBS BOS 58/35 (Image 2) ---
+# --- 15M FBS BOS 58/35 ---
 def fbs_logic(h,l,c,o):
     if len(c)<3: return None,None,None
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; cc=c[-1]; co=o[-1]
     pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35
-    # STRONG BREAKOUT from image: close above 38% = BOS
     if pc>=p58 and cc>=p35 and cc>co: return "BOS_UP",True,f"Prev>58%({pc:.4f}>={p58:.4f}) Curr>35%({cc:.4f}>={p35:.4f})"
     if pc<=p35 and cc<=p58 and cc<co: return "BOS_DOWN",False,f"Prev<35%({pc:.4f}<={p35:.4f}) Curr<58%({cc:.4f}<={p58:.4f})"
     return None,None,None
@@ -161,31 +183,22 @@ def scan():
     for s in SYMBOLS:
         if s in ACTIVE: continue
         if time.time()-COOLDOWN["signals"].get(s,0) < 1800: continue
-
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240 or not d60 or not d5: continue
-
-        # 4H BIAS
         bias, bias_reason = get_bias_4h(d240)
         if bias=="RANGE": continue
-
-        # 15M BOS
         fbs,is_buy, fbs_reason = fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if not fbs: continue
         if bias=="BULL" and not is_buy: continue
         if bias=="BEAR" and is_buy: continue
-
-        # 1H CONFIRMATION - OB/FVG/Liquidity (NEW!)
         ok_1h, smc_reason = check_1h_confluence(d60, is_buy)
         if not ok_1h: continue
-
         entry=d5["l"][-2]+(d5["h"][-2]-d5["l"][-2])*0.56
         cfg=PER_COIN_TP[s]
         sl=entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
         tp1=entry*(1+cfg["tp1"]) if is_buy else entry*(1-cfg["tp1"])
         side="🟢 BUY" if is_buy else "🔴 SELL"
         tg(f"{side} {s} {fbs}\nEntry {entry:.5f} SL {sl:.5f} TP {tp1:.5f}\n4H:{bias} {bias_reason}\n1H SMC:{smc_reason}\n15M:{fbs_reason}\n{get_time()}")
-
         ACTIVE[s]={"entry":entry,"is_buy":is_buy,"time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
 
@@ -195,8 +208,7 @@ if __name__=="__main__":
     except:
         if "--once" not in sys.argv:
             print("Bot already running"); exit(1)
-    # NO SPAM HEARTBEAT - only print
-    print(f"🚀 BOT V43 FULL 4H->1H->15M | {get_time()}", flush=True)
+    print(f"🚀 BOT V44 FULL + BREAKER | {get_time()}", flush=True)
     if "--once" in sys.argv:
         try: scan()
         except Exception as e: print(e)
