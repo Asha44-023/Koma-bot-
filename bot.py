@@ -122,10 +122,17 @@ def scan():
         COOLDOWN["signals"][s]=time.time(); save_c()
 
 if __name__=="__main__":
+    import sys
     fp=open(LOCK_FILE,"w")
     try: fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except: print("Bot already running"); exit(1)
+    except: 
+        if "--once" not in sys.argv:
+            print("Bot already running"); exit(1)
     tg(f"🚀 BOT V42.9 MINIMAL | {get_time()}")
+    if "--once" in sys.argv:
+        try: scan()
+        except Exception as e: print(e)
+        exit(0)
     while True:
         try: scan()
         except Exception as e: print(e)
