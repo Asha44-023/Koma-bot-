@@ -15,15 +15,15 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Restore cache V42 MINIMAL
+      - name: Restore cache V44 FULL+BREAKER
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v42-minimal-${{ github.run_id }}
+          key: bot-cache-v44-breaker-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v42-minimal-
+            bot-cache-v44-breaker-
 
       - name: Ensure files
         run: |
@@ -46,4 +46,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v42-minimal-${{ github.run_id }}
+          key: bot-cache-v44-breaker-${{ github.run_id }}
