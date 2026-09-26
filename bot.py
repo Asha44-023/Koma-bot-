@@ -1,4 +1,4 @@
-# BOT V42.4 MERGED - ENTRY BOTH WAYS + HOLD MANAGER
+# BOT V42.5 MERGED - CONSOLIDATION + AUTO 10MIN CLOSE + BE
 import time, json, os, requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -85,7 +85,31 @@ def confirm_grab(h,l,c,o,grab):
         return ("FAKE_CONTINUE_SELL",False) if c[-1]<=p58 and c[-1]<o[-1] else ("REAL_REVERSE_BUY",True)
     return None,None
 
+# === NEW: CONSOLIDATION DETECTOR 35/58 ===
+def is_consolidation_face(h,l,c):
+    if len(c) < 20: return False
+    recent_range = max(h[-8:]) - min(l[-8:])
+    avg_range = sum([h[i]-l[i] for i in range(-20,-1)])/20
+    up = sum(1 for i in range(-8,-1) if c[i] > c[i-1])
+    return recent_range < avg_range*0.85 and 2 <= up <= 6
+
+def range_logic(h,l,c,o):
+    if len(c) < 3: return None,None
+    ph,pl=h[-2],l[-2]; pr=ph-pl or 1
+    p58=pl+pr*0.58; p35=pl+pr*0.35; p56=pl+pr*0.56; p22=pl+pr*0.22; p78=pl+pr*0.78
+    cc=c[-1]; co=o[-1]; cl=l[-1]; ch=h[-1]
+    if cl < p35 and cc > p35 and cc > co and cc >= p56*0.999:
+        return f"RANGE_BEAR_TRAP_BUY 35/58", True
+    if ch > p58 and cc < p58 and cc < co and cc <= p56*1.001:
+        return f"RANGE_BULL_TRAP_SELL 58/35", False
+    return None,None
+
 def fbs_logic(h,l,c,o):
+    # AUTO SWITCH
+    if is_consolidation_face(h,l,c):
+        r_side, r_buy = range_logic(h,l,c,o)
+        if r_side: return r_side, r_buy
+        return None,None
     if len(c)<3: return None,None
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; cc=c[-1]; co=o[-1]; ch=h[-1]; cl=l[-1]
     pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35; p22=pl+pr*0.22; p78=pl+pr*0.78
@@ -103,9 +127,23 @@ def is_fake_body(h,l,c,o,is_buy):
     if not is_buy and c[-1] > p58: return True
     return False
 
-# === HOLD MANAGER ===
+# === NEW: CLOSE REVERSING 10MIN ===
+def is_close_reversing(d5, is_buy):
+    h,l,c,o=d5["h"],d5["l"],d5["c"],d5["o"]
+    if len(c) < 4: return False
+    ph,pl=h[-2],l[-2]; pr=ph-pl or 1; p35=pl+pr*0.35; p58=pl+pr*0.58
+    if is_buy:
+        if c[-1] < p35 and c[-1] < c[-2] and c[-2] <= c[-3]: return True
+        if c[-1] < o[-1] and c[-1] < p35 and h[-1] > pl+pr*0.78: return True
+    else:
+        if c[-1] > p58 and c[-1] > c[-2] and c[-2] >= c[-3]: return True
+        if c[-1] > o[-1] and c[-1] > p58 and l[-1] < pl+pr*0.22: return True
+    return False
+
+# === HOLD MANAGER + AUTO 10MIN CLOSE ===
 def manage_active():
     if not ACTIVE: return
+    now=time.time()
     for s in list(ACTIVE.keys()):
         perp=SYMBOL_MAP.get(s)
         d5=kl(perp,"Min15")
@@ -114,38 +152,52 @@ def manage_active():
         cfg=PER_COIN_TP[s]
         pnl = (cur-entry)/entry if is_buy else (entry-cur)/entry
         pnl_pct=pnl*100
-        age_h = (time.time()-pos.get("time",time.time()))/3600
+        age_min = (now-pos.get("time",now))/60
+        age_h = age_min/60
 
-        # SL check
+        # AUTO 10 MIN
+        if age_min >= 10:
+            if is_close_reversing(d5, is_buy) and pnl < 0.01:
+                tg(f"⏱️ AUTO 10MIN CLOSE REV {s} {'BUY' if is_buy else 'SELL'} {pnl_pct:+.1f}% close reversing | {get_time_12hr()}")
+                del ACTIVE[s]; save_a(); continue
+            if age_min >= 15 and pnl < 0.003:
+                tg(f"⏱️ AUTO 15MIN CLOSE FLAT {s} {'BUY' if is_buy else 'SELL'} {pnl_pct:+.1f}% | {get_time_12hr()}")
+                del ACTIVE[s]; save_a(); continue
+
+        # BE SL
+        if pos.get("be_price"):
+            be=pos["be_price"]
+            if (is_buy and cur <= be) or (not is_buy and cur >= be):
+                tg(f"🟡 BE HIT {s} {pos['side']} {pnl_pct:+.1f}% | {get_time_12hr()}")
+                del ACTIVE[s]; save_a(); continue
+
         sl_price = entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
         if (is_buy and cur <= sl_price) or (not is_buy and cur >= sl_price):
             tg(f"🔴 SL HIT {s} {pos['side']} {pnl_pct:.1f}% | {get_time_12hr()}")
             del ACTIVE[s]; save_a(); continue
 
-        # TP checks
         side="BUY" if is_buy else "SELL"
         if pnl >= cfg["tp4"]:
-            tg(f"🟢 TP4 HIT {s} {side} +{pnl_pct:.1f}% CLOSE 100% | {get_time_12hr()}")
+            tg(f"🟢 TP4 HIT {s} {side} +{pnl_pct:.1f}% CLOSE | {get_time_12hr()}")
             del ACTIVE[s]; save_a()
         elif pnl >= cfg["tp3"] and not pos.get("tp3"):
-            tg(f"🟢 TP3 HIT {s} {side} +{pnl_pct:.1f}% CLOSE 50% HOLD rest | {get_time_12hr()}")
+            tg(f"🟢 TP3 HIT {s} {side} +{pnl_pct:.1f}% | {get_time_12hr()}")
             pos["tp3"]=True; save_a()
         elif pnl >= cfg["tp2"] and not pos.get("tp2"):
-            tg(f"🟢 TP2 HIT {s} {side} +{pnl_pct:.1f}% CLOSE 30% | {get_time_12hr()}")
+            tg(f"🟢 TP2 HIT {s} {side} +{pnl_pct:.1f}% | {get_time_12hr()}")
             pos["tp2"]=True; save_a()
         elif pnl >= cfg["tp1"] and not pos.get("tp1"):
-            tg(f"🟡 TP1 HIT {s} {side} +{pnl_pct:.1f}% | {get_time_12hr()}")
-            pos["tp1"]=True; save_a()
+            tg(f"🟡 TP1 HIT + BE {s} {side} +{pnl_pct:.1f}% SL→BE | {get_time_12hr()}")
+            pos["tp1"]=True; pos["be_price"]=entry; save_a()
         else:
-            # HOLD message every 60 min
-            if int(time.time()) % 3600 < 60:
-                trend = "Range"
-                tg(f"🟡 HOLD {s} {side} {pnl_pct:+.1f}% {trend} {pnl*100:.1f}% {age_h:.0f}h | {get_time_12hr()}")
+            if int(now) % 1800 < 60:
+                face="RANGE" if is_consolidation_face(d5["h"],d5["l"],d5["c"]) else "TREND"
+                tg(f"🟡 HOLD {s} {side} {pnl_pct:+.1f}% {face} {age_min:.0f}m | {get_time_12hr()}")
 
 def full_scan():
     manage_active()
     for s in SYMBOLS:
-        if s in ACTIVE: continue # already in trade
+        if s in ACTIVE: continue
         perp=SYMBOL_MAP[s]
         d60=kl(perp,"Min60"); d5=kl(perp,"Min15"); d240=kl(perp,"Min240")
         if not d60 or not d5 or not d240: continue
@@ -157,9 +209,9 @@ def full_scan():
         grab=is_grab(d5["h"],d5["l"],d5["c"],crt_low,crt_high)
         if grab:
             fbs,is_buy = confirm_grab(d5["h"],d5["l"],d5["c"],d5["o"],grab)
+            if not fbs: continue
         else:
             if is_fake_body(d5["h"],d5["l"],d5["c"],d5["o"],is_buy): continue
-
         entry=d5["l"][-2] + (d5["h"][-2]-d5["l"][-2])*0.56
         cfg=PER_COIN_TP[s]
         sl=entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
@@ -167,13 +219,11 @@ def full_scan():
         tp2=entry*(1+cfg["tp2"]) if is_buy else entry*(1-cfg["tp2"])
         side="🟢 BUY" if is_buy else "🔴 SELL"
         tg(f"{side} {s} {fbs}\nEntry {entry:.5f} SL {sl:.5f} TP {tp1:.5f}/{tp2:.5f} | {get_time_12hr()} | 4H {bias_4h}")
-        # SAVE ACTIVE
         ACTIVE[s]={"entry":entry,"is_buy":is_buy,"side":side,"time":now,"tp1":False,"tp2":False,"tp3":False}
-        save_a()
-        COOLDOWN["signals"][s]=now; save_c()
+        save_a(); COOLDOWN["signals"][s]=now; save_c()
 
 if __name__=="__main__":
-    tg(f"🚀 BOT V42.4 MERGED STARTED - 9 coins | {get_time_12hr()}")
+    tg(f"🚀 BOT V42.5 FINAL 9coins AUTO10MIN+RANGE 35/58 | {get_time_12hr()}")
     while True:
         try: full_scan()
         except Exception as e: print(e)
