@@ -1,15 +1,12 @@
 name: Run Crypto Bot
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/8 * * * *'
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    env:
-      NODE_NO_WARNINGS: 1
-      NODE_OPTIONS: --no-deprecation
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,29 +15,23 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Ensure files exist before restore
-        run: |
-          if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
-          if [ ! -f active.json ]; then echo '{}' > active.json; fi
-          if [ ! -f wall_alerts.json ]; then echo '{}' > wall_alerts.json; fi
-
-      - name: Restore cache
+      - name: Restore cache V42 MINIMAL
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-            wall_alerts.json
-          key: bot-cache-v34-${{ hashFiles('bot.py') }}
+          key: bot-cache-v42-minimal-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v34-
+            bot-cache-v42-minimal-
 
-      - name: Ensure files after restore
+      - name: Ensure files
         run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
-          if [ ! -f wall_alerts.json ]; then echo '{}' > wall_alerts.json; fi
-          ls -lh *.json
+          rm -f /tmp/bot.lock
+          cat cooldown.json
+          cat active.json
 
       - name: Run bot once
         env:
@@ -55,5 +46,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-            wall_alerts.json
-          key: bot-cache-v34-${{ hashFiles('bot.py') }}-${{ github.run_id }}
+          key: bot-cache-v42-minimal-${{ github.run_id }}
