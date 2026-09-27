@@ -37,7 +37,7 @@ def tg(msg):
         token=os.getenv("TELEGRAM_BOT_TOKEN"); chat=os.getenv("TELEGRAM_CHAT_ID")
         if token and chat:
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id":chat,"text":msg}, timeout=10)
-    except: pass
+    except Exception as e: print(f"TG error {e}")
 
 def kl(sym,interval):
     try:
@@ -51,10 +51,11 @@ def kl(sym,interval):
                 try: o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4]))
                 except: continue
             return {"o":o,"h":h,"l":l,"c":c}
-    except: return None
+    except Exception as e:
+        print(f"kl error {sym} {interval} {e}")
+        return None
     return None
 
-# --- 4H BIAS ---
 def get_bias_4h(d):
     if len(d["c"])<50: return "RANGE",""
     LOOKBACK=48
@@ -63,7 +64,6 @@ def get_bias_4h(d):
     if d["c"][-1]<mid and d["c"][-1]<ema: return "BEAR",f"Below 4H SD mid+EMA"
     return "RANGE","4H Range"
 
-# --- 1H SMC: OB, FVG, Liquidity, BREAKER ---
 def detect_fvg_1h(d):
     bull_fvg=False; bear_fvg=False
     if len(d["c"])<10: return False,False
@@ -92,23 +92,17 @@ def detect_liquidity_1h(d):
     return bull_liq, bear_liq
 
 def detect_breaker_1h(d):
-    # From your screenshot: OB Failed -> Breaker Block retest
     bull_breaker=False; bear_breaker=False
     if len(d["c"])<20: return False,False
-    # Scan for failed bearish OB in last 15 candles
     for i in range(-18,-5):
         ob_high=d["h"][i]; ob_low=d["l"][i]
-        # bearish OB (red) that got broken
         if d["c"][i] < d["o"][i]:
-            # check if it was broken after
             broken=False
             for j in range(i+1, -2):
                 if d["c"][j] > ob_high:
                     broken=True; break
-            # if broken and now price is back inside it = bullish breaker retest
             if broken and d["l"][-1] <= ob_high and d["l"][-1] >= ob_low*0.995:
                 bull_breaker=True
-        # bullish OB failed -> bearish breaker
         if d["c"][i] > d["o"][i]:
             broken=False
             for j in range(i+1, -2):
@@ -123,9 +117,8 @@ def check_1h_confluence(d1, is_buy):
     bull_ob, bear_ob = detect_ob_1h(d1)
     bull_liq, bear_liq = detect_liquidity_1h(d1)
     bull_brk, bear_brk = detect_breaker_1h(d1)
-
     if is_buy:
-        score = int(bull_fvg) + int(bull_ob) + int(bull_liq) + int(bull_brk)*2 # breaker = 2 points
+        score = int(bull_fvg) + int(bull_ob) + int(bull_liq) + int(bull_brk)*2
         reason = f"FVG:{bull_fvg} OB:{bull_ob} LIQ:{bull_liq} BREAKER:{bull_brk}"
         return score>=1, reason
     else:
@@ -133,7 +126,6 @@ def check_1h_confluence(d1, is_buy):
         reason = f"FVG:{bear_fvg} OB:{bear_ob} LIQ:{bear_liq} BREAKER:{bear_brk}"
         return score>=1, reason
 
-# --- 15M FBS BOS 58/35 ---
 def fbs_logic(h,l,c,o):
     if len(c)<3: return None,None,None
     ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; cc=c[-1]; co=o[-1]
@@ -152,7 +144,9 @@ def is_close(d5,is_buy):
 
 def manage():
     global ACTIVE
-    if not ACTIVE: return
+    if not ACTIVE:
+        print("No active positions", flush=True)
+        return
     now=time.time()
     for s in list(ACTIVE.keys()):
         d5=kl(SYMBOL_MAP[s],"Min15")
@@ -179,19 +173,35 @@ def scan():
     if os.path.exists(ACTIVE_FILE):
         try: ACTIVE=json.load(open(ACTIVE_FILE))
         except: pass
+    print(f"Starting scan {len(SYMBOLS)} pairs...", flush=True)
     manage()
+    found=0
     for s in SYMBOLS:
-        if s in ACTIVE: continue
-        if time.time()-COOLDOWN["signals"].get(s,0) < 1800: continue
+        if s in ACTIVE:
+            print(f"{s} -> skip ACTIVE", flush=True)
+            continue
+        if time.time()-COOLDOWN["signals"].get(s,0) < 1800:
+            print(f"{s} -> skip COOLDOWN", flush=True)
+            continue
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
-        if not d240 or not d60 or not d5: continue
+        if not d240 or not d60 or not d5:
+            print(f"{s} -> kl fail", flush=True)
+            continue
         bias, bias_reason = get_bias_4h(d240)
+        print(f"{s} 4H:{bias}", flush=True)
         if bias=="RANGE": continue
         fbs,is_buy, fbs_reason = fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
-        if not fbs: continue
-        if bias=="BULL" and not is_buy: continue
-        if bias=="BEAR" and is_buy: continue
+        if not fbs:
+            print(f"{s} -> no 15M BOS", flush=True)
+            continue
+        if bias=="BULL" and not is_buy:
+            print(f"{s} -> bias BULL but BOS_DOWN", flush=True)
+            continue
+        if bias=="BEAR" and is_buy:
+            print(f"{s} -> bias BEAR but BOS_UP", flush=True)
+            continue
         ok_1h, smc_reason = check_1h_confluence(d60, is_buy)
+        print(f"{s} 1H:{smc_reason} ok={ok_1h}", flush=True)
         if not ok_1h: continue
         entry=d5["l"][-2]+(d5["h"][-2]-d5["l"][-2])*0.56
         cfg=PER_COIN_TP[s]
@@ -201,6 +211,8 @@ def scan():
         tg(f"{side} {s} {fbs}\nEntry {entry:.5f} SL {sl:.5f} TP {tp1:.5f}\n4H:{bias} {bias_reason}\n1H SMC:{smc_reason}\n15M:{fbs_reason}\n{get_time()}")
         ACTIVE[s]={"entry":entry,"is_buy":is_buy,"time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
+        found+=1
+    print(f"Scan done. Found {found} signals. {get_time()}", flush=True)
 
 if __name__=="__main__":
     fp=open(LOCK_FILE,"w")
@@ -211,9 +223,9 @@ if __name__=="__main__":
     print(f"🚀 BOT V44 FULL + BREAKER | {get_time()}", flush=True)
     if "--once" in sys.argv:
         try: scan()
-        except Exception as e: print(e)
+        except Exception as e: print(f"SCAN ERROR {e}", flush=True)
         exit(0)
     while True:
         try: scan()
-        except Exception as e: print(e)
+        except Exception as e: print(f"LOOP ERROR {e}", flush=True)
         time.sleep(60)
