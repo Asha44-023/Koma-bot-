@@ -1,7 +1,7 @@
-name: Run Crypto Bot V47.7 NO-SPAM-EARLY
+name: Run Crypto Bot V47.8 BREAK+50%
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15m scan, trend only on bias change or hourly
+    - cron: '*/15 * * * *'  # every 15m, trend only on change or hourly
   workflow_dispatch:
 
 jobs:
@@ -23,10 +23,10 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-7-${{ github.run_id }}
+          key: bot-cache-v47-8-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v47-8-
             bot-cache-v47-7-
-            bot-cache-v47-6-
             bot-cache-
 
       - name: Ensure files
@@ -38,14 +38,14 @@ jobs:
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot V47.7
+      - name: Run bot V47.8 BREAK+50%
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V47.7 REVERSAL ONLY ==="
+          echo "=== SCAN V47.8 50% SLOW + BREAK FAST ==="
           python bot.py --once
-          echo "=== TREND (bias change or hourly only) ==="
+          echo "=== TREND (bias change or hourly) ==="
           python bot.py --trend
           echo "Active: $(cat active.json)"
 
@@ -58,4 +58,4 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-7-${{ github.run_id }}
+          key: bot-cache-v47-8-${{ github.run_id }}
