@@ -1,4 +1,4 @@
-# BOT V47.6 FINAL NO-TOP-BUY - LIQ GRAB + SPECIFIC RE-ENTRY + LIVE + AUTO SELL + EARLY + PUMP FILTER + NO-SPAM
+# BOT V47.7 FINAL NO-SPAM-EARLY - REVERSAL ONLY
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -97,23 +97,19 @@ def liquidity_scalp_levels(sym, bias, d15, live_price, entry_price=None):
             return f" OVEREXTENDED BEAR -{((1-live_price/recent_low)*100):.1f}% | BUY {buy_now:.5f} -> SELL BACK {sell_back:.5f} | Await retest, if breaks {mid:.5f} flip LONG"
     return None
 def early_warning(d, symbol):
+    # V47.7 FIXED: Only real reversal, not spam
     if len(d["c"])<60: return None
     curr=d["c"][-1]
     recent_low = min(d["l"][-20:]); prev_low = min(d["l"][-50:-20])
     recent_high = max(d["h"][-20:]); prev_high = max(d["h"][-50:-20])
     ema = sum(d["c"][-50:])/50
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
-    is_fast = symbol in FAST_COINS
-    if curr < ema*1.01 and recent_low < prev_low*1.015 and curr < mid*1.01:
-        mins = 10 if is_fast else 15
-        return f"EARLY BEAR SHIFT ~{mins}m | {symbol} {curr:.5f} near EMA {ema:.5f}"
-    if curr > ema*0.99 and recent_high > prev_high*0.985 and curr > mid*0.99:
-        mins = 10 if is_fast else 15
-        return f"EARLY BULL SHIFT ~{mins}m | {symbol} {curr:.5f} near EMA {ema:.5f}"
-    if abs(curr-mid)/mid < 0.015:
-        mins = 10 if is_fast else 15
-        side = "BEAR" if curr < mid else "BULL"
-        return f"EARLY {side} SHIFT ~{mins}m | {symbol} near mid {mid:.5f}"
+    bias,_,_,_,_ = get_bias_4h(d, symbol)
+    # Only warn if bias about to flip, not same direction
+    if bias=="BULL" and curr < ema*0.998 and recent_low < prev_low*0.98 and curr < mid:
+        return f"EARLY BEAR REVERSAL | {symbol} BULL->BEAR? {curr:.5f} broke {prev_low:.5f} below EMA {ema:.5f}"
+    if bias=="BEAR" and curr > ema*1.002 and recent_high > prev_high*1.02 and curr > mid:
+        return f"EARLY BULL REVERSAL | {symbol} BEAR->BULL? {curr:.5f} broke {prev_high:.5f} above EMA {ema:.5f}"
     return None
 def get_bias_4h(d, symbol=""):
     if len(d["c"])<60: return "RANGE","Need more candles",0,0,d["c"][-1] if d["c"] else 0
@@ -236,7 +232,7 @@ def print_trends():
     if os.path.exists(TREND_CACHE):
         try: last=json.load(open(TREND_CACHE))
         except: pass
-    msg = f"📊 TREND V47.6 NO-SPAM - {get_time()}\n━━━━━━━━━━━━━━\n\n"
+    msg = f"📊 TREND V47.7 NO-SPAM - {get_time()}\n━━━━━━━━━━━━━━\n\n"
     curr_state={}; changed=False; early_msgs=[]; pump_msgs=[]
     for s in SYMBOLS:
         d240=kl(SYMBOL_MAP[s],"Min240"); d5=kl(SYMBOL_MAP[s],"Min15")
@@ -247,7 +243,7 @@ def print_trends():
         lp = get_live_price(s)
         cur_price = lp if lp else (d5["c"][-1] if d5 else tgt)
         ew = early_warning(d240, s)
-        if ew and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>3600):
+        if ew and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>14400):
             early_msgs.append(ew); EARLY_WARN_TIME[s]=time.time()
         pd = pump_dump_detector(s, cur_price)
         if pd and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>3600):
@@ -269,7 +265,10 @@ def print_trends():
     for pm in pump_msgs: tg(f"🚨 {pm} | {get_time()}")
     minute = datetime.now().minute
     should_send = changed or (minute % 60 == 0)
-    if should_send or early_msgs or pump_msgs: tg(msg)
+    if should_send: tg(msg)
+    elif early_msgs or pump_msgs:
+        # dont spam full trend if only early, early already sent
+        pass
 def scan():
     global COOLDOWN,ACTIVE
     if os.path.exists(COOLDOWN_FILE):
@@ -318,7 +317,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V47.6 FINAL | {get_time()}")
+    print(f"BOT V47.7 FINAL | {get_time()}")
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}")
