@@ -1,4 +1,4 @@
-# BOT V44 FULL - 4H -> 1H OB/FVG/LIQ/BREAKER -> 15M 58/35 BOS - NO SPAM
+# BOT V45 FULL - 4H BIAS -> 1H OB/FVG/LIQ/BREAKER/CHOCH -> 15M 58/35 BOS
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -40,11 +40,9 @@ def tg(msg):
     except Exception as e: print(f"TG error {e}")
 
 def kl(sym,interval):
-    # FIXED: 3 endpoints with fallback
     headers = {"User-Agent":"Mozilla/5.0"}
     spot_sym = sym.replace("_","")
     spot_iv = {"Min15":"15m","Min60":"60m","Min240":"4h"}.get(interval,"15m")
-
     urls = [
         f"https://contract.mexc.com/api/v1/contract/kline/{sym}?interval={interval}",
         f"https://api.mexc.com/api/v3/klines?symbol={spot_sym}&interval={spot_iv}&limit=200",
@@ -59,14 +57,10 @@ def kl(sym,interval):
             if isinstance(data,list) and len(data)>20:
                 o,h,l,c=[],[],[],[]
                 for k in data:
-                    try:
-                        # spot format: [time, open, high, low, close,...]
-                        o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4]))
+                    try: o.append(float(k[1])); h.append(float(k[2])); l.append(float(k[3])); c.append(float(k[4]))
                     except: continue
-                if len(c)>20:
-                    return {"o":o,"h":h,"l":l,"c":c}
-        except Exception as e:
-            continue
+                if len(c)>20: return {"o":o,"h":h,"l":l,"c":c}
+        except: continue
     print(f"kl FINAL fail {sym} {interval}", flush=True)
     return None
 
@@ -120,21 +114,39 @@ def detect_breaker_1h(d):
             if broken and d["h"][-1] >= ob_low and d["h"][-1] <= ob_high*1.005: bear_breaker=True
     return bull_breaker, bear_breaker
 
+def detect_choch_1h(d):
+    bull_choch=False; bear_choch=False
+    if len(d["c"])<30: return False,False
+    try:
+        last_high = max(d["h"][-20:-3]); prev_high = max(d["h"][-35:-20])
+        last_low = min(d["l"][-20:-3]); prev_low = min(d["l"][-35:-20])
+        # Bearish structure broken -> Bull CHOCH
+        if prev_high > last_high and d["c"][-1] > last_high and d["c"][-2] <= last_high:
+            bull_choch=True
+        # Bullish structure broken -> Bear CHOCH
+        if prev_low < last_low and d["c"][-1] < last_low and d["c"][-2] >= last_low:
+            bear_choch=True
+    except: pass
+    return bull_choch, bear_choch
+
 def check_1h_confluence(d1, is_buy):
     bull_fvg, bear_fvg = detect_fvg_1h(d1)
     bull_ob, bear_ob = detect_ob_1h(d1)
     bull_liq, bear_liq = detect_liquidity_1h(d1)
     bull_brk, bear_brk = detect_breaker_1h(d1)
+    bull_choch, bear_choch = detect_choch_1h(d1)
     if is_buy:
-        reason = f"FVG:{bull_fvg} OB:{bull_ob} LIQ:{bull_liq} BREAKER:{bull_brk}"
-        return (bull_fvg or bull_ob or bull_liq or bull_brk), reason
+        reason = f"FVG:{bull_fvg} OB:{bull_ob} LIQ:{bull_liq} BRK:{bull_brk} CHOCH:{bull_choch}"
+        ok = bull_fvg or bull_ob or bull_liq or bull_brk or bull_choch
+        return ok, reason
     else:
-        reason = f"FVG:{bear_fvg} OB:{bear_ob} LIQ:{bear_liq} BREAKER:{bear_brk}"
-        return (bear_fvg or bear_ob or bear_liq or bear_brk), reason
+        reason = f"FVG:{bear_fvg} OB:{bear_ob} LIQ:{bear_liq} BRK:{bear_brk} CHOCH:{bear_choch}"
+        ok = bear_fvg or bear_ob or bear_liq or bear_brk or bear_choch
+        return ok, reason
 
 def fbs_logic(h,l,c,o):
     if len(c)<3: return None,None,None
-    ph,pl,po,pc=h[-2],l[-2],o[-2],c[-2]; cc=c[-1]; co=o[-1]
+    ph,pl=h[-2],l[-2]; pc=c[-2]; cc=c[-1]; co=o[-1]
     pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35
     if pc>=p58 and cc>=p35 and cc>co: return "BOS_UP",True,f"Prev>58% Curr>35%"
     if pc<=p35 and cc<=p58 and cc<co: return "BOS_DOWN",False,f"Prev<35% Curr<58%"
@@ -150,8 +162,7 @@ def is_close(d5,is_buy):
 
 def manage():
     global ACTIVE
-    if not ACTIVE:
-        print("No active positions", flush=True); return
+    if not ACTIVE: print("No active positions", flush=True); return
     now=time.time()
     for s in list(ACTIVE.keys()):
         d5=kl(SYMBOL_MAP[s],"Min15")
@@ -186,7 +197,7 @@ def scan():
         if time.time()-COOLDOWN["signals"].get(s,0) < 1800: print(f"{s} -> skip COOLDOWN", flush=True); continue
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240 or not d60 or not d5: print(f"{s} -> kl fail", flush=True); continue
-        bias, _ = get_bias_4h(d240)
+        bias,_ = get_bias_4h(d240)
         print(f"{s} 4H:{bias}", flush=True)
         if bias=="RANGE": continue
         fbs,is_buy,_ = fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
@@ -212,7 +223,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"🚀 BOT V44 FULL + BREAKER | {get_time()}", flush=True)
+    print(f"🚀 BOT V45 + CHOCH | {get_time()}", flush=True)
     if "--once" in sys.argv:
         try: scan()
         except Exception as e: print(f"SCAN ERROR {e}", flush=True)
