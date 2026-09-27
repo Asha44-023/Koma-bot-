@@ -1,4 +1,4 @@
-# BOT V47.7 FINAL NO-SPAM-EARLY - REVERSAL ONLY
+# BOT V47.8 FINAL - 50% SLOW + BREAK FAST + NO-SPAM-EARLY
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -97,7 +97,6 @@ def liquidity_scalp_levels(sym, bias, d15, live_price, entry_price=None):
             return f" OVEREXTENDED BEAR -{((1-live_price/recent_low)*100):.1f}% | BUY {buy_now:.5f} -> SELL BACK {sell_back:.5f} | Await retest, if breaks {mid:.5f} flip LONG"
     return None
 def early_warning(d, symbol):
-    # V47.7 FIXED: Only real reversal, not spam
     if len(d["c"])<60: return None
     curr=d["c"][-1]
     recent_low = min(d["l"][-20:]); prev_low = min(d["l"][-50:-20])
@@ -105,7 +104,6 @@ def early_warning(d, symbol):
     ema = sum(d["c"][-50:])/50
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
     bias,_,_,_,_ = get_bias_4h(d, symbol)
-    # Only warn if bias about to flip, not same direction
     if bias=="BULL" and curr < ema*0.998 and recent_low < prev_low*0.98 and curr < mid:
         return f"EARLY BEAR REVERSAL | {symbol} BULL->BEAR? {curr:.5f} broke {prev_low:.5f} below EMA {ema:.5f}"
     if bias=="BEAR" and curr > ema*1.002 and recent_high > prev_high*1.02 and curr > mid:
@@ -232,7 +230,7 @@ def print_trends():
     if os.path.exists(TREND_CACHE):
         try: last=json.load(open(TREND_CACHE))
         except: pass
-    msg = f"📊 TREND V47.7 NO-SPAM - {get_time()}\n━━━━━━━━━━━━━━\n\n"
+    msg = f"📊 TREND V47.8 50%+BREAK - {get_time()}\n━━━━━━━━━━━━━━\n\n"
     curr_state={}; changed=False; early_msgs=[]; pump_msgs=[]
     for s in SYMBOLS:
         d240=kl(SYMBOL_MAP[s],"Min240"); d5=kl(SYMBOL_MAP[s],"Min15")
@@ -266,9 +264,6 @@ def print_trends():
     minute = datetime.now().minute
     should_send = changed or (minute % 60 == 0)
     if should_send: tg(msg)
-    elif early_msgs or pump_msgs:
-        # dont spam full trend if only early, early already sent
-        pass
 def scan():
     global COOLDOWN,ACTIVE
     if os.path.exists(COOLDOWN_FILE):
@@ -306,10 +301,21 @@ def scan():
         ok_1h,_=check_1h_confluence(d60,is_buy,is_slow=is_slow)
         if not ok_1h: continue
         ph=d5["h"][-2]; pl=d5["l"][-2]
-        entry=pl+(ph-pl)*0.50
+        # V47.8 ENTRY LOGIC - From your images
+        if is_slow:
+            # SLOW = 50% of engulfing (Image top right) - LIMIT ORDER
+            entry=pl+(ph-pl)*0.50
+            entry_type="50% ENGULF"
+        else:
+            # FAST = BREAK OF THE CANDLE (Image bottom) - BREAKOUT
+            if is_buy:
+                entry=d5["h"][-2]*1.001 # break high + 0.1%
+            else:
+                entry=d5["l"][-2]*0.999 # break low - 0.1%
+            entry_type="BREAK"
         cfg=PER_COIN_TP[s]; sl=entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"]); tp1=entry*(1+cfg["tp1"]) if is_buy else entry*(1-cfg["tp1"])
         side="BUY" if is_buy else "SELL"
-        tg(f"{side} {s} {fbs}\nEntry {entry:.5f} SL {sl:.5f} TP {tp1:.5f}\n{get_time()}")
+        tg(f"{side} {s} {fbs} [{entry_type}]\nEntry {entry:.5f} SL {sl:.5f} TP {tp1:.5f}\n{get_time()}")
         ACTIVE[s]={"entry":entry,"is_buy":is_buy,"time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
 if __name__=="__main__":
@@ -317,7 +323,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V47.7 FINAL | {get_time()}")
+    print(f"BOT V47.8 BREAK+50% | {get_time()}")
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}")
