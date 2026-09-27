@@ -1,4 +1,4 @@
-# BOT V46.5 - CLEAN COLOR NO IMAGE
+# BOT V46.6 - TREND + REVERSAL COMBINED
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -57,31 +57,20 @@ def kl(sym,interval):
     return None
 def get_bias_4h(d):
     if len(d["c"])<60: return "RANGE","Need more candles",0,0,d["c"][-1] if d["c"] else 0
-    recent_low = min(d["l"][-20:])
-    prev_low = min(d["l"][-50:-20])
-    recent_high = max(d["h"][-20:])
-    prev_high = max(d["h"][-50:-20])
-    ema = sum(d["c"][-50:])/50
-    curr = d["c"][-1]
-    sup=recent_low; res=recent_high
-    long_tgt=res*1.08; short_tgt=sup*0.92
-    higher_low = recent_low > prev_low * 1.002
-    lower_low = recent_low < prev_low * 0.998
-    higher_high = recent_high > prev_high * 1.002
-    lower_high = recent_high < prev_high * 0.998
-    if higher_low and curr > ema:
-        return "BULL", f"HL {prev_low:.4f}->{recent_low:.4f} intact", sup, res, long_tgt
-    if lower_low and lower_high and curr < ema:
-        return "BEAR", f"LL {prev_low:.4f}->{recent_low:.4f} + LH {prev_high:.4f}->{recent_high:.4f}", sup, res, short_tgt
-    if lower_low and curr < ema:
-        return "BEAR", f"LL {prev_low:.4f}->{recent_low:.4f} broken", sup, res, short_tgt
+    recent_low = min(d["l"][-20:]); prev_low = min(d["l"][-50:-20])
+    recent_high = max(d["h"][-20:]); prev_high = max(d["h"][-50:-20])
+    ema = sum(d["c"][-50:])/50; curr = d["c"][-1]
+    sup=recent_low; res=recent_high; long_tgt=res*1.08; short_tgt=sup*0.92
+    higher_low = recent_low > prev_low * 1.002; lower_low = recent_low < prev_low * 0.998
+    higher_high = recent_high > prev_high * 1.002; lower_high = recent_high < prev_high * 0.998
+    if higher_low and curr > ema: return "BULL", f"HL {prev_low:.4f}->{recent_low:.4f} intact", sup, res, long_tgt
+    if lower_low and lower_high and curr < ema: return "BEAR", f"LL {prev_low:.4f}->{recent_low:.4f} + LH {prev_high:.4f}->{recent_high:.4f}", sup, res, short_tgt
+    if lower_low and curr < ema: return "BEAR", f"LL {prev_low:.4f}->{recent_low:.4f} broken", sup, res, short_tgt
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
     if curr>mid and curr>ema:
-        if higher_high:
-            return "BULL", f"Above mid {mid:.4f} + HH {prev_high:.4f}->{recent_high:.4f}", sup, res, long_tgt
+        if higher_high: return "BULL", f"Above mid {mid:.4f} + HH {prev_high:.4f}->{recent_high:.4f}", sup, res, long_tgt
         return "BULL", f"Above mid {mid:.4f}", sup, res, long_tgt
-    if curr<mid and curr<ema:
-        return "BEAR", f"Below mid {mid:.4f}", sup, res, short_tgt
+    if curr<mid and curr<ema: return "BEAR", f"Below mid {mid:.4f}", sup, res, short_tgt
     return "RANGE", f"No HL/LL | {prev_low:.4f}->{recent_low:.4f}", sup, res, curr
 def detect_fvg_1h(d):
     b=False; br=False
@@ -203,22 +192,36 @@ def manage():
     if summary and int(now)%3600<90:
         tg(f"OPEN: {' | '.join(summary)} | {get_time()}")
 def print_trends():
-    print(f"\n TREND CHECK - {get_time()}\n", flush=True)
-    msg = f"📊 TREND CHECK - {get_time()}\n"
+    # TREND + REVERSAL COMBINED
+    global ACTIVE
+    if os.path.exists(ACTIVE_FILE):
+        try: ACTIVE=json.load(open(ACTIVE_FILE))
+        except: pass
+    print(f"\n TREND CHECK + REVERSAL - {get_time()}\n", flush=True)
+    msg = f"📊 TREND + REVERSAL - {get_time()}\n"
     msg += "━━━━━━━━━━━━━━\n\n"
     for s in SYMBOLS:
         d240=kl(SYMBOL_MAP[s],"Min240")
-        if not d240:
-            print(f"{s} -> kl fail", flush=True)
-            continue
+        d5=kl(SYMBOL_MAP[s],"Min15")
+        if not d240: print(f"{s} -> kl fail",flush=True); continue
         bias, reason, sup, res, tgt = get_bias_4h(d240)
-        print(f"{s} 4H:{bias} {reason} -> tgt {tgt:.5f}", flush=True)
+        # check if active and reversing
+        rev_line=""
+        if s in ACTIVE and d5:
+            pos=ACTIVE[s]; is_buy=pos["is_buy"]; cur=d5["c"][-1]; entry=pos["entry"]
+            pnl=(cur-entry)/entry if is_buy else (entry-cur)/entry
+            rev,_=is_close(d5,is_buy)
+            if rev and pnl<0:
+                rev_line=f"\n ⚠️ REVERSAL {pnl*100:+.1f}% | CLOSE ~12m"
+            elif s in ACTIVE:
+                rev_line=f"\n 📈 ACTIVE {pnl*100:+.1f}% HOLD"
+        print(f"{s} 4H:{bias} {reason} -> tgt {tgt:.5f} {rev_line}", flush=True)
         if bias=="BULL":
-            msg += f"🟢 {s} BULLISH\n {reason}\n Hold LONG → {tgt:.5f} | Sup {sup:.5f}\n\n"
+            msg += f"🟢 {s} BULLISH\n {reason}\n Hold LONG → {tgt:.5f} | Sup {sup:.5f}{rev_line}\n\n"
         elif bias=="BEAR":
-            msg += f"🔴 {s} BEARISH\n {reason}\n Hold SHORT → {tgt:.5f} | Res {res:.5f}\n\n"
+            msg += f"🔴 {s} BEARISH\n {reason}\n Hold SHORT → {tgt:.5f} | Res {res:.5f}{rev_line}\n\n"
         else:
-            msg += f"⚪ {s} RANGE\n {reason}\n\n"
+            msg += f"⚪ {s} RANGE\n {reason}{rev_line}\n\n"
         time.sleep(0.2)
     tg(msg)
 def scan():
@@ -259,7 +262,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V46.5 CLEAN COLOR | {get_time()}",flush=True)
+    print(f"BOT V46.6 TREND+REV | {get_time()}",flush=True)
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}",flush=True)
