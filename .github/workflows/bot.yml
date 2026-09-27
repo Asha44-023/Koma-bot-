@@ -1,4 +1,4 @@
-name: Run Crypto Bot V46.8 FIXED BIAS+PNL
+name: Run Crypto Bot V46.9 FIXED FAST RANGE
 on:
   schedule:
     - cron: '*/8 * * * *'
@@ -21,8 +21,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-8
+          key: bot-cache-v46-9
           restore-keys: |
+            bot-cache-v46-8-
             bot-cache-v46-7-
             bot-cache-
 
@@ -32,14 +33,13 @@ jobs:
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
           rm -f /tmp/bot.lock
           ls -la
-          echo "KOMA bias fix: 0.8% threshold"
 
       - name: Run bot + Trend+Rev
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V46.8 ==="
+          echo "=== SCAN V46.9 ==="
           python bot.py --once
           echo "=== TREND+REVERSAL ==="
           MIN=$(date +%M)
@@ -57,4 +57,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-8-${{ github.run_id }}
+          key: bot-cache-v46-9-${{ github.run_id }}
