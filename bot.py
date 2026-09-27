@@ -1,4 +1,4 @@
-# BOT V46.8 - FIXED BIAS 0.8% FOR FAST + PNL FILTER
+# BOT V46.9 - FIXED FAST BIAS RANGE + PNL FILTER
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -62,25 +62,23 @@ def get_bias_4h(d, symbol=""):
     recent_high = max(d["h"][-20:]); prev_high = max(d["h"][-50:-20])
     ema = sum(d["c"][-50:])/50; curr = d["c"][-1]
     sup=recent_low; res=recent_high; long_tgt=res*1.08; short_tgt=sup*0.92
-
-    # V46.8 FIX: FAST coins need 0.8% move, SLOW 0.2%
     is_fast = symbol in FAST_COINS if symbol else curr < 1.0
     thr = 0.008 if is_fast else 0.002
-
     higher_low = recent_low > prev_low * (1+thr)
     lower_low = recent_low < prev_low * (1-thr)
     higher_high = recent_high > prev_high * (1+thr)
     lower_high = recent_high < prev_high * (1-thr)
-
     if higher_low and curr > ema: return "BULL", f"HL {prev_low:.4f}->{recent_low:.4f} intact", sup, res, long_tgt
     if lower_low and lower_high and curr < ema: return "BEAR", f"LL {prev_low:.4f}->{recent_low:.4f} + LH {prev_high:.4f}->{recent_high:.4f}", sup, res, short_tgt
     if lower_low and curr < ema: return "BEAR", f"LL {prev_low:.4f}->{recent_low:.4f} broken", sup, res, short_tgt
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
-    if curr>mid and curr>ema:
-        if higher_high: return "BULL", f"Above mid {mid:.4f} + HH {prev_high:.4f}->{recent_high:.4f}", sup, res, long_tgt
-        return "BULL", f"Above mid {mid:.4f}", sup, res, long_tgt
-    if curr<mid and curr<ema: return "BEAR", f"Below mid {mid:.4f}", sup, res, short_tgt
-    return "RANGE", f"No HL/LL | {prev_low:.4f}->{recent_low:.4f}", sup, res, curr
+    # V46.9 FIX: FAST coins ignore mid, only HL/LL
+    if not is_fast:
+        if curr>mid and curr>ema:
+            if higher_high: return "BULL", f"Above mid {mid:.4f} + HH {prev_high:.4f}->{recent_high:.4f}", sup, res, long_tgt
+            return "BULL", f"Above mid {mid:.4f}", sup, res, long_tgt
+        if curr<mid and curr<ema: return "BEAR", f"Below mid {mid:.4f}", sup, res, short_tgt
+    return "RANGE", f"No HL/LL | {prev_low:.4f}->{recent_low:.4f} | mid {mid:.4f}", sup, res, curr
 
 def detect_fvg_1h(d):
     b=False; br=False
@@ -269,7 +267,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V46.8 FIXED BIAS+PNL | {get_time()}",flush=True)
+    print(f"BOT V46.9 FIXED FAST RANGE | {get_time()}",flush=True)
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}",flush=True)
