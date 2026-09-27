@@ -1,4 +1,4 @@
-name: Run Crypto Bot
+name: Run Crypto Bot V45.1 FAST/SLOW
 on:
   schedule:
     - cron: '*/8 * * * *'
@@ -15,23 +15,26 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Restore cache V44 FULL+BREAKER
+      - name: Restore cache V45.1 FAST/SLOW
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v44-breaker-${{ github.run_id }}
+          key: bot-cache-v45.1-fast-slow-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v45.1-fast-slow-
             bot-cache-v44-breaker-
+            bot-cache-v44-
 
       - name: Ensure files
         run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
           rm -f /tmp/bot.lock
-          cat cooldown.json
-          cat active.json
+          echo "=== cooldown ==="; cat cooldown.json
+          echo "=== active ==="; cat active.json
+          echo "=== bot version ==="; head -n 1 bot.py
 
       - name: Run bot once
         env:
@@ -46,4 +49,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v44-breaker-${{ github.run_id }}
+          key: bot-cache-v45.1-fast-slow-${{ github.run_id }}
