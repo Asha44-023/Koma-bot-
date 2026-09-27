@@ -1,4 +1,4 @@
-name: Run Crypto Bot V45.1 FAST/SLOW
+name: Run Crypto Bot V46 REFORM 50%
 on:
   schedule:
     - cron: '*/8 * * * *'
@@ -15,17 +15,17 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Restore cache V45.1 FAST/SLOW
+      - name: Restore cache V46 REFORM 50%
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v45.1-fast-slow-${{ github.run_id }}
+          key: bot-cache-v46-reform-50-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v46-reform-50-
             bot-cache-v45.1-fast-slow-
             bot-cache-v44-breaker-
-            bot-cache-v44-
 
       - name: Ensure files
         run: |
@@ -49,4 +49,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v45.1-fast-slow-${{ github.run_id }}
+          key: bot-cache-v46-reform-50-${{ github.run_id }}
