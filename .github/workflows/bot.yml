@@ -1,4 +1,4 @@
-name: Run Crypto Bot V47.4 FINAL LIQ+SCALP
+name: Run Crypto Bot V47.5 FINAL NO-TOP-BUY
 on:
   schedule:
     - cron: '*/5 * * * *'
@@ -23,11 +23,11 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-4-${{ github.run_id }}
+          key: bot-cache-v47-5-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v47-5-
             bot-cache-v47-4-
             bot-cache-v47-3-
-            bot-cache-v46-9-
             bot-cache-
 
       - name: Ensure files
@@ -39,12 +39,12 @@ jobs:
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot + Trend+Rev + LIQ
+      - name: Run bot + Trend+Rev + LIQ + NO-TOP
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V47.4 FINAL ==="
+          echo "=== SCAN V47.5 NO-TOP ==="
           python bot.py --once
           echo "=== TREND+REVERSAL+LIQ+SCALP (ALWAYS RUN) ==="
           python bot.py --trend
@@ -60,4 +60,4 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-4-${{ github.run_id }}
+          key: bot-cache-v47-5-${{ github.run_id }}
