@@ -1,7 +1,7 @@
-name: Run Crypto Bot V47.5 FINAL NO-TOP-BUY
+name: Run Crypto Bot V47.6 NO-SPAM
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/10 * * * *'  # scan every 10m, trend only when changed or hourly
   workflow_dispatch:
 
 jobs:
@@ -23,11 +23,10 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-5-${{ github.run_id }}
+          key: bot-cache-v47-6-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v47-6-
             bot-cache-v47-5-
-            bot-cache-v47-4-
-            bot-cache-v47-3-
             bot-cache-
 
       - name: Ensure files
@@ -39,14 +38,14 @@ jobs:
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot + Trend+Rev + LIQ + NO-TOP
+      - name: Run bot + Trend+Rev + LIQ + NO-TOP V47.6
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V47.5 NO-TOP ==="
+          echo "=== SCAN V47.6 NO-SPAM ==="
           python bot.py --once
-          echo "=== TREND+REVERSAL+LIQ+SCALP (ALWAYS RUN) ==="
+          echo "=== TREND (only on change or hourly) ==="
           python bot.py --trend
           echo "Active: $(cat active.json)"
           echo "Pump: $(cat pump_cache.json)"
@@ -60,4 +59,4 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-5-${{ github.run_id }}
+          key: bot-cache-v47-6-${{ github.run_id }}
