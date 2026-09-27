@@ -1,4 +1,4 @@
-name: Run Crypto Bot V46.6 TREND+REV
+name: Run Crypto Bot V46.7 FIXED PNL
 on:
   schedule:
     - cron: '*/8 * * * *'
@@ -21,9 +21,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-6
+          key: bot-cache-v46-7
           restore-keys: |
-            bot-cache-v46-5-clean-
+            bot-cache-v46-6-
             bot-cache-
 
       - name: Ensure files
@@ -32,18 +32,17 @@ jobs:
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
           rm -f /tmp/bot.lock
           ls -la
-          echo "bot.py exists?"; ls -la bot.py
 
       - name: Run bot + Trend+Rev
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN ==="
+          echo "=== SCAN V46.7 ==="
           python bot.py --once
           echo "=== TREND+REVERSAL ==="
           MIN=$(date +%M)
-          echo "Minute $MIN"
+          echo "Minute $MIN - Active: $(cat active.json)"
           if [ "$MIN" -lt 15 ] || [ "$(cat active.json)" != "{}" ]; then
             python bot.py --trend
           else
@@ -57,4 +56,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-6-${{ github.run_id }}
+          key: bot-cache-v46-7-${{ github.run_id }}
