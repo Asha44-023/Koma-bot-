@@ -1,8 +1,17 @@
-name: Run Crypto Bot V46 REFORM 50%
+name: Run Crypto Bot V46.3 TREND HL
 on:
   schedule:
     - cron: '*/8 * * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'once'
+        type: choice
+        options:
+          - once
+          - trend
 
 jobs:
   run-bot:
@@ -15,14 +24,15 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Restore cache V46 REFORM 50%
+      - name: Restore cache V46.3 TREND
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-reform-50-${{ github.run_id }}
+          key: bot-cache-v46.3-trend-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v46.3-trend-
             bot-cache-v46-reform-50-
             bot-cache-v45.1-fast-slow-
             bot-cache-v44-breaker-
@@ -37,16 +47,4 @@ jobs:
           echo "=== bot version ==="; head -n 1 bot.py
 
       - name: Run bot once
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
-
-      - name: Save cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            cooldown.json
-            active.json
-          key: bot-cache-v46-reform-50-${{ github.run_id }}
+        if: ${
