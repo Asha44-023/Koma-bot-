@@ -1,4 +1,4 @@
-# BOT V46.3 - TREND HL/LL + --trend
+# BOT V46.4 - TREND HL/LL + COLOR + HOLD-TO + IMAGE
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -37,6 +37,36 @@ def tg(msg):
         token=os.getenv("TELEGRAM_BOT_TOKEN"); chat=os.getenv("TELEGRAM_CHAT_ID")
         if token and chat: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id":chat,"text":msg}, timeout=10)
     except: pass
+
+def send_trend_image(biases):
+    try:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(12, len(biases)*0.72 + 1))
+        fig.patch.set_facecolor('#0a0a0a')
+        ax.set_facecolor('#0a0a0a')
+        for i, (sym, data) in enumerate(reversed(list(biases.items()))):
+            trend = data['trend']
+            if trend=="BULLISH": bg='#0d2818'; tc='#00FF66'
+            elif trend=="BEARISH": bg='#2d0d0d'; tc='#FF3333'
+            else: bg='#222200'; tc='#FFAA00'
+            ax.barh(i, 1, color=bg, height=0.8, edgecolor=tc, linewidth=0.9)
+            ax.text(0.01, i, sym, color='white', va='center', fontweight='bold', fontsize=11, fontfamily='monospace')
+            ax.text(0.30, i, trend, color=tc, va='center', fontweight='extra bold', fontsize=12)
+            ax.text(0.48, i, data['detail'], color='#bbbbbb', va='center', fontsize=8, fontfamily='monospace')
+        ax.set_xlim(0,1); ax.axis('off')
+        ax.set_title(f'TREND CHECK - {get_time()} - V46.4 COLOR', color='white', fontsize=14, fontweight='bold', pad=15, loc='left')
+        plt.tight_layout()
+        path='/tmp/trend.png'
+        plt.savefig(path, dpi=200, facecolor=fig.get_facecolor(), bbox_inches='tight')
+        plt.close()
+        token=os.getenv("TELEGRAM_BOT_TOKEN"); chat=os.getenv("TELEGRAM_CHAT_ID")
+        if token and chat:
+            url=f"https://api.telegram.org/bot{token}/sendPhoto"
+            with open(path,'rb') as f:
+                requests.post(url, data={'chat_id':chat, 'caption':f'TREND IMAGE - {get_time()}'}, files={'photo':f}, timeout=15)
+    except Exception as e:
+        print(f"Image error {e}", flush=True)
+
 def kl(sym,interval):
     headers={"User-Agent":"Mozilla/5.0"}
     spot_sym=sym.replace("_",""); spot_iv={"Min15":"15m","Min60":"60m","Min240":"4h"}.get(interval,"15m")
@@ -55,32 +85,36 @@ def kl(sym,interval):
                 if len(c)>20: return {"o":o,"h":h,"l":l,"c":c}
         except: continue
     return None
+
+# UPDATED TO RETURN SUPPORT/RES/TARGET
 def get_bias_4h(d):
-    if len(d["c"])<60: return "RANGE","Need more candles"
+    if len(d["c"])<60: return "RANGE","Need more candles",0,0,d["c"][-1] if d["c"] else 0
     recent_low = min(d["l"][-20:])
     prev_low = min(d["l"][-50:-20])
     recent_high = max(d["h"][-20:])
     prev_high = max(d["h"][-50:-20])
     ema = sum(d["c"][-50:])/50
     curr = d["c"][-1]
+    sup=recent_low; res=recent_high
+    long_tgt=res*1.08; short_tgt=sup*0.92
     higher_low = recent_low > prev_low * 1.002
     lower_low = recent_low < prev_low * 0.998
     higher_high = recent_high > prev_high * 1.002
     lower_high = recent_high < prev_high * 0.998
     if higher_low and curr > ema:
-        return "BULL", f"TREND BULLISH - HL {prev_low:.4f}->{recent_low:.4f} intact"
+        return "BULL", f"TREND BULLISH - HL {prev_low:.4f}->{recent_low:.4f} intact", sup, res, long_tgt
     if lower_low and lower_high and curr < ema:
-        return "BEAR", f"TREND BEARISH - LL {prev_low:.4f}->{recent_low:.4f} + LH {prev_high:.4f}->{recent_high:.4f}"
+        return "BEAR", f"TREND BEARISH - LL {prev_low:.4f}->{recent_low:.4f} + LH {prev_high:.4f}->{recent_high:.4f}", sup, res, short_tgt
     if lower_low and curr < ema:
-        return "BEAR", f"TREND BEARISH - LL {prev_low:.4f}->{recent_low:.4f} broken"
+        return "BEAR", f"TREND BEARISH - LL {prev_low:.4f}->{recent_low:.4f} broken", sup, res, short_tgt
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
     if curr>mid and curr>ema:
         if higher_high:
-            return "BULL", f"TREND BULLISH - Above mid {mid:.4f} + HH {prev_high:.4f}->{recent_high:.4f}"
-        return "BULL", f"TREND BULLISH - Above mid {mid:.4f}"
+            return "BULL", f"TREND BULLISH - Above mid {mid:.4f} + HH {prev_high:.4f}->{recent_high:.4f}", sup, res, long_tgt
+        return "BULL", f"TREND BULLISH - Above mid {mid:.4f}", sup, res, long_tgt
     if curr<mid and curr<ema:
-        return "BEAR", f"TREND BEARISH - Below mid {mid:.4f}"
-    return "RANGE", f"TREND RANGE - No HL/LL | {prev_low:.4f}->{recent_low:.4f}"
+        return "BEAR", f"TREND BEARISH - Below mid {mid:.4f}", sup, res, short_tgt
+    return "RANGE", f"TREND RANGE - No HL/LL | {prev_low:.4f}->{recent_low:.4f}", sup, res, curr
 
 def detect_fvg_1h(d):
     b=False; br=False
@@ -205,29 +239,41 @@ def manage():
 def print_trends():
     print(f"\n TREND CHECK - {get_time()}\n", flush=True)
     bull=[]; bear=[]; rng=[]
+    biases={}
     for s in SYMBOLS:
         d240=kl(SYMBOL_MAP[s],"Min240")
         if not d240:
             print(f"{s} -> kl fail", flush=True)
             continue
-        bias, reason = get_bias_4h(d240)
+        bias, reason, sup, res, tgt = get_bias_4h(d240)
         curr = d240["c"][-1]
         ema = sum(d240["c"][-50:])/50 if len(d240["c"])>=50 else curr
         comp = " > " if curr>ema else " < "
-        line = f"{s}: {reason} | Price {curr:.5f}{comp}EMA {ema:.5f}"
-        print(f"{s} 4H:{bias} {reason}", flush=True)
-        if bias=="BULL": bull.append(line)
-        elif bias=="BEAR": bear.append(line)
-        else: rng.append(line)
+        if bias=="BULL":
+            line = f"🐂 {s}: {reason} | Price {curr:.5f}{comp}EMA {ema:.5f} | Hold LONG to {tgt:.5f} | Sup {sup:.5f}"
+            detail = f"{reason} | P:{curr:.4f} EMA:{ema:.4f} | Hold to {tgt:.4f}"
+            biases[s]={"trend":"BULLISH","detail":detail}
+            bull.append(line)
+        elif bias=="BEAR":
+            line = f"🐻 {s}: {reason} | Price {curr:.5f}{comp}EMA {ema:.5f} | Hold SHORT to {tgt:.5f} | Res {res:.5f}"
+            detail = f"{reason} | P:{curr:.4f} EMA:{ema:.4f} | Short to {tgt:.4f}"
+            biases[s]={"trend":"BEARISH","detail":detail}
+            bear.append(line)
+        else:
+            line = f"⚪ {s}: {reason} | Price {curr:.5f}{comp}EMA {ema:.5f}"
+            biases[s]={"trend":"RANGE","detail":reason}
+            rng.append(line)
+        print(f"{s} 4H:{bias} {reason} -> tgt {tgt:.5f}", flush=True)
         time.sleep(0.3)
-    msg = f"TREND CHECK - {get_time()}\n\n"
+    msg = f"📊 TREND CHECK - {get_time()}\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
     if bull:
-        msg += "BULLISH - Hold Long Safe:\n" + "\n".join(bull) + "\n\n"
+        msg += "BULLISH - Hold Long Safe (GREEN):\n" + "\n".join(bull) + "\n\n"
     if bear:
-        msg += "BEARISH - Dont Hold Long:\n" + "\n".join(bear) + "\n\n"
+        msg += "BEARISH - Dont Hold Long (RED):\n" + "\n".join(bear) + "\n\n"
     if rng:
         msg += "RANGE - No Hold:\n" + "\n".join(rng)
     tg(msg)
+    send_trend_image(biases)
 
 def scan():
     global COOLDOWN,ACTIVE
@@ -246,7 +292,7 @@ def scan():
         if time.time()-COOLDOWN["signals"].get(s,0)<cooldown_needed: print(f"{s} -> skip COOLDOWN {cooldown_needed/3600:.0f}H",flush=True); continue
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240 or not d60 or not d5: print(f"{s} -> kl fail",flush=True); continue
-        bias,bias_reason=get_bias_4h(d240); print(f"{s} 4H:{bias} {bias_reason}",flush=True)
+        bias,bias_reason,_,_,_ =get_bias_4h(d240); print(f"{s} 4H:{bias} {bias_reason}",flush=True)
         if bias=="RANGE": continue
         fbs,is_buy,_=fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if not fbs: print(f"{s} -> no 15M BOS",flush=True); continue
@@ -268,7 +314,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V46.3 TREND HL/LL + --trend | {get_time()}",flush=True)
+    print(f"BOT V46.4 COLOR | {get_time()}",flush=True)
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}",flush=True)
