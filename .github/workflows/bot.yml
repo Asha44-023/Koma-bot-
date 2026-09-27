@@ -1,4 +1,4 @@
-name: Run Crypto Bot V46.3 TREND
+name: Run Crypto Bot V46.4 COLOR TREND
 on:
   schedule:
     - cron: '*/8 * * * *'
@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install deps
-        run: pip install requests pytz
+        run: pip install requests pytz matplotlib
 
       - name: Restore cache
         uses: actions/cache/restore@v4
@@ -21,8 +21,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-3-trend-${{ github.run_id }}
+          key: bot-cache-v46-4-color-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v46-4-color-
             bot-cache-v46-3-trend-
             bot-cache-v46-reform-50-
 
@@ -32,14 +33,14 @@ jobs:
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
           rm -f /tmp/bot.lock
 
-      - name: Run bot + Trend in one go
+      - name: Run bot + Trend + Image in one go
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "=== SCAN ==="
           python bot.py --once
-          echo "=== TREND ==="
+          echo "=== TREND COLOR + IMAGE ==="
           python bot.py --trend
 
       - name: Save cache
@@ -49,4 +50,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-3-trend-${{ github.run_id }}
+          key: bot-cache-v46-4-color-${{ github.run_id }}
