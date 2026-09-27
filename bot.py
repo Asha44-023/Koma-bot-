@@ -1,4 +1,4 @@
-# BOT V46.6 - TREND + REVERSAL COMBINED
+# BOT V46.7 - FIXED PNL FILTER - KEEPS 58/35
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -159,7 +159,8 @@ def manage():
         if pnl>=cfg["tp4"]:
             tg(f"TP4 {s} +{pnl*100:.1f}% {age/60:.1f}h | {get_time()}"); del ACTIVE[s]; save_a(); continue
         rev,_=is_close(d5,is_buy)
-        if rev and age>20:
+        # FIXED: PNL filter -0.3% before considering reversal
+        if rev and age>20 and pnl < -0.003:
             bull_ob,bear_ob=detect_ob_1h(d60) if d60 else (False,False)
             bull_liq,bear_liq=detect_liquidity_1h(d60) if d60 else (False,False)
             is_ob_hold=bull_ob if is_buy else bear_ob
@@ -170,29 +171,26 @@ def manage():
                     WARN_TIME[s]=now
                 continue
             if s in FAST_COINS:
-                if pnl < 0:
-                    if s not in WARN_TIME or now-WARN_TIME.get(s,0)>900:
-                        tg(f"REVERSAL {s} {pnl*100:+.1f}% | CLOSE in ~12m | {get_time()}")
-                        WARN_TIME[s]=now
-                    if pnl > -0.007: continue
-                    tg(f"CLOSE FAST {s} {pnl*100:+.1f}% {age:.0f}m | {get_time()}"); del ACTIVE[s]; save_a(); continue
+                if s not in WARN_TIME or now-WARN_TIME.get(s,0)>900:
+                    tg(f"REVERSAL {s} {pnl*100:+.1f}% | CLOSE in ~12m if holds | {get_time()}")
+                    WARN_TIME[s]=now
+                if pnl > -0.007: continue # HOLD until -0.7%
+                tg(f"CLOSE FAST {s} {pnl*100:+.1f}% {age:.0f}m | {get_time()}"); del ACTIVE[s]; save_a(); continue
             if s in SLOW_COINS:
                 if d240:
                     bull_choch,bear_choch=detect_choch_1h(d240)
                     if (is_buy and bear_choch) or (not is_buy and bull_choch):
                         if s not in WARN_TIME or now-WARN_TIME.get(s,0)>900:
-                            tg(f"REVERSAL {s} {pnl*100:+.1f}% | CLOSE in ~15m | {get_time()}")
+                            tg(f"REVERSAL {s} {pnl*100:+.1f}% | CHOCH | {get_time()}")
                             WARN_TIME[s]=now
                         if pnl > -0.01: continue
-                        if pnl < 0:
-                            tg(f"CLOSE SLOW CHOCH {s} {pnl*100:+.1f}% {age/60:.1f}h | {get_time()}"); del ACTIVE[s]; save_a(); continue
-                if age>1440 and pnl<0:
+                        tg(f"CLOSE SLOW CHOCH {s} {pnl*100:+.1f}% {age/60:.1f}h | {get_time()}"); del ACTIVE[s]; save_a(); continue
+                if age>1440 and pnl< -0.005:
                     tg(f"CLOSE SLOW 24H {s} {pnl*100:+.1f}% | {get_time()}"); del ACTIVE[s]; save_a(); continue
         summary.append(f"{s} {pnl*100:+.1f}% {age/60:.1f}h")
     if summary and int(now)%3600<90:
         tg(f"OPEN: {' | '.join(summary)} | {get_time()}")
 def print_trends():
-    # TREND + REVERSAL COMBINED
     global ACTIVE
     if os.path.exists(ACTIVE_FILE):
         try: ACTIVE=json.load(open(ACTIVE_FILE))
@@ -205,13 +203,13 @@ def print_trends():
         d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240: print(f"{s} -> kl fail",flush=True); continue
         bias, reason, sup, res, tgt = get_bias_4h(d240)
-        # check if active and reversing
         rev_line=""
         if s in ACTIVE and d5:
             pos=ACTIVE[s]; is_buy=pos["is_buy"]; cur=d5["c"][-1]; entry=pos["entry"]
             pnl=(cur-entry)/entry if is_buy else (entry-cur)/entry
             rev,_=is_close(d5,is_buy)
-            if rev and pnl<0:
+            # FIXED: Only show reversal if actually losing
+            if rev and pnl < -0.003:
                 rev_line=f"\n ⚠️ REVERSAL {pnl*100:+.1f}% | CLOSE ~12m"
             elif s in ACTIVE:
                 rev_line=f"\n 📈 ACTIVE {pnl*100:+.1f}% HOLD"
@@ -262,7 +260,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V46.6 TREND+REV | {get_time()}",flush=True)
+    print(f"BOT V46.7 FIXED PNL | {get_time()}",flush=True)
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}",flush=True)
