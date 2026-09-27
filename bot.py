@@ -1,4 +1,4 @@
-# BOT V46.2 REFORM - 50% ENTRY + SIMPLE LIQ GRAB + REVERSAL WARNING - MERGED
+# BOT V46.2.1 - FIXED: NO CLOSE IN PROFIT + SIMPLE WARNINGS
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -21,7 +21,7 @@ PER_COIN_TP={
 }
 COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; LOCK_FILE="/tmp/bot.lock"
 COOLDOWN={"signals":{}}; ACTIVE={}
-WARN_TIME={} # for simple warning throttle
+WARN_TIME={}
 if os.path.exists(COOLDOWN_FILE):
     try: COOLDOWN=json.load(open(COOLDOWN_FILE))
     except: pass
@@ -66,7 +66,6 @@ def get_bias_4h(d):
     if d["c"][-1]>mid and d["c"][-1]>ema: return "BULL","Above 4H SD mid+EMA"
     if d["c"][-1]<mid and d["c"][-1]<ema: return "BEAR","Below 4H SD mid+EMA"
     return "RANGE","4H Range"
-
 def detect_fvg_1h(d):
     b=False; br=False
     if len(d["c"])<10: return False,False
@@ -120,21 +119,19 @@ def check_1h_confluence(d1, is_buy, is_slow=False):
     bull_fvg,bear_fvg=detect_fvg_1h(d1); bull_ob,bear_ob=detect_ob_1h(d1); bull_liq,bear_liq=detect_liquidity_1h(d1); bull_brk,bear_brk=detect_breaker_1h(d1); bull_choch,bear_choch=detect_choch_1h(d1)
     if is_buy:
         reason=f"FVG:{bull_fvg} OB:{bull_ob} LIQ:{bull_liq} BRK:{bull_brk} CHOCH:{bull_choch}"
-        if is_slow: ok = bull_ob or bull_brk or bull_liq or bull_fvg
-        else: ok = bull_ob or bull_brk
+        ok = (bull_ob or bull_brk or bull_liq or bull_fvg) if is_slow else (bull_ob or bull_brk)
         return ok,reason
     else:
         reason=f"FVG:{bear_fvg} OB:{bear_ob} LIQ:{bear_liq} BRK:{bear_brk} CHOCH:{bear_choch}"
-        if is_slow: ok = bear_ob or bear_brk or bear_liq or bear_fvg
-        else: ok = bear_ob or bear_brk
+        ok = (bear_ob or bear_brk or bear_liq or bear_fvg) if is_slow else (bear_ob or bear_brk)
         return ok,reason
 
 def fbs_logic(h,l,c,o):
     if len(c)<3: return None,None,None
     ph,pl=h[-2],l[-2]; pc=c[-2]; cc=c[-1]; co=o[-1]
     pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35
-    if pc>=p58 and cc>=p35 and cc>co: return "BOS_UP",True,"Prev>58% Curr>35% - GOOD BREAKOUT"
-    if pc<=p35 and cc<=p58 and cc<co: return "BOS_DOWN",False,"Prev<35% Curr<58% - GOOD BREAKOUT"
+    if pc>=p58 and cc>=p35 and cc>co: return "BOS_UP",True,"Prev>58% Curr>35%"
+    if pc<=p35 and cc<=p58 and cc<co: return "BOS_DOWN",False,"Prev<35% Curr<58%"
     return None,None,None
 
 def is_close(d5,is_buy):
@@ -160,49 +157,42 @@ def manage():
         if pnl>=cfg["tp4"]:
             tg(f"🟢 TP4 {s} +{pnl*100:.1f}% {age/60:.1f}h | {get_time()}"); del ACTIVE[s]; save_a(); continue
 
-        # --- NEW SIMPLE WARNING LOGIC MERGED ---
-        rev, rev_reason = is_close(d5, is_buy)
+        rev,_=is_close(d5,is_buy)
         if rev and age>20:
-            # check if LIQ GRAB or REAL REVERSAL
-            bull_ob,bear_ob = detect_ob_1h(d60) if d60 else (False,False)
-            bull_liq,bear_liq = detect_liquidity_1h(d60) if d60 else (False,False)
-            is_ob_hold = bull_ob if is_buy else bear_ob
-            is_liq = bull_liq if is_buy else bear_liq
+            bull_ob,bear_ob=detect_ob_1h(d60) if d60 else (False,False)
+            bull_liq,bear_liq=detect_liquidity_1h(d60) if d60 else (False,False)
+            is_ob_hold=bull_ob if is_buy else bear_ob
+            is_liq=bull_liq if is_buy else bear_liq
 
-            # 1. LIQ GRAB = OB holds + LIQ sweep = DON'T CLOSE
             if is_ob_hold and is_liq:
-                if s not in WARN_TIME or now - WARN_TIME.get(s,0) > 1800:
+                if s not in WARN_TIME or now-WARN_TIME.get(s,0)>1800:
                     tg(f"💧 LIQ GRAB {s} {pnl*100:+.1f}% | HOLD - DON'T CLOSE | {get_time()}")
                     WARN_TIME[s]=now
-                continue # skip close, let bounce
+                continue
 
-            # 2. REAL REVERSAL = give 10-15m warning before close
             if s in FAST_COINS:
-                if pnl < 0.005: # only warn when negative or small profit
-                    if s not in WARN_TIME or now - WARN_TIME.get(s,0) > 900:
+                if pnl < 0: # FIXED: only if losing
+                    if s not in WARN_TIME or now-WARN_TIME.get(s,0)>900:
                         tg(f"⚠️ REVERSAL {s} {pnl*100:+.1f}% | CLOSE in ~12m | {get_time()}")
                         WARN_TIME[s]=now
-                    # give 1 more cycle if loss small
-                    if pnl > -0.007:
-                        continue
-                # final close
-                tg(f"🔵 CLOSE FAST {s} {pnl*100:+.1f}% {age:.0f}m | {get_time()}"); del ACTIVE[s]; save_a(); continue
+                    if pnl > -0.007: continue
+                    tg(f"🔵 CLOSE FAST {s} {pnl*100:+.1f}% {age:.0f}m | {get_time()}"); del ACTIVE[s]; save_a(); continue
 
             if s in SLOW_COINS:
                 if d240:
                     bull_choch,bear_choch=detect_choch_1h(d240)
                     if (is_buy and bear_choch) or (not is_buy and bull_choch):
-                        if s not in WARN_TIME or now - WARN_TIME.get(s,0) > 900:
+                        if s not in WARN_TIME or now-WARN_TIME.get(s,0)>900:
                             tg(f"⚠️ REVERSAL {s} {pnl*100:+.1f}% | CLOSE in ~15m | {get_time()}")
                             WARN_TIME[s]=now
-                        if pnl > -0.01:
-                            continue
-                        tg(f"🔵 CLOSE SLOW CHOCH {s} {pnl*100:+.1f}% {age/60:.1f}h | {get_time()}"); del ACTIVE[s]; save_a(); continue
+                        if pnl > -0.01: continue
+                        if pnl < 0:
+                            tg(f"🔵 CLOSE SLOW CHOCH {s} {pnl*100:+.1f}% {age/60:.1f}h | {get_time()}"); del ACTIVE[s]; save_a(); continue
                 if age>1440 and pnl<0:
                     tg(f"🔵 CLOSE SLOW 24H {s} {pnl*100:+.1f}% | {get_time()}"); del ACTIVE[s]; save_a(); continue
 
         summary.append(f"{s} {pnl*100:+.1f}% {age/60:.1f}h")
-    if summary and int(now) % 3600 < 90:
+    if summary and int(now)%3600<90:
         tg(f"📊 OPEN: {' | '.join(summary)} | {get_time()}")
 
 def scan():
@@ -217,9 +207,9 @@ def scan():
     manage(); found=0
     for s in SYMBOLS:
         if s in ACTIVE: print(f"{s} -> skip ACTIVE",flush=True); continue
-        is_slow = s in SLOW_COINS
+        is_slow=s in SLOW_COINS
         cooldown_needed=7200 if not is_slow else 21600
-        if time.time()-COOLDOWN["signals"].get(s,0) < cooldown_needed: print(f"{s} -> skip COOLDOWN {cooldown_needed/3600:.0f}H",flush=True); continue
+        if time.time()-COOLDOWN["signals"].get(s,0)<cooldown_needed: print(f"{s} -> skip COOLDOWN {cooldown_needed/3600:.0f}H",flush=True); continue
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240 or not d60 or not d5: print(f"{s} -> kl fail",flush=True); continue
         bias,_=get_bias_4h(d240); print(f"{s} 4H:{bias}",flush=True)
@@ -244,7 +234,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"🚀 BOT V46.2 50% + LIQ GRAB + REVERSAL WARNING | {get_time()}",flush=True)
+    print(f"🚀 BOT V46.2.1 FIXED 50% + LIQ GRAB + REVERSAL | {get_time()}",flush=True)
     if "--once" in sys.argv:
         try: scan()
         except Exception as e: print(f"SCAN ERROR {e}",flush=True)
