@@ -1,7 +1,7 @@
-name: Run Crypto Bot V46.9 FIXED FAST RANGE
+name: Run Crypto Bot V47.4 FINAL LIQ+SCALP
 on:
   schedule:
-    - cron: '*/8 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -21,34 +21,35 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-9
+            pump_cache.json
+            last_trend.json
+          key: bot-cache-v47-4-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v46-8-
-            bot-cache-v46-7-
+            bot-cache-v47-4-
+            bot-cache-v47-3-
+            bot-cache-v46-9-
             bot-cache-
 
       - name: Ensure files
         run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
+          if [ ! -f pump_cache.json ]; then echo '{}' > pump_cache.json; fi
+          if [ ! -f last_trend.json ]; then echo '{}' > last_trend.json; fi
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot + Trend+Rev
+      - name: Run bot + Trend+Rev + LIQ
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V46.9 ==="
+          echo "=== SCAN V47.4 FINAL ==="
           python bot.py --once
-          echo "=== TREND+REVERSAL ==="
-          MIN=$(date +%M)
-          echo "Minute $MIN - Active: $(cat active.json)"
-          if [ "$MIN" -lt 15 ] || [ "$(cat active.json)" != "{}" ]; then
-            python bot.py --trend
-          else
-            echo "Skip trend - no active"
-          fi
+          echo "=== TREND+REVERSAL+LIQ+SCALP (ALWAYS RUN) ==="
+          python bot.py --trend
+          echo "Active: $(cat active.json)"
+          echo "Pump: $(cat pump_cache.json)"
 
       - name: Save cache
         if: always()
@@ -57,4 +58,6 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-9-${{ github.run_id }}
+            pump_cache.json
+            last_trend.json
+          key: bot-cache-v47-4-${{ github.run_id }}
