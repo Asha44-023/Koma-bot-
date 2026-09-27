@@ -1,67 +1,60 @@
-name: Run Crypto Bot V46.6 TREND+REVERSAL
+name: Run Crypto Bot V46.6 TREND+REV
 on:
   schedule:
-        - cron: '*/8 * * * *'
+    - cron: '*/8 * * * *'
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-            - uses: actions/checkout@v4
-            - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-            - name: Install deps
+      - name: Install deps
         run: pip install requests pytz
 
-            - name: Restore cache
+      - name: Restore cache
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-6-trend-rev-${{ github.run_id }}
+          key: bot-cache-v46-6
           restore-keys: |
-            bot-cache-v46-6-trend-rev-
             bot-cache-v46-5-clean-
-            bot-cache-v46-4-color-
+            bot-cache-
 
-            - name: Ensure files
+      - name: Ensure files
         run: |
           if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
           rm -f /tmp/bot.lock
+          ls -la
+          echo "bot.py exists?"; ls -la bot.py
 
-            - name: Run bot + Trend+Rev
+      - name: Run bot + Trend+Rev
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "=== SCAN ==="
           python bot.py --once
-          echo "=== TREND+REVERSAL CHECK ==="
+          echo "=== TREND+REVERSAL ==="
           MIN=$(date +%M)
-          echo "Minute: $MIN"
-          # Send trend every hour OR if reversal exists
-          if [ "$MIN" -lt 12 ]; then
-            echo "Top of hour -> sending TREND+REV"
+          echo "Minute $MIN"
+          if [ "$MIN" -lt 15 ] || [ "$(cat active.json)" != "{}" ]; then
             python bot.py --trend
           else
-            # Check if any ACTIVE exists - if yes send trend with reversal
-            if [ -f active.json ] && [ "$(cat active.json)" != "{}" ]; then
-              echo "Active positions found -> sending TREND+REV"
-              python bot.py --trend
-            else
-              echo "Skip trend - no active, not top of hour"
-            fi
+            echo "Skip trend - no active"
           fi
 
-            - name: Save cache
+      - name: Save cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v46-6-trend-rev-${{ github.run_id }}
+          key: bot-cache-v46-6-${{ github.run_id }}
