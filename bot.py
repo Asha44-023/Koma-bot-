@@ -1,4 +1,4 @@
-# BOT V47.5 FINAL NO-TOP-BUY - LIQ GRAB + SPECIFIC RE-ENTRY + LIVE + AUTO SELL + EARLY + PUMP FILTER
+# BOT V47.6 FINAL NO-TOP-BUY - LIQ GRAB + SPECIFIC RE-ENTRY + LIVE + AUTO SELL + EARLY + PUMP FILTER + NO-SPAM
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -203,12 +203,12 @@ def manage():
         bias,_,_,_,_ = get_bias_4h(d240, s)
         liq_msg = liquidity_scalp_levels(s, bias, d5, cur, entry)
         if liq_msg:
-            if s not in WARN_TIME or now-WARN_TIME.get(s,0)>600:
+            if s not in WARN_TIME or now-WARN_TIME.get(s,0)>3600:
                 tg(f"{s}{liq_msg} | ACTIVE {pnl*100:+.1f}% | {get_time()}")
                 WARN_TIME[s]=now
         pd_msg = pump_dump_detector(s, cur)
         if pd_msg:
-            if s not in WARN_TIME or now-WARN_TIME.get(s,0)>600:
+            if s not in WARN_TIME or now-WARN_TIME.get(s,0)>3600:
                 tg(f"🚨 {pd_msg} | PnL {pnl*100:+.1f}% | {get_time()}")
                 WARN_TIME[s]=now
             save_p()
@@ -236,7 +236,7 @@ def print_trends():
     if os.path.exists(TREND_CACHE):
         try: last=json.load(open(TREND_CACHE))
         except: pass
-    msg = f"📊 TREND V47.5 NO-TOP - {get_time()}\n━━━━━━━━━━━━━━\n\n"
+    msg = f"📊 TREND V47.6 NO-SPAM - {get_time()}\n━━━━━━━━━━━━━━\n\n"
     curr_state={}; changed=False; early_msgs=[]; pump_msgs=[]
     for s in SYMBOLS:
         d240=kl(SYMBOL_MAP[s],"Min240"); d5=kl(SYMBOL_MAP[s],"Min15")
@@ -247,10 +247,10 @@ def print_trends():
         lp = get_live_price(s)
         cur_price = lp if lp else (d5["c"][-1] if d5 else tgt)
         ew = early_warning(d240, s)
-        if ew and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>1800):
+        if ew and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>3600):
             early_msgs.append(ew); EARLY_WARN_TIME[s]=time.time()
         pd = pump_dump_detector(s, cur_price)
-        if pd and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>600):
+        if pd and (s not in EARLY_WARN_TIME or time.time()-EARLY_WARN_TIME.get(s,0)>3600):
             pump_msgs.append(pd)
         liq = liquidity_scalp_levels(s, bias, d5, cur_price)
         rev_line=""
@@ -268,7 +268,7 @@ def print_trends():
     for em in early_msgs: tg(em + f" | {get_time()}")
     for pm in pump_msgs: tg(f"🚨 {pm} | {get_time()}")
     minute = datetime.now().minute
-    should_send = changed or (minute % 15 == 0)
+    should_send = changed or (minute % 60 == 0)
     if should_send or early_msgs or pump_msgs: tg(msg)
 def scan():
     global COOLDOWN,ACTIVE
@@ -294,7 +294,7 @@ def scan():
             continue
         liq = liquidity_scalp_levels(s, bias, d5, cur_f)
         if liq and "OVEREXTENDED BULL" in liq and bias=="BULL":
-            if s not in WARN_TIME or time.time()-WARN_TIME.get(s,0)>1800:
+            if s not in WARN_TIME or time.time()-WARN_TIME.get(s,0)>3600:
                 tg(f"⏳ {s}{liq} | WAIT - dont chase | {get_time()}")
                 WARN_TIME[s]=time.time()
             continue
@@ -318,7 +318,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V47.5 FINAL | {get_time()}")
+    print(f"BOT V47.6 FINAL | {get_time()}")
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}")
