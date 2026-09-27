@@ -1,25 +1,13 @@
-# BOT V47.4 FINAL COMPLETE - LIQ GRAB + SPECIFIC RE-ENTRY + LIVE + AUTO SELL + EARLY + PUMP
+# BOT V47.5 FINAL NO-TOP-BUY - LIQ GRAB + SPECIFIC RE-ENTRY + LIVE + AUTO SELL + EARLY + PUMP FILTER
 import time, json, os, requests, fcntl, sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
 SYMBOL_MAP={"GRASSUSDT":"GRASS_USDT","KOMAUSDT":"KOMA_USDT","FARTCOINUSDT":"FARTCOIN_USDT","SENTUSDT":"SENT_USDT","SANDUSDT":"SAND_USDT","TAOUSDT":"TAO_USDT","JASMYUSDT":"JASMY_USDT","LABUSDT":"LAB_USDT","SIRENUSDT":"SIREN_USDT"}
 SYMBOLS=list(SYMBOL_MAP.keys())
 FAST_COINS={"SIRENUSDT","LABUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"}
 SLOW_COINS={"GRASSUSDT","TAOUSDT","SANDUSDT","JASMYUSDT"}
-PER_COIN_TP={
-    "GRASSUSDT":{"sl":0.022,"tp1":0.05,"tp2":0.12,"tp3":0.22,"tp4":0.30},
-    "FARTCOINUSDT":{"sl":0.025,"tp1":0.06,"tp2":0.12,"tp3":0.20,"tp4":0.28},
-    "KOMAUSDT":{"sl":0.022,"tp1":0.05,"tp2":0.10,"tp3":0.18,"tp4":0.25},
-    "SENTUSDT":{"sl":0.022,"tp1":0.04,"tp2":0.08,"tp3":0.15,"tp4":0.22},
-    "LABUSDT":{"sl":0.025,"tp1":0.06,"tp2":0.12,"tp3":0.20,"tp4":0.28},
-    "SIRENUSDT":{"sl":0.022,"tp1":0.05,"tp2":0.10,"tp3":0.18,"tp4":0.25},
-    "TAOUSDT":{"sl":0.015,"tp1":0.025,"tp2":0.05,"tp3":0.08,"tp4":0.12},
-    "SANDUSDT":{"sl":0.012,"tp1":0.02,"tp2":0.04,"tp3":0.07,"tp4":0.10},
-    "JASMYUSDT":{"sl":0.015,"tp1":0.025,"tp2":0.05,"tp3":0.08,"tp4":0.12},
-}
-COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; LOCK_FILE="/tmp/bot.lock"
-TREND_CACHE="last_trend.json"; PUMP_CACHE="pump_cache.json"
+PER_COIN_TP={"GRASSUSDT":{"sl":0.022,"tp1":0.05,"tp2":0.12,"tp3":0.22,"tp4":0.30},"FARTCOINUSDT":{"sl":0.025,"tp1":0.06,"tp2":0.12,"tp3":0.20,"tp4":0.28},"KOMAUSDT":{"sl":0.022,"tp1":0.05,"tp2":0.10,"tp3":0.18,"tp4":0.25},"SENTUSDT":{"sl":0.022,"tp1":0.04,"tp2":0.08,"tp3":0.15,"tp4":0.22},"LABUSDT":{"sl":0.025,"tp1":0.06,"tp2":0.12,"tp3":0.20,"tp4":0.28},"SIRENUSDT":{"sl":0.022,"tp1":0.05,"tp2":0.10,"tp3":0.18,"tp4":0.25},"TAOUSDT":{"sl":0.015,"tp1":0.025,"tp2":0.05,"tp3":0.08,"tp4":0.12},"SANDUSDT":{"sl":0.012,"tp1":0.02,"tp2":0.04,"tp3":0.07,"tp4":0.10},"JASMYUSDT":{"sl":0.015,"tp1":0.025,"tp2":0.05,"tp3":0.08,"tp4":0.12},}
+COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; LOCK_FILE="/tmp/bot.lock"; TREND_CACHE="last_trend.json"; PUMP_CACHE="pump_cache.json"
 COOLDOWN={"signals":{}}; ACTIVE={}; WARN_TIME={}; EARLY_WARN_TIME={}; PUMP_HIST={}
 if os.path.exists(COOLDOWN_FILE):
     try: COOLDOWN=json.load(open(COOLDOWN_FILE))
@@ -116,14 +104,13 @@ def early_warning(d, symbol):
     ema = sum(d["c"][-50:])/50
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
     is_fast = symbol in FAST_COINS
-    dist_mid = abs(curr-mid)/mid if mid else 0
     if curr < ema*1.01 and recent_low < prev_low*1.015 and curr < mid*1.01:
         mins = 10 if is_fast else 15
         return f"EARLY BEAR SHIFT ~{mins}m | {symbol} {curr:.5f} near EMA {ema:.5f}"
     if curr > ema*0.99 and recent_high > prev_high*0.985 and curr > mid*0.99:
         mins = 10 if is_fast else 15
         return f"EARLY BULL SHIFT ~{mins}m | {symbol} {curr:.5f} near EMA {ema:.5f}"
-    if dist_mid < 0.015:
+    if abs(curr-mid)/mid < 0.015:
         mins = 10 if is_fast else 15
         side = "BEAR" if curr < mid else "BULL"
         return f"EARLY {side} SHIFT ~{mins}m | {symbol} near mid {mid:.5f}"
@@ -200,12 +187,6 @@ def fbs_logic(h,l,c,o):
     if pc>=p58 and cc>=p35 and cc>co: return "BOS_UP",True,""
     if pc<=p35 and cc<=p58 and cc<co: return "BOS_DOWN",False,""
     return None,None,None
-def is_close(d5,is_buy):
-    if len(d5["c"])<4: return False,""
-    ph,pl=d5["h"][-2],d5["l"][-2]; pr=ph-pl or 1; p58=pl+pr*0.58; p35=pl+pr*0.35; cc=d5["c"][-1]
-    if is_buy and cc<p35: return True,"lost p35"
-    if not is_buy and cc>p58: return True,"lost p58"
-    return False,""
 def manage():
     global ACTIVE
     if not ACTIVE: return
@@ -255,7 +236,7 @@ def print_trends():
     if os.path.exists(TREND_CACHE):
         try: last=json.load(open(TREND_CACHE))
         except: pass
-    msg = f"📊 TREND V47.4 LIQ+SCALP - {get_time()}\n━━━━━━━━━━━━━━\n\n"
+    msg = f"📊 TREND V47.5 NO-TOP - {get_time()}\n━━━━━━━━━━━━━━\n\n"
     curr_state={}; changed=False; early_msgs=[]; pump_msgs=[]
     for s in SYMBOLS:
         d240=kl(SYMBOL_MAP[s],"Min240"); d5=kl(SYMBOL_MAP[s],"Min15")
@@ -306,6 +287,19 @@ def scan():
         if not d240 or not d60 or not d5: continue
         bias,_,_,_,_ =get_bias_4h(d240, s)
         if bias=="RANGE": continue
+        lp = get_live_price(s)
+        cur_f = lp if lp else d5["c"][-1]
+        pd = pump_dump_detector(s, cur_f)
+        if pd and "PUMP" in pd and bias=="BULL":
+            continue
+        liq = liquidity_scalp_levels(s, bias, d5, cur_f)
+        if liq and "OVEREXTENDED BULL" in liq and bias=="BULL":
+            if s not in WARN_TIME or time.time()-WARN_TIME.get(s,0)>1800:
+                tg(f"⏳ {s}{liq} | WAIT - dont chase | {get_time()}")
+                WARN_TIME[s]=time.time()
+            continue
+        if liq and "OVEREXTENDED BEAR" in liq and bias=="BEAR":
+            continue
         fbs,is_buy,_=fbs_logic(d5["h"],d5["l"],d5["c"],d5["o"])
         if not fbs: continue
         if bias=="BULL" and not is_buy: continue
@@ -324,7 +318,7 @@ if __name__=="__main__":
     try: fcntl.flock(fp,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except:
         if "--once" not in sys.argv and "--trend" not in sys.argv: print("Bot already running"); exit(1)
-    print(f"BOT V47.4 FINAL | {get_time()}")
+    print(f"BOT V47.5 FINAL | {get_time()}")
     if "--trend" in sys.argv:
         try: print_trends()
         except Exception as e: print(f"TREND ERROR {e}")
