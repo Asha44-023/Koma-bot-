@@ -56,16 +56,6 @@ def get_crt_levels(d):
     if not d: return None,None
     return max(d["h"][-30:]), min(d["l"][-30:])
 
-def check_early_warning(s, price, rsi, ch, cl):
-    k=f"{s}_warn"; now=time.time()
-    if now-WARNING_SENT.get(k,0)<7200: return
-    if ch and price>=ch*0.95 and 75<=rsi<80:
-        WARNING_SENT[k]=now
-        tg(f"⚠️ WARNING {s} OB near HIGH {ch:.5f}\nPrice {price:.5f} RSI {rsi:.1f} ->80 in 1-2H\n{get_time()}")
-    if cl and price<=cl*1.05 and 22<rsi<=27:
-        WARNING_SENT[k]=now
-        tg(f"⚠️ WARNING {s} OS near LOW {cl:.5f}\nPrice {price:.5f} RSI {rsi:.1f} ->22 in 1-2H\n{get_time()}")
-
 def analyze_4h_full(d,s):
     if not d: return "NEUTRAL",0
     ema50=sum(d["c"][-50:])/50
@@ -104,13 +94,14 @@ def manage():
         if not ch: continue
         tp1,tp2=get_tps(entry,is_buy,ch,cl)
         if is_buy and price<=sl or not is_buy and price>=sl:
-            tg(f"❌ SL {s} {price:.5f}\n{get_time()}"); del ACTIVE[s]; save_a(); continue
+            box = f"❌ STOP LOSS HIT\n{s} {price:.5f}\nBuy Box Failed\n{get_time()}" if is_buy else f"❌ STOP LOSS HIT\n{s} {price:.5f}\nSell Box Failed\n{get_time()}"
+            tg(box); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit"):
             if is_buy and price>=tp1 or not is_buy and price<=tp1:
                 data["tp1_hit"]=True; data["sl"]=entry; save_a()
-                tg(f"✅ TP1 {s} {price:.5f} SL->BE\n{get_time()}")
+                tg(f"✅ Long TP1 HIT {s} {price:.5f}\nSL → BE (Green Box Safe)\n{get_time()}" if is_buy else f"✅ Short TP1 HIT {s} {price:.5f}\nSL → BE (Red Box Safe)\n{get_time()}")
         if is_buy and price>=tp2 or not is_buy and price<=tp2:
-            tg(f"✅✅ TP2 {s} JUNCTION {price:.5f} CLOSE\n{get_time()}"); del ACTIVE[s]; save_a()
+            tg(f"✅✅ Long TP2 HIT {s} JUNCTION {price:.5f}\nBUY BOX COMPLETE ✅\n{get_time()}" if is_buy else f"✅✅ Short TP2 HIT {s} JUNCTION {price:.5f}\nSELL BOX COMPLETE ✅\n{get_time()}"); del ACTIVE[s]; save_a()
 
 def scan():
     manage()
@@ -122,22 +113,6 @@ def scan():
         rsi_15=get_rsi(d15["c"],14); ch,cl=get_crt_levels(d_daily)
         live=get_live_price(s) or d15["c"][-1]
         if not ch: continue
-        check_early_warning(s,live,rsi_15,ch,cl)
-
-        if live>=ch*0.98 and rsi_15>=80:
-            k=f"{s}_SHORT"
-            if time.time()-COOLDOWN["signals"].get(k,0)>=1800:
-                entry=(d15["h"][-2]+d15["l"][-2])/2; sl=d15["h"][-2]*1.002
-                ACTIVE[s]={"entry":entry,"is_buy":False,"time":time.time(),"sl":sl,"crt_high":ch,"crt_low":cl}; save_a()
-                COOLDOWN["signals"][k]=time.time(); save_c()
-                tg(f"🔴 SELL FLIP {s} RSI {rsi_15:.1f}\nH {ch:.5f}->L {cl:.5f}\nE {entry:.5f}\n{get_time()}"); break
-        if live<=cl*1.02 and rsi_15<=22:
-            k=f"{s}_LONG"
-            if time.time()-COOLDOWN["signals"].get(k,0)>=1800:
-                entry=(d15["h"][-2]+d15["l"][-2])/2; sl=d15["l"][-2]*0.998
-                ACTIVE[s]={"entry":entry,"is_buy":True,"time":time.time(),"sl":sl,"crt_high":ch,"crt_low":cl}; save_a()
-                COOLDOWN["signals"][k]=time.time(); save_c()
-                tg(f"🟢 BUY FLIP {s} RSI {rsi_15:.1f}\nL {cl:.5f}->H {ch:.5f}\nE {entry:.5f}\n{get_time()}"); break
 
         rng=ch-cl or 1
         pct_from_low = (live-cl)/rng*100
@@ -172,23 +147,43 @@ def scan():
         COOLDOWN["signals"][k]=time.time(); save_c()
         tp1,tp2=get_tps(entry,is_buy,ch,cl)
 
-        if prev_bias and prev_bias!= bias:
-            label = f"🔄 TOTAL REVERSAL {prev_bias}->{bias}"
-        else:
-            label = f"💧 LIQ GRAB → CONTINUE {'UP' if is_buy else 'DOWN'}"
-
+        label = f"🔄 REVERSAL {prev_bias}->{bias}" if prev_bias and prev_bias!=bias else f"💧 LIQ GRAB → {'UP' if is_buy else 'DOWN'}"
         exp_pct = ((tp2-entry)/entry*100) if is_buy else ((entry-tp2)/entry*100)
 
         if is_buy:
-            if "MID" in zone:
-                tg(f"🟢 BUY {zone} {s} {label}\nBUY MID - Back to High GRASS 0.55->0.69\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%) SL {sl:.5f}\n{tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.1f}\nLive {live:.5f}\n{get_time()}")
-            else:
-                tg(f"🟢 {s} {zone} {label} RSI {rsi_15:.1f}\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f}\n{tbs_type or fbs}\n{get_time()}")
+            msg = f"""🟢 BUY {s} {zone}
+━━━━━━━━━━━━━━
+🟩 BUY BOX: {d15['l'][-2]:.5f} - {d15['h'][-2]:.5f}
+🟥 SELL BOX: {ch:.5f} (Long TP)
+
+✅ Long TP1: {tp1:.5f} (50%)
+✅ Long TP2: {tp2:.5f} ({exp_pct:.1f}%)
+
+🔹 ENTRY: {entry:.5f}
+🔹 SL: {sl:.5f} (Short TP)
+🔹 {tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.0f}
+🔹 {label}
+━━━━━━━━━━━━━━
+Live {live:.5f} | H {ch:.5f} L {cl:.5f}
+{get_time()}"""
+            tg(msg)
         else:
-            if "MID" in zone:
-                tg(f"🔴 SELL {zone} {s} {label}\nSELL MID - Back to Low GRASS 0.65->0.55\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%) SL {sl:.5f}\n{tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.1f}\nLive {live:.5f}\n{get_time()}")
-            else:
-                tg(f"🔴 {s} {zone} {label} RSI {rsi_15:.1f}\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f}\n{tbs_type or fbs}\n{get_time()}")
+            msg = f"""🔴 SELL {s} {zone}
+━━━━━━━━━━━━━━
+🟥 SELL BOX: {d15['l'][-2]:.5f} - {d15['h'][-2]:.5f}
+🟩 BUY BOX: {cl:.5f} (Short TP)
+
+✅ Short TP1: {tp1:.5f} (50%)
+✅ Short TP2: {tp2:.5f} ({exp_pct:.1f}%)
+
+🔹 ENTRY: {entry:.5f}
+🔹 SL: {sl:.5f} (Long TP)
+🔹 {tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.0f}
+🔹 {label}
+━━━━━━━━━━━━━━
+Live {live:.5f} | H {ch:.5f} L {cl:.5f}
+{get_time()}"""
+            tg(msg)
         break
 
 def poll_telegram_commands():
@@ -202,7 +197,7 @@ def poll_telegram_commands():
             text=upd.get("message",{}).get("text","").strip()
             if not text.startswith("/"): continue
             if text.startswith("/status"):
-                txt=f"V69.1 MID {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V70 BOX STYLE {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS:
                     d15=kl(SYMBOL_MAP[s],"Min15"); dd=kl(SYMBOL_MAP[s],"Day1")
                     if not d15 or not dd: continue
@@ -218,13 +213,6 @@ def poll_telegram_commands():
                     if not d15: continue
                     txt+=f"{s} {get_rsi(d15['c']):.0f}\n"
                 tg(txt)
-            elif text.startswith("/junctions"):
-                txt=""
-                for s in SYMBOLS:
-                    dd=kl(SYMBOL_MAP[s],"Day1")
-                    if not dd: continue
-                    ch,cl=get_crt_levels(dd); txt+=f"{s} L{cl:.4f} H{ch:.4f}\n"
-                tg(txt)
             elif text.startswith("/close"):
                 p=text.split()
                 if len(p)>1:
@@ -233,7 +221,6 @@ def poll_telegram_commands():
                 else: ACTIVE.clear(); save_a(); tg("Closed all")
     except Exception as e: print(f"poll err {e}")
 
-# === FIXED FOR GITHUB ACTIONS ===
 if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
