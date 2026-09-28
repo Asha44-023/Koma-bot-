@@ -1,7 +1,7 @@
-name: Run Crypto Bot V47.8 BREAK+50%
+name: Run Crypto Bot V60 IMAGES 100%
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15m, trend only on change or hourly
+    - cron: '*/15 * * * *'  # every 15m - scan + trend + reversal + pump alerts
   workflow_dispatch:
 
 jobs:
@@ -23,10 +23,12 @@ jobs:
             active.json
             pump_cache.json
             last_trend.json
-          key: bot-cache-v47-8-${{ github.run_id }}
+            winloss.json
+            week_tracker.json
+          key: bot-cache-v60-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v60-
             bot-cache-v47-8-
-            bot-cache-v47-7-
             bot-cache-
 
       - name: Ensure files
@@ -35,27 +37,19 @@ jobs:
           if [ ! -f active.json ]; then echo '{}' > active.json; fi
           if [ ! -f pump_cache.json ]; then echo '{}' > pump_cache.json; fi
           if [ ! -f last_trend.json ]; then echo '{}' > last_trend.json; fi
+          if [ ! -f winloss.json ]; then echo '{"wins":0,"losses":0,"history":[]}' > winloss.json; fi
+          if [ ! -f week_tracker.json ]; then echo "{\"start_date\":\"$(date +%F)\",\"end_date\":\"$(date -d '+7 days' +%F)\"}" > week_tracker.json; fi
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot V47.8 BREAK+50%
+      - name: Run bot V60 IMAGES 100%
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V47.8 50% SLOW + BREAK FAST ==="
+          echo "=== SCAN V60 - 4H->1H->15m 62/38 + 50%/Break + Breaker + Weekly Filter ==="
           python bot.py --once
-          echo "=== TREND (bias change or hourly) ==="
+          echo "=== TREND + REVERSAL + PUMP ALERTS (weekly + bias flip + instant) ==="
           python bot.py --trend
-          echo "Active: $(cat active.json)"
-
-      - name: Save cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            cooldown.json
-            active.json
-            pump_cache.json
-            last_trend.json
-          key: bot-cache-v47-8-${{ github.run_id }}
+          echo "=== WEEK REPORT / HOLDING ==="
+          cat winloss
