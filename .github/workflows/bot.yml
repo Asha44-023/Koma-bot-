@@ -26,20 +26,22 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v67-${{ github.run_id }}
+          key: bot-cache-v67
           restore-keys: |
             bot-cache-v67-
             bot-cache-
 
       - name: Ensure files
         run: |
-          printf '%s\n' '{"signals":{}}' > cooldown.json || true
-          printf '%s\n' '{}' > active.json || true
+          [ -f cooldown.json ] || printf '%s\n' '{"signals":{}}' > cooldown.json
+          [ -f active.json ] || printf '%s\n' '{}' > active.json
           [ -f pump_cache.json ] || printf '%s\n' '{}' > pump_cache.json
           [ -f last_trend.json ] || printf '%s\n' '{"trend":"RANGE"}' > last_trend.json
           [ -f winloss.json ] || printf '%s\n' '{"wins":0,"losses":0,"history":[]}' > winloss.json
           [ -f week_tracker.json ] || printf '%s\n' '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
           rm -f /tmp/bot.lock
+          echo "ACTIVE:" && cat active.json
+          echo "COOLDOWN:" && cat cooldown.json
 
       - name: Run bot V67
         env:
@@ -62,4 +64,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v67-${{ github.run_id }}
+          key: bot-cache-v67
