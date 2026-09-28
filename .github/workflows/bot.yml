@@ -1,4 +1,4 @@
-name: Run Crypto Bot V60 IMAGES 100%
+name: Run Crypto Bot V61 LONG+SHORT BOTH WAYS
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -25,10 +25,10 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v60-${{ github.run_id }}
+          key: bot-cache-v61-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v61-
             bot-cache-v60-
-            bot-cache-v47-8-
             bot-cache-
 
       - name: Ensure files
@@ -42,12 +42,12 @@ jobs:
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot V60 IMAGES 100%
+      - name: Run bot V61 LONG+SHORT BOTH WAYS
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V60 ==="
+          echo "=== SCAN V61 LONG+SHORT ==="
           python bot.py --once || true
           echo "=== TREND + HOLDING ==="
           python bot.py --trend || true
@@ -67,4 +67,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v60-${{ github.run_id }}
+          key: bot-cache-v61-${{ github.run_id }}
