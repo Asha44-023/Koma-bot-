@@ -1,46 +1,52 @@
-name: Run Crypto Bot V70 BOX STYLE
+name: Run Crypto Bot V80 25 SHAPES PVT
+
 on:
   schedule:
-    - cron: '*/2 * * * *'
+    - cron: '*/30 * * * *'  # Every 30 min for 4H scanner - no need every 2 min!
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install requests pytz
-      - name: Restore cache
+
+      - name: Restore cache V80
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v70-box-${{ github.run_id }}
+          key: bot-cache-v80-shapes-pvt-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v70-box-
+            bot-cache-v80-shapes-pvt-
+
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
-      - name: Run bot 2.5 min loop
+
+      - name: Run bot V80 4 min loop
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          timeout 150 python bot.py || true
-          echo "===ACTIVE==="; cat active.json
-      - name: Save cache
+          timeout 240 python v80.py || true
+          echo "===ACTIVE V80==="; cat active.json
+          echo "===COOLDOWN==="; cat cooldown.json
+
+      - name: Save cache V80
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v70-box-${{ github.run_id }}
+          key: bot-cache-v80-shapes-pvt-${{ github.run_id }} a 
