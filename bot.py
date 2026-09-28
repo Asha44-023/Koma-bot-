@@ -9,11 +9,16 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_C
 
 ACTIVE_FILE = "active.json"
 COOLDOWN_FILE = "cooldown.json"
+LAST_FILE = "last_update.json"
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
 COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{}}
 WARNING_SENT = {}
 LAST_UPDATE_ID = 0
-PREV_BIAS = {} # to detect TOTAL REVERSAL
+PREV_BIAS = {}
+
+if os.path.exists(LAST_FILE):
+    try: LAST_UPDATE_ID = json.load(open(LAST_FILE)).get("id",0)
+    except: pass
 
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
@@ -119,7 +124,6 @@ def scan():
         if not ch: continue
         check_early_warning(s,live,rsi_15,ch,cl)
 
-        # === EXTREME FLIP 98%/2% ===
         if live>=ch*0.98 and rsi_15>=80:
             k=f"{s}_SHORT"
             if time.time()-COOLDOWN["signals"].get(k,0)>=1800:
@@ -135,7 +139,6 @@ def scan():
                 COOLDOWN["signals"][k]=time.time(); save_c()
                 tg(f"🟢 BUY FLIP {s} RSI {rsi_15:.1f}\nL {cl:.5f}->H {ch:.5f}\nE {entry:.5f}\n{get_time()}"); break
 
-        # === MID ENABLED LOGIC - BOTH BUY AND SELL ===
         rng=ch-cl or 1
         pct_from_low = (live-cl)/rng*100
         is_mid = 15 < pct_from_low < 85
@@ -157,12 +160,7 @@ def scan():
             if ro or rf or rl: is_buy=False
 
         if is_buy is None: continue
-
-        # MID FILTER: NOW ALLOWED FOR BOTH SIDES IF TBS OR FBS 0.62 STRONG
-        # OLD CODE BLOCKED MID COMPLETELY - NOW WE TRADE MID LIKE GRASS 0.55->0.69
-        if is_mid and not (is_tbs or is_strong):
-            continue
-
+        if is_mid and not (is_tbs or is_strong): continue
         if bias=="BULL" and not is_buy: continue
         if bias=="BEAR" and is_buy: continue
 
@@ -174,9 +172,8 @@ def scan():
         COOLDOWN["signals"][k]=time.time(); save_c()
         tp1,tp2=get_tps(entry,is_buy,ch,cl)
 
-        # === REVERSAL vs LIQ GRAB DETECTION FOR ALL COINS ===
         if prev_bias and prev_bias!= bias:
-            label = f"🔄 TOTAL REVERSAL {prev_bias}->{bias} Pattern Changed"
+            label = f"🔄 TOTAL REVERSAL {prev_bias}->{bias}"
         else:
             label = f"💧 LIQ GRAB → CONTINUE {'UP' if is_buy else 'DOWN'}"
 
@@ -184,14 +181,14 @@ def scan():
 
         if is_buy:
             if "MID" in zone:
-                tg(f"🟢 BUY {zone} {s} {label}\nBUY MID - Back to High like GRASS 0.55->0.69\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%) SL {sl:.5f}\n{tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.1f}\nLive {live:.5f} H {ch:.5f} L {cl:.5f}\n{get_time()}")
+                tg(f"🟢 BUY {zone} {s} {label}\nBUY MID - Back to High GRASS 0.55->0.69\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%) SL {sl:.5f}\n{tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.1f}\nLive {live:.5f}\n{get_time()}")
             else:
-                tg(f"🟢 {s} {zone} {label} RSI {rsi_15:.1f}\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f}\n{tbs_type or fbs} | 4H {bias}\n{get_time()}")
+                tg(f"🟢 {s} {zone} {label} RSI {rsi_15:.1f}\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f}\n{tbs_type or fbs}\n{get_time()}")
         else:
             if "MID" in zone:
-                tg(f"🔴 SELL {zone} {s} {label}\nSELL MID - Back to Low like GRASS 0.65->0.55\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%) SL {sl:.5f}\n{tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.1f}\nLive {live:.5f} H {ch:.5f} L {cl:.5f}\n{get_time()}")
+                tg(f"🔴 SELL {zone} {s} {label}\nSELL MID - Back to Low GRASS 0.65->0.55\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%) SL {sl:.5f}\n{tbs_type or fbs} | 4H {bias} | RSI {rsi_15:.1f}\nLive {live:.5f}\n{get_time()}")
             else:
-                tg(f"🔴 {s} {zone} {label} RSI {rsi_15:.1f}\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f}\n{tbs_type or fbs} | 4H {bias}\n{get_time()}")
+                tg(f"🔴 {s} {zone} {label} RSI {rsi_15:.1f}\nE {entry:.5f} TP1 {tp1:.5f} TP2 {tp2:.5f}\n{tbs_type or fbs}\n{get_time()}")
         break
 
 def poll_telegram_commands():
@@ -201,15 +198,16 @@ def poll_telegram_commands():
         r=requests.get(url, timeout=5).json()
         for upd in r.get("result",[]):
             LAST_UPDATE_ID=upd["update_id"]
+            json.dump({"id":LAST_UPDATE_ID}, open(LAST_FILE,"w"))
             text=upd.get("message",{}).get("text","").strip()
             if not text.startswith("/"): continue
             if text.startswith("/status"):
-                txt=f"V69 MID-ENABLED {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V69.1 MID {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS:
                     d15=kl(SYMBOL_MAP[s],"Min15"); dd=kl(SYMBOL_MAP[s],"Day1")
                     if not d15 or not dd: continue
                     rsi=get_rsi(d15["c"]); ch,cl=get_crt_levels(dd); price=get_live_price(s) or d15["c"][-1]
-                    rng=ch-cl; pct=(price-cl)/rng*100 if rng else 50
+                    rng=ch-cl or 1; pct=(price-cl)/rng*100 if rng else 50
                     zone="MID" if 15<pct<85 else "JUNC"
                     txt+=f"{s} {price:.4f} RSI{int(rsi)} {zone} {pct:.0f}%\n"
                 tg(txt)
@@ -233,9 +231,11 @@ def poll_telegram_commands():
                     sym=p[1].upper()
                     if sym in ACTIVE: del ACTIVE[sym]; save_a(); tg(f"Closed {sym}")
                 else: ACTIVE.clear(); save_a(); tg("Closed all")
-    except: pass
+    except Exception as e: print(f"poll err {e}")
 
+# === FIXED FOR GITHUB ACTIONS ===
 if "--once" in sys.argv:
+    poll_telegram_commands()
     scan()
     print("DONE --once")
 else:
