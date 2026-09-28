@@ -1,8 +1,9 @@
-# BOT V60 - FOLLOWS YOUR IMAGES 100%
+# BOT V61 - LONG+SHORT BOTH WAYS - FOLLOWS YOUR IMAGES 100%
 # Image3: 4H Direction/Key levels/SupplyDemand -> 1H OB/FVG/Liquidity/Breaker/Trend/Breaks/Reversal -> 15m Confirmation
 # Image1: Entry Techniques - 50% engulfing (SLOW) / Break of candle (FAST) / Closure+next open
 # Image2: Breaker Block = OB Failed -> Breaker
 # Image4: FBS Good Breakout 62%/38% rule - only strong breakouts
+# V61 CHANGE: BOTH WAYS LONG+SHORT - no blocking, trades red market as SHORT
 import time, json, requests, fcntl, sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -181,7 +182,8 @@ def build_report(is_forced=False):
         msg+="------------\nHOLDING:\n"
         for s,pos in ACTIVE.items():
             cur=get_live_price(s) or 0; entry=pos["entry"]; pnl=(cur-entry)/entry if pos["is_buy"] else (entry-cur)/entry
-            msg+=f"{s} {pnl*100:+.2f}% {pos.get('setup','')} LIVE {cur:.5f}\n"
+            dir_str="LONG" if pos["is_buy"] else "SHORT"
+            msg+=f"{s} {dir_str} {pnl*100:+.2f}% {pos.get('setup','')} LIVE {cur:.5f}\n"
     msg+=f"Week {WEEK['start_date']}->{WEEK['end_date']}"
     return msg
 
@@ -231,11 +233,11 @@ def manage():
         if pd and (s not in WARN_TIME or now-WARN_TIME.get(s,0)>3600):
             tg(f"🚨 {pd} | HOLD {s} {pnl*100:+.1f}% | {get_time()}"); WARN_TIME[s]=now; save_p()
         if pnl>=cfg["tp4"]:
-            JOURNAL["wins"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"WIN","pnl":round(pnl*100,2)})
-            save_j(); tg(f"TP4 WIN {s} +{pnl*100:.1f}% LIVE {cur:.5f} SELL NOW | {get_time()}"); del ACTIVE[s]; save_a(); continue
+            JOURNAL["wins"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"WIN","pnl":round(pnl*100,2),"dir":"LONG" if is_buy else "SHORT"})
+            save_j(); tg(f"TP4 WIN {s} {'LONG' if is_buy else 'SHORT'} +{pnl*100:.1f}% LIVE {cur:.5f} CLOSE NOW | {get_time()}"); del ACTIVE[s]; save_a(); continue
         if (is_buy and cur<=sl) or (not is_buy and cur>=sl):
-            JOURNAL["losses"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"LOSS","pnl":round(pnl*100,2),"why":f"Flip {pos.get('bias')}->{bias}" if bias!=pos.get('bias') else "SL"})
-            save_j(); print(f"SILENT SL {s}"); del ACTIVE[s]; save_a(); continue
+            JOURNAL["losses"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"LOSS","pnl":round(pnl*100,2),"why":f"Flip {pos.get('bias')}->{bias}" if bias!=pos.get('bias') else "SL","dir":"LONG" if is_buy else "SHORT"})
+            save_j(); print(f"SILENT SL {s} {'LONG' if is_buy else 'SHORT'}"); del ACTIVE[s]; save_a(); continue
 
 def scan():
     global COOLDOWN,ACTIVE
@@ -255,11 +257,12 @@ def scan():
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240 or not d60 or not d5: continue
         bias,reason,demand,supply,_=analyze_4h(d240,s)
-        if bias=="RANGE": continue
+        # V61 BOTH WAYS: DO NOT SKIP RANGE - trade both directions
         fbs,is_buy=fbs_strong_breakout(d5["h"],d5["l"],d5["c"],d5["o"])
         if not fbs: continue
-        if bias=="BULL" and not is_buy: print(f"BLOCKED SELL {s} BULL week"); continue
-        if bias=="BEAR" and is_buy: print(f"BLOCKED BUY {s} BEAR week"); continue
+        # V61: NO BIAS BLOCK - allow LONG+SHORT in any bias
+        # if bias=="BULL" and not is_buy: continue # REMOVED FOR BOTH WAYS
+        # if bias=="BEAR" and is_buy: continue # REMOVED FOR BOTH WAYS
         ok,reason_1h=check_1h_confluence(d60,is_buy,is_slow=is_slow)
         if not ok: continue
         ph=d5["h"][-2]; pl=d5["l"][-2]
@@ -270,7 +273,8 @@ def scan():
             entry=d5["h"][-2]*1.001 if is_buy else d5["l"][-2]*0.999
             entry_type="BREAK OF CANDLE"
         cfg=PER_COIN_TP[s]; sl=entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
-        print(f"SILENT SIGNAL {s} {'BUY' if is_buy else 'SELL'} {fbs} [{entry_type}] Entry {entry:.5f} SL {sl:.5f} | 4H:{bias} {reason} | 1H:{reason_1h}")
+        dir_str="BUY/LONG" if is_buy else "SELL/SHORT"
+        print(f"SILENT SIGNAL {s} {dir_str} {fbs} [{entry_type}] Entry {entry:.5f} SL {sl:.5f} | 4H:{bias} {reason} | 1H:{reason_1h}")
         ACTIVE[s]={"entry":entry,"is_buy":is_buy,"bias":bias,"setup":f"{fbs}+{entry_type} {reason_1h}","time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
         break
@@ -290,7 +294,7 @@ if __name__=="__main__":
         if os.path.exists(ACTIVE_FILE): ACTIVE=json.load(open(ACTIVE_FILE))
         if os.path.exists(PUMP_CACHE): PUMP_HIST=json.load(open(PUMP_CACHE))
     except: pass
-    print(f"BOT V60 IMAGES 100% | Week {WEEK['start_date']}->{WEEK['end_date']} | 4H->1H->15m + 62/38 + 50%/Break + Breaker | {get_time()}")
+    print(f"BOT V61 LONG+SHORT BOTH WAYS | Week {WEEK['start_date']}->{WEEK['end_date']} | 4H->1H->15m + 62/38 + 50%/Break + Breaker | {get_time()}")
     if "--trend" in sys.argv:
         print(build_report(True)); exit(0)
     if "--once" in sys.argv: scan(); exit(0)
