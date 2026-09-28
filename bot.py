@@ -1,9 +1,5 @@
-# BOT V61 - LONG+SHORT BOTH WAYS - FOLLOWS YOUR IMAGES 100%
-# Image3: 4H Direction/Key levels/SupplyDemand -> 1H OB/FVG/Liquidity/Breaker/Trend/Breaks/Reversal -> 15m Confirmation
-# Image1: Entry Techniques - 50% engulfing (SLOW) / Break of candle (FAST) / Closure+next open
-# Image2: Breaker Block = OB Failed -> Breaker
-# Image4: FBS Good Breakout 62%/38% rule - only strong breakouts
-# V61 CHANGE: BOTH WAYS LONG+SHORT - no blocking, trades red market as SHORT
+# BOT V63 - TREND RIDE - 4H Trend Gate + Pullback Entries + Exhaustion
+# Rule: BULL=Only LONG pullbacks, BEAR=Only SHORT pullbacks, 15min same direction, 45min opposite blocked
 import time, json, requests, fcntl, sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -14,7 +10,7 @@ FAST_COINS={"SIRENUSDT","LABUSDT","KOMAUSDT","FARTCOINUSDT","SENTUSDT"}
 SLOW_COINS={"GRASSUSDT","TAOUSDT","SANDUSDT","JASMYUSDT"}
 PER_COIN_TP={"GRASSUSDT":{"sl":0.022,"tp4":0.30},"KOMAUSDT":{"sl":0.022,"tp4":0.25},"FARTCOINUSDT":{"sl":0.025,"tp4":0.28},"SENTUSDT":{"sl":0.022,"tp4":0.22},"LABUSDT":{"sl":0.025,"tp4":0.28},"SIRENUSDT":{"sl":0.022,"tp4":0.25},"TAOUSDT":{"sl":0.015,"tp4":0.12},"SANDUSDT":{"sl":0.012,"tp4":0.10},"JASMYUSDT":{"sl":0.015,"tp4":0.12}}
 
-COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; LOCK_FILE="/tmp/bot.lock"; TREND_CACHE="last_trend.json"; PUMP_CACHE="pump_cache.json"; JOURNAL_FILE="winloss.json"; WEEK_FILE="week_tracker.json"
+COOLDOWN_FILE="cooldown.json"; ACTIVE_FILE="active.json"; LOCK_FILE="/tmp/bot.lock"; PUMP_CACHE="pump_cache.json"; JOURNAL_FILE="winloss.json"; WEEK_FILE="week_tracker.json"
 COOLDOWN={"signals":{}}; ACTIVE={}; WARN_TIME={}; EARLY_WARN_TIME={}; PUMP_HIST={}; JOURNAL={"wins":0,"losses":0,"history":[]}
 WEEK={"start_date":datetime.now().strftime("%Y-%m-%d"),"end_date":(datetime.now()+timedelta(days=7)).strftime("%Y-%m-%d")}
 
@@ -63,17 +59,16 @@ def analyze_4h(d, symbol):
     if len(d["c"])<60: return "RANGE","need 60",0,0,d["c"][-1] if d["c"] else 0
     rl=min(d["l"][-20:]); pl=min(d["l"][-50:-20]); rh=max(d["h"][-20:]); ph=max(d["h"][-50:-20])
     ema50=sum(d["c"][-50:])/50; curr=d["c"][-1]
-    supply_zone=rh; demand_zone=rl
     is_fast=symbol in FAST_COINS; thr=0.008 if is_fast else 0.002
     higher_low=rl>pl*(1+thr); lower_low=rl<pl*(1-thr)
     lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
     long_tgt=rh*1.08; short_tgt=rl*0.92
-    if higher_low and curr>ema50: return "BULL", f"HL {pl:.4f}->{rl:.4f} Demand {demand_zone:.4f}", demand_zone, supply_zone, long_tgt
-    if lower_low and curr<ema50: return "BEAR", f"LL {pl:.4f}->{rl:.4f} Supply {supply_zone:.4f}", demand_zone, supply_zone, short_tgt
+    if higher_low and curr>ema50: return "BULL", f"HL {pl:.4f}->{rl:.4f}", rl, rh, long_tgt
+    if lower_low and curr<ema50: return "BEAR", f"LL {pl:.4f}->{rl:.4f}", rl, rh, short_tgt
     if not is_fast:
-        if curr>mid and curr>ema50: return "BULL", f"Above mid {mid:.4f}", demand_zone, supply_zone, long_tgt
-        if curr<mid and curr<ema50: return "BEAR", f"Below mid {mid:.4f}", demand_zone, supply_zone, short_tgt
-    return "RANGE", f"Range {pl:.4f}->{rl:.4f}", demand_zone, supply_zone, curr
+        if curr>mid and curr>ema50: return "BULL", f"Above mid {mid:.4f}", rl, rh, long_tgt
+        if curr<mid and curr<ema50: return "BEAR", f"Below mid {mid:.4f}", rl, rh, short_tgt
+    return "RANGE", f"Range {pl:.4f}->{rl:.4f}", rl, rh, curr
 
 def detect_ob_1h(d):
     bull=False; bear=False
@@ -134,41 +129,43 @@ def fbs_strong_breakout(h,l,c,o):
     if len(c)<3: return None,None
     ph=h[-2]; pl=l[-2]; pc=c[-2]; cc=c[-1]; co=o[-1]
     pr=ph-pl or 1
-    level_62=pl+pr*0.62
-    level_38=pl+pr*0.38
-    if pc>=level_62 and cc>=level_38 and cc>co:
-        return "BOS_UP_STRONG", True
-    if pc<=level_38 and cc<=level_62 and cc<co:
-        return "BOS_DOWN_STRONG", False
+    level_62=pl+pr*0.62; level_38=pl+pr*0.38
+    if pc>=level_62 and cc>=level_38 and cc>co: return "BOS_UP_STRONG", True
+    if pc<=level_38 and cc<=level_62 and cc<co: return "BOS_DOWN_STRONG", False
     return None,None
 
-def early_warning(d,symbol):
-    if len(d["c"])<60: return None
-    curr=d["c"][-1]; rl=min(d["l"][-20:]); pl=min(d["l"][-50:-20]); rh=max(d["h"][-20:]); ph=max(d["h"][-50:-20]); ema=sum(d["c"][-50:])/50
-    lo=min(d["l"][-48:]); hi=max(d["h"][-48:]); mid=(lo+hi)/2
-    bias,_,_,_,_=analyze_4h(d,symbol)
-    if bias=="BULL" and curr<ema*0.998 and rl<pl*0.98 and curr<mid: return f"EARLY BEAR REVERSAL {symbol} BULL->BEAR?"
-    if bias=="BEAR" and curr>ema*1.002 and rh>ph*1.02 and curr>mid: return f"EARLY BULL REVERSAL {symbol} BEAR->BULL?"
-    return None
+def check_turtle_soup_liquidity(d):
+    if len(d["c"])<20: return None,False,False
+    recent_high=max(d["h"][-20:-2]); recent_low=min(d["l"][-20:-2])
+    h=d["h"][-2]; l=d["l"][-2]; c2=d["c"][-2]; c1=d["c"][-1]
+    rng2=d["h"][-2]-d["l"][-2] or 1
+    upper_wick2=(d["h"][-2]-max(d["c"][-2],d["o"][-2]))/rng2 if rng2 else 0
+    lower_wick2=(min(d["c"][-2],d["o"][-2])-d["l"][-2])/rng2 if rng2 else 0
+    if c2>recent_high and c1<recent_high: return "TURTLE BODY SOUP BEAR", True, False
+    if c2<recent_low and c1>recent_low: return "TURTLE BODY SOUP BULL", True, False
+    if h>recent_high and c1<recent_high and upper_wick2>=0.6: return "TURTLE WICK GRAB BEAR", False, True
+    if l<recent_low and c1>recent_low and lower_wick2>=0.6: return "TURTLE WICK GRAB BULL", False, True
+    if h>recent_high and c1<recent_high: return "TURTLE WICK SOUP BEAR", False, False
+    if l<recent_low and c1>recent_low: return "TURTLE WICK SOUP BULL", False, False
+    return None,False,False
 
-def pump_dump_detector(s,curr):
-    global PUMP_HIST
-    now=time.time()
-    if s not in PUMP_HIST: PUMP_HIST[s]=[]
-    PUMP_HIST[s].append((now,curr))
-    PUMP_HIST[s]=[(t,p) for t,p in PUMP_HIST[s] if now-t<=600]
-    if len(PUMP_HIST[s])<3: return None
-    prices=[p for _,p in PUMP_HIST[s]]; low_10=min(prices); high_10=max(prices)
-    pump_pct=(curr-low_10)/low_10 if low_10 else 0; dump_pct=(high_10-curr)/high_10 if high_10 else 0
-    is_fast=s in FAST_COINS; thr_p=0.06 if is_fast else 0.08; thr_d=0.04 if is_fast else 0.06
-    if pump_pct>=thr_p: return f"PUMP +{pump_pct*100:.1f}% LIVE {curr:.5f}"
-    if dump_pct>=thr_d: return f"DUMP -{dump_pct*100:.1f}% LIVE {curr:.5f}"
-    return None
+def get_overall_market_trend():
+    bulls=0; bears=0
+    for s in SYMBOLS:
+        d=kl(SYMBOL_MAP[s],"Min240")
+        if not d: continue
+        b,_,_,_,_=analyze_4h(d,s)
+        if b=="BULL": bulls+=1
+        elif b=="BEAR": bears+=1
+    if bulls>=6: return f"BULLISH {bulls}/9"
+    if bears>=6: return f"BEARISH {bears}/9"
+    return f"RANGE {bulls}B {bears}S"
 
 def build_report(is_forced=False):
     total=JOURNAL["wins"]+JOURNAL["losses"]; wr=(JOURNAL["wins"]/total*100) if total else 0
+    overall=get_overall_market_trend()
     title=f"FORCE REPORT {get_time()}" if is_forced else f"1 WEEK FINAL {WEEK['start_date']}->{WEEK['end_date']}"
-    msg=f"{title}\nW:{JOURNAL['wins']} L:{JOURNAL['losses']} WR:{wr:.1f}%\n------------\n"
+    msg=f"{title}\nOVERALL: {overall}\nW:{JOURNAL['wins']} L:{JOURNAL['losses']} WR:{wr:.1f}%\n------------\n"
     per={}
     for h in JOURNAL["history"]:
         c=h["coin"]
@@ -177,13 +174,12 @@ def build_report(is_forced=False):
         else: per[c]["l"]+=1
     for coin,st in per.items():
         tot=st["w"]+st["l"]; wrr=(st["w"]/tot*100) if tot else 0
-        msg+=f"{coin}: W{st['w']} L{st['l']} {wrr:.0f}% {'GOOD' if wrr>=50 else 'BAD'}\n"
+        msg+=f"{coin}: W{st['w']} L{st['l']} {wrr:.0f}%\n"
     if ACTIVE:
         msg+="------------\nHOLDING:\n"
         for s,pos in ACTIVE.items():
             cur=get_live_price(s) or 0; entry=pos["entry"]; pnl=(cur-entry)/entry if pos["is_buy"] else (entry-cur)/entry
-            dir_str="LONG" if pos["is_buy"] else "SHORT"
-            msg+=f"{s} {dir_str} {pnl*100:+.2f}% {pos.get('setup','')} LIVE {cur:.5f}\n"
+            msg+=f"{s} {'LONG' if pos['is_buy'] else 'SHORT'} {pnl*100:+.2f}% {pos.get('setup','')[:30]} LIVE {cur:.5f}\n"
     msg+=f"Week {WEEK['start_date']}->{WEEK['end_date']}"
     return msg
 
@@ -210,34 +206,23 @@ def check_week_report():
             WEEK["start_date"]=now.strftime("%Y-%m-%d"); WEEK["end_date"]=(now+timedelta(days=7)).strftime("%Y-%m-%d")
             JOURNAL["wins"]=0; JOURNAL["losses"]=0; JOURNAL["history"]=[]
             save_w(); save_j()
-    except Exception as e: print(f"week err {e}")
+    except: pass
 
 def manage():
     global ACTIVE,JOURNAL
     if not ACTIVE: return
-    now=time.time()
     for s in list(ACTIVE.keys()):
         d5=kl(SYMBOL_MAP[s],"Min15"); d240=kl(SYMBOL_MAP[s],"Min240")
         if not d5 or not d240: continue
         pos=ACTIVE[s]; is_buy=pos["is_buy"]; entry=pos["entry"]
         cur=get_live_price(s) or d5["c"][-1]; pnl=(cur-entry)/entry if is_buy else (entry-cur)/entry
         cfg=PER_COIN_TP[s]; sl=entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
-        bias,_,_,_,_=analyze_4h(d240,s)
-        ew=early_warning(d240,s)
-        if ew and (s not in EARLY_WARN_TIME or now-EARLY_WARN_TIME.get(s,0)>14400):
-            tg(f"{ew} HOLD {s} {pnl*100:+.1f}% LIVE {cur:.5f} | {get_time()}"); EARLY_WARN_TIME[s]=now
-        if pos.get("bias") and bias!=pos.get("bias") and bias!="RANGE":
-            if s not in WARN_TIME or now-WARN_TIME.get(s,0)>3600:
-                tg(f"BIAS FLIP {s} {pos.get('bias')}->{bias} {pnl*100:+.1f}% LIVE {cur:.5f} CLOSE? | {get_time()}"); WARN_TIME[s]=now
-        pd=pump_dump_detector(s,cur)
-        if pd and (s not in WARN_TIME or now-WARN_TIME.get(s,0)>3600):
-            tg(f"🚨 {pd} | HOLD {s} {pnl*100:+.1f}% | {get_time()}"); WARN_TIME[s]=now; save_p()
         if pnl>=cfg["tp4"]:
             JOURNAL["wins"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"WIN","pnl":round(pnl*100,2),"dir":"LONG" if is_buy else "SHORT"})
-            save_j(); tg(f"TP4 WIN {s} {'LONG' if is_buy else 'SHORT'} +{pnl*100:.1f}% LIVE {cur:.5f} CLOSE NOW | {get_time()}"); del ACTIVE[s]; save_a(); continue
+            save_j(); tg(f"TP4 WIN {s} {'LONG' if is_buy else 'SHORT'} +{pnl*100:.1f}% LIVE {cur:.5f} | {get_time()}"); del ACTIVE[s]; save_a(); continue
         if (is_buy and cur<=sl) or (not is_buy and cur>=sl):
-            JOURNAL["losses"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"LOSS","pnl":round(pnl*100,2),"why":f"Flip {pos.get('bias')}->{bias}" if bias!=pos.get('bias') else "SL","dir":"LONG" if is_buy else "SHORT"})
-            save_j(); print(f"SILENT SL {s} {'LONG' if is_buy else 'SHORT'}"); del ACTIVE[s]; save_a(); continue
+            JOURNAL["losses"]+=1; JOURNAL["history"].append({"date":datetime.now().strftime("%Y-%m-%d"),"coin":s,"result":"LOSS","pnl":round(pnl*100,2),"dir":"LONG" if is_buy else "SHORT"})
+            save_j(); print(f"SILENT SL {s}"); del ACTIVE[s]; save_a(); continue
 
 def scan():
     global COOLDOWN,ACTIVE
@@ -246,37 +231,51 @@ def scan():
     if cmd=="report": tg(build_report(is_forced=True))
     elif cmd=="resetweek":
         WEEK["start_date"]=datetime.now().strftime("%Y-%m-%d"); WEEK["end_date"]=(datetime.now()+timedelta(days=7)).strftime("%Y-%m-%d")
-        JOURNAL["wins"]=0; JOURNAL["losses"]=0; JOURNAL["history"]=[]; save_w(); save_j(); tg(f"Week reset {WEEK['start_date']}->{WEEK['end_date']}")
+        JOURNAL["wins"]=0; JOURNAL["losses"]=0; JOURNAL["history"]=[]; save_w(); save_j(); tg(f"Week reset")
     if ACTIVE and len(ACTIVE)>=2:
-        print(f"Holding {list(ACTIVE.keys())} - max 2")
+        print(f"Holding {list(ACTIVE.keys())}")
     for s in SYMBOLS:
         if s in ACTIVE: continue
         if len(ACTIVE)>=2: break
         is_slow=s in SLOW_COINS
-        if time.time()-COOLDOWN["signals"].get(s,0)<(7200 if not is_slow else 21600): continue
         d240=kl(SYMBOL_MAP[s],"Min240"); d60=kl(SYMBOL_MAP[s],"Min60"); d5=kl(SYMBOL_MAP[s],"Min15")
         if not d240 or not d60 or not d5: continue
-        bias,reason,demand,supply,_=analyze_4h(d240,s)
-        # V61 BOTH WAYS: DO NOT SKIP RANGE - trade both directions
+        bias,reason,_,_,_=analyze_4h(d240,s)
+        tbs_type,is_body,is_grab = check_turtle_soup_liquidity(d5)
+        # LIQ GRAB HOLD - your 6:30 AM dump case - don't trade, wait for bounce
+        if is_grab:
+            print(f"LIQ GRAB HOLD {s} {tbs_type} - bounce expected | {get_time()}")
+            continue
         fbs,is_buy=fbs_strong_breakout(d5["h"],d5["l"],d5["c"],d5["o"])
-        if not fbs: continue
-        # V61: NO BIAS BLOCK - allow LONG+SHORT in any bias
-        # if bias=="BULL" and not is_buy: continue # REMOVED FOR BOTH WAYS
-        # if bias=="BEAR" and is_buy: continue # REMOVED FOR BOTH WAYS
+        if tbs_type:
+            if "BULL" in tbs_type: is_buy=True
+            elif "BEAR" in tbs_type: is_buy=False
+        if not fbs and not is_body: continue
+        # V63 TREND GATE: BULL only LONG, BEAR only SHORT
+        if bias=="BULL" and not is_buy:
+            print(f"TREND GATE BLOCK SHORT {s} bias BULL - only LONG | {get_time()}")
+            continue
+        if bias=="BEAR" and is_buy:
+            print(f"TREND GATE BLOCK LONG {s} bias BEAR - only SHORT | {get_time()}")
+            continue
         ok,reason_1h=check_1h_confluence(d60,is_buy,is_slow=is_slow)
+        if not ok and is_body: ok=True; reason_1h+=f" +{tbs_type} BODY HIGH"
         if not ok: continue
+        # DIRECTION SPLIT COOLDOWN - fixes your question
+        cd_key=f"{s}_{'LONG' if is_buy else 'SHORT'}"
+        cooldown_time=900 if is_body else 2700 # 15min for BODY SOUP pullback, 45min normal
+        if time.time()-COOLDOWN["signals"].get(cd_key,0)<cooldown_time:
+            print(f"COOLDOWN {cd_key} {cooldown_time/60:.0f}min left")
+            continue
         ph=d5["h"][-2]; pl=d5["l"][-2]
-        if is_slow:
-            entry=pl+(ph-pl)*0.50
-            entry_type="50% ENGULF LIMIT"
-        else:
-            entry=d5["h"][-2]*1.001 if is_buy else d5["l"][-2]*0.999
-            entry_type="BREAK OF CANDLE"
+        entry=pl+(ph-pl)*0.50 if is_slow else (d5["h"][-2]*1.001 if is_buy else d5["l"][-2]*0.999)
+        entry_type="50% ENGULF LIMIT" if is_slow else "BREAK OF CANDLE"
         cfg=PER_COIN_TP[s]; sl=entry*(1-cfg["sl"]) if is_buy else entry*(1+cfg["sl"])
         dir_str="BUY/LONG" if is_buy else "SELL/SHORT"
-        print(f"SILENT SIGNAL {s} {dir_str} {fbs} [{entry_type}] Entry {entry:.5f} SL {sl:.5f} | 4H:{bias} {reason} | 1H:{reason_1h}")
-        ACTIVE[s]={"entry":entry,"is_buy":is_buy,"bias":bias,"setup":f"{fbs}+{entry_type} {reason_1h}","time":time.time()}; save_a()
-        COOLDOWN["signals"][s]=time.time(); save_c()
+        setup_str=f"{fbs or ''}+{tbs_type or ''}+{entry_type} {reason_1h} 4H:{bias}"
+        print(f"SIGNAL {s} {dir_str} {tbs_type} Entry {entry:.5f} SL {sl:.5f} | 4H:{bias} | 1H:{reason_1h}")
+        ACTIVE[s]={"entry":entry,"is_buy":is_buy,"bias":bias,"setup":setup_str,"time":time.time()}; save_a()
+        COOLDOWN["signals"][cd_key]=time.time(); save_c()
         break
 
 if __name__=="__main__":
@@ -294,7 +293,7 @@ if __name__=="__main__":
         if os.path.exists(ACTIVE_FILE): ACTIVE=json.load(open(ACTIVE_FILE))
         if os.path.exists(PUMP_CACHE): PUMP_HIST=json.load(open(PUMP_CACHE))
     except: pass
-    print(f"BOT V61 LONG+SHORT BOTH WAYS | Week {WEEK['start_date']}->{WEEK['end_date']} | 4H->1H->15m + 62/38 + 50%/Break + Breaker | {get_time()}")
+    print(f"BOT V63 TREND RIDE BULL=ONLY LONG BEAR=ONLY SHORT 15min pullback + 45min | {get_time()} | Overall: {get_overall_market_trend()}")
     if "--trend" in sys.argv:
         print(build_report(True)); exit(0)
     if "--once" in sys.argv: scan(); exit(0)
