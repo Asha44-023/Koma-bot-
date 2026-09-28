@@ -1,5 +1,8 @@
 import time, requests, json, os, sys
 from datetime import datetime
+import pytz
+
+EAT = pytz.timezone("Africa/Nairobi")
 
 # MEXC SYMBOLS with underscore!
 SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT"]
@@ -16,7 +19,7 @@ if "signals" not in COOLDOWN: COOLDOWN={"signals":{}}
 
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
-def get_time(): return datetime.now().strftime("%Y-%m-%d %H:%M")
+def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def tg(msg):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=5)
     except: pass
@@ -24,7 +27,6 @@ def tg(msg):
 
 def kl(symbol, interval):
     try:
-        # Map your intervals to MEXC intervals
         mexc_interval = interval
         if interval == "Min240": mexc_interval = "Hour4"
         if interval == "Min60": mexc_interval = "Min60"
@@ -33,7 +35,6 @@ def kl(symbol, interval):
         url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={mexc_interval}"
         r = requests.get(url, timeout=10).json()
         d = r["data"] if "data" in r else r
-        # MEXC returns column arrays
         return {"o":[float(x) for x in d["open"][-200:]],"h":[float(x) for x in d["high"][-200:]],"l":[float(x) for x in d["low"][-200:]],"c":[float(x) for x in d["close"][-200:]]}
     except Exception as e:
         print(f"kl err {symbol} {e}")
@@ -98,11 +99,14 @@ def manage():
         if is_buy and price>=tp2 or not is_buy and price<=tp2:
             tg(f"✅✅ TP2 JUNCTION {s} {price:.5f} BOX COMPLETE\n{get_time()}"); del ACTIVE[s]; save_a()
 
+LAST_ID=0
 def poll_telegram_commands():
+    global LAST_ID
     try:
-        url=f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset=-5&timeout=2"
+        url=f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={LAST_ID+1}&timeout=2"
         r=requests.get(url, timeout=5).json()
-        for upd in r.get("result",[])[-3:]:
+        for upd in r.get("result",[]):
+            LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if not text: continue
             print(f"CMD: {text}")
