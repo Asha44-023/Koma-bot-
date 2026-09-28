@@ -1,12 +1,13 @@
 name: Run Crypto Bot V70 BOX STYLE
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/2 * * * *'
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,38 +20,22 @@ jobs:
           path: |
             cooldown.json
             active.json
-            last_update.json
-            pump_cache.json
-            last_trend.json
-            winloss.json
-            week_tracker.json
-          key: bot-cache-v70-box
+          key: bot-cache-v70-box-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v70-
-            bot-cache-
+            bot-cache-v70-box-
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
-          [ -f last_update.json ] || echo '{"id":0}' > last_update.json
-          [ -f pump_cache.json ] || echo '{}' > pump_cache.json
-          [ -f last_trend.json ] || echo '{"trend":"RANGE"}' > last_trend.json
-          [ -f winloss.json ] || echo '{"wins":0,"losses":0,"history":[]}' > winloss.json
-          [ -f week_tracker.json ] || echo '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
-      - name: Run bot
+      - name: Run bot 2.5 min loop
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python bot.py --once
-          echo "===ACTIVE==="
-          cat active.json
-          echo "===COOLDOWN==="
-          cat cooldown.json
-          echo "===LAST_UPDATE==="
-          cat last_update.json
+          timeout 150 python bot.py || true
+          echo "===ACTIVE==="; cat active.json
       - name: Save cache
         if: always()
         uses: actions/cache/save@v4
@@ -58,9 +43,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-            last_update.json
-            pump_cache.json
-            last_trend.json
-            winloss.json
-            week_tracker.json
           key: bot-cache-v70-box-${{ github.run_id }}
