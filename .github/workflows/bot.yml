@@ -1,4 +1,4 @@
-name: Run Crypto Bot V65.1 FINAL 9/9 July+AutoTP
+name: Run Crypto Bot V66.1 SIMPLE BUY SELL
 
 on:
   schedule:
@@ -26,11 +26,11 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v65-1-${{ github.run_id }}
+          key: bot-cache-v66-1-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v66-1-
             bot-cache-v65-1-
             bot-cache-v65-
-            bot-cache-v63-
             bot-cache-
 
       - name: Ensure files
@@ -38,26 +38,25 @@ jobs:
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
           [ -f pump_cache.json ] || echo '{}' > pump_cache.json
-          [ -f last_trend.json ] || echo '{}' > last_trend.json
+          [ -f last_trend.json ] || echo '{"trend":"RANGE"}' > last_trend.json
           [ -f winloss.json ] || echo '{"wins":0,"losses":0,"history":[]}' > winloss.json
           [ -f week_tracker.json ] || echo '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot V65.1 FINAL 9/9
+      - name: Run bot V66.1 SIMPLE
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V65.1 FINAL 9/9 July Exact + AutoTP Hybrid ==="
+          echo "=== SCAN V66.1 SIMPLE BUY SELL + TP/SL + REVERSAL ==="
           python bot.py --once || true
-          echo "=== OVERALL MARKET TREND + SMART PLANS ==="
+          echo "=== OVERALL MARKET TREND ==="
           python bot.py --trend || true
           echo "=== FILES ==="
           cat active.json || echo "no active"
           cat winloss.json || echo "no winloss yet"
           cat week_tracker.json || echo "no week yet"
-          cat cooldown.json || echo "no cooldown yet"
 
       - name: Save cache
         if: always()
@@ -70,4 +69,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v65-1-${{ github.run_id }}
+          key: bot-cache-v66-1-${{ github.run_id }}
