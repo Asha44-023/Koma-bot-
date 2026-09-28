@@ -1,4 +1,4 @@
-name: Run Crypto Bot V61 LONG+SHORT BOTH WAYS
+name: Run Crypto Bot V63 TREND RIDE BULL LONG BEAR SHORT
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -25,10 +25,10 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v61-${{ github.run_id }}
+          key: bot-cache-v63-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v63-
             bot-cache-v61-
-            bot-cache-v60-
             bot-cache-
 
       - name: Ensure files
@@ -42,19 +42,20 @@ jobs:
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot V61 LONG+SHORT BOTH WAYS
+      - name: Run bot V63 TREND RIDE
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V61 LONG+SHORT ==="
+          echo "=== SCAN V63 TREND RIDE BULL=ONLY LONG BEAR=ONLY SHORT ==="
           python bot.py --once || true
-          echo "=== TREND + HOLDING ==="
+          echo "=== OVERALL MARKET TREND + HOLDING ==="
           python bot.py --trend || true
           echo "=== FILES ==="
           cat active.json || echo "no active"
           cat winloss.json || echo "no winloss yet"
           cat week_tracker.json || echo "no week yet"
+          cat cooldown.json || echo "no cooldown yet"
 
       - name: Save cache
         if: always()
@@ -67,4 +68,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v61-${{ github.run_id }}
+          key: bot-cache-v63-${{ github.run_id }}
