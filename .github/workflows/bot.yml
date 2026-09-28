@@ -1,5 +1,4 @@
 name: Run Crypto Bot V68 UNIVERSAL
-
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -13,9 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
-        run: pip install requests pytz
-
+      - run: pip install requests pytz
       - name: Restore cache
         uses: actions/cache/restore@v4
         with:
@@ -28,34 +25,24 @@ jobs:
             week_tracker.json
           key: bot-cache-v68
           restore-keys: |
-            bot-cache-v68-
-            bot-cache-v67-
             bot-cache-
-
       - name: Ensure files
         run: |
-          [ -f cooldown.json ] || printf '%s\n' '{"signals":{}}' > cooldown.json
-          [ -f active.json ] || printf '%s\n' '{}' > active.json
-          [ -f pump_cache.json ] || printf '%s\n' '{}' > pump_cache.json
-          [ -f last_trend.json ] || printf '%s\n' '{"trend":"RANGE"}' > last_trend.json
-          [ -f winloss.json ] || printf '%s\n' '{"wins":0,"losses":0,"history":[]}' > winloss.json
-          [ -f week_tracker.json ] || printf '%s\n' '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
-          rm -f /tmp/bot.lock
-          echo "ACTIVE:" && cat active.json
-          echo "COOLDOWN:" && cat cooldown.json
-
-      - name: Run bot V68
+          [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
+          [ -f active.json ] || echo '{}' > active.json
+          [ -f pump_cache.json ] || echo '{}' > pump_cache.json
+          [ -f last_trend.json ] || echo '{"trend":"RANGE"}' > last_trend.json
+          [ -f winloss.json ] || echo '{"wins":0,"losses":0,"history":[]}' > winloss.json
+          [ -f week_tracker.json ] || echo '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
+      - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python bot.py --once
-          echo "=== AFTER RUN ==="
+          python bot.py --once || python bot.py
           cat active.json
-          cat winloss.json
-
       - name: Save cache
         if: always()
         uses: actions/cache/save@v4
@@ -67,4 +54,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key
+          key: bot-cache-v68-${{ github.run_id }}
