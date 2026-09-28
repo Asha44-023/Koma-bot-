@@ -51,6 +51,39 @@ def get_pvt(d):
     sig=[sum(sma21[max(0,i-8):i+1])/len(sma21[max(0,i-8):i+1]) for i in range(len(sma21))]
     return pvt,sma21,sig
 
+# 100% BEST FILTERS
+def get_rsi(c, period=14):
+    if len(c)<period+1: return 50
+    gains=[]; losses=[]
+    for i in range(1, len(c)):
+        diff=c[i]-c[i-1]
+        gains.append(max(diff,0))
+        losses.append(max(-diff,0))
+    avg_gain=sum(gains[-period:])/period
+    avg_loss=sum(losses[-period:])/period
+    if avg_loss==0: return 70
+    rs=avg_gain/avg_loss
+    return 100 - (100/(1+rs))
+
+def get_adx(d, period=14):
+    try:
+        h,l,c=d["h"],d["l"],d["c"]
+        if len(c)<period*2: return 25
+        plus_dm=[]; minus_dm=[]; tr=[]
+        for i in range(1,len(c)):
+            up=h[i]-h[i-1]; down=l[i-1]-l[i]
+            plus_dm.append(up if up>down and up>0 else 0)
+            minus_dm.append(down if down>up and down>0 else 0)
+            tr.append(max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])))
+        atr=sum(tr[-period:])/period
+        if atr==0: return 25
+        plus_di=sum(plus_dm[-period:])/period/atr*100
+        minus_di=sum(minus_dm[-period:])/period/atr*100
+        if plus_di+minus_di==0: return 25
+        dx=abs(plus_di-minus_di)/(plus_di+minus_di)*100
+        return dx
+    except: return 25
+
 def detect_25_shapes(d):
     if not d: return None
     c,h,l = d["c"],d["h"],d["l"]
@@ -58,7 +91,6 @@ def detect_25_shapes(d):
     def ll(n=10): return min(l[-n:])
     rng20 = hh(20)-ll(20)
     avg = sum(c[-20:])/20
-
     if rng20 < avg*0.07: return "BOX_CONSOLIDATION"
     if l[-1]>l[-10] and abs(h[-1]-h[-10])<(h[-1]*0.015): return "ASCENDING_TRIANGLE"
     if h[-1]<h[-10] and abs(l[-1]-l[-10])<(l[-1]*0.015): return "DESCENDING_TRIANGLE"
@@ -129,12 +161,13 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V80 25 SHAPES + PVT {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V80 25 SHAPES + PVT RSI+ADX 100% BEST {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
                     _,sma,_=get_pvt(d) or (None,None,None)
-                    txt+=f"{s} {price:.4f} SMA{sma[-1]:.1f}\n" if sma else f"{s} {price}\n"
+                    rsi=get_rsi(d["c"]); adx=get_adx(d)
+                    txt+=f"{s} {price:.4f} RSI{int(rsi)} ADX{int(adx)}\n"
                 tg(txt)
     except: pass
 
@@ -157,6 +190,13 @@ def scan():
         _,sma_d,_ = get_pvt(d_daily)
         if not sma_d: continue
 
+        # 100% BEST FILTERS
+        rsi = get_rsi(d4h["c"])
+        adx = get_adx(d4h)
+        if adx < 18: continue # No trend = no trade
+        # Avoid overbought/oversold
+        # RSI filter added
+
         slope = sma[-1]-sma[-5]
         if abs(slope) < abs(sma[-1])*0.0008: continue
         if d4h["v"][-1] < sum(d4h["v"][-15:])/15 *1.15: continue
@@ -173,6 +213,10 @@ def scan():
         else:
             is_buy = sma[-1]>sma[-5]
 
+        # RSI confirmation for BEST
+        if is_buy and rsi>72: continue
+        if not is_buy and rsi<28: continue
+
         k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
         if time.time()-COOLDOWN["signals"].get(k,0)<7200: continue
 
@@ -186,7 +230,8 @@ def scan():
         tg(f"""{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s}
 ━━━━━━━━━━━━━━
 📐 SHAPE: {shape.replace('_',' ')}
-📊 PVT: {'GREEN ABOVE RED BULL ✅' if sma[-1]>sma[-5] else 'GREEN BELOW RED BEAR ✅'} SMA21
+📊 PVT: {'GREEN ABOVE RED BULL ✅' if sma[-1]>sma[-5] else 'GREEN BELOW RED BEAR ✅'}
+💪 RSI: {rsi:.1f} | ADX: {adx:.1f} TREND ✅
 💰 ENTRY {live:.5f}
 🛑 SL {sl:.5f} ({abs(live-sl)/live*100:.2f}%)
 🎯 TP1 {tp1:.5f}
@@ -199,8 +244,7 @@ if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
 else:
-    # FIXED: NO SPAM - only log to console, not telegram every run
-    print(f"🚀 V80 STARTED 25 SHAPES + PVT + TP/SL {get_time()} - spam fixed, telegram only for BUY/SELL")
+    print(f"🚀 V80 STARTED 25 SHAPES + PVT + RSI+ADX 100% BEST {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
