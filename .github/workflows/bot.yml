@@ -1,7 +1,7 @@
 name: Run Crypto Bot V60 IMAGES 100%
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15m - scan + trend + reversal + pump alerts
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -33,12 +33,12 @@ jobs:
 
       - name: Ensure files
         run: |
-          if [ ! -f cooldown.json ]; then echo '{"signals":{}}' > cooldown.json; fi
-          if [ ! -f active.json ]; then echo '{}' > active.json; fi
-          if [ ! -f pump_cache.json ]; then echo '{}' > pump_cache.json; fi
-          if [ ! -f last_trend.json ]; then echo '{}' > last_trend.json; fi
-          if [ ! -f winloss.json ]; then echo '{"wins":0,"losses":0,"history":[]}' > winloss.json; fi
-          if [ ! -f week_tracker.json ]; then echo "{\"start_date\":\"$(date +%F)\",\"end_date\":\"$(date -d '+7 days' +%F)\"}" > week_tracker.json; fi
+          [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
+          [ -f active.json ] || echo '{}' > active.json
+          [ -f pump_cache.json ] || echo '{}' > pump_cache.json
+          [ -f last_trend.json ] || echo '{}' > last_trend.json
+          [ -f winloss.json ] || echo '{"wins":0,"losses":0,"history":[]}' > winloss.json
+          [ -f week_tracker.json ] || echo '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
           rm -f /tmp/bot.lock
           ls -la
 
@@ -47,9 +47,24 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V60 - 4H->1H->15m 62/38 + 50%/Break + Breaker + Weekly Filter ==="
-          python bot.py --once
-          echo "=== TREND + REVERSAL + PUMP ALERTS (weekly + bias flip + instant) ==="
-          python bot.py --trend
-          echo "=== WEEK REPORT / HOLDING ==="
-          cat winloss
+          echo "=== SCAN V60 ==="
+          python bot.py --once || true
+          echo "=== TREND + HOLDING ==="
+          python bot.py --trend || true
+          echo "=== FILES ==="
+          cat active.json || echo "no active"
+          cat winloss.json || echo "no winloss yet"
+          cat week_tracker.json || echo "no week yet"
+
+      - name: Save cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            cooldown.json
+            active.json
+            pump_cache.json
+            last_trend.json
+            winloss.json
+            week_tracker.json
+          key: bot-cache-v60-${{ github.run_id }}
