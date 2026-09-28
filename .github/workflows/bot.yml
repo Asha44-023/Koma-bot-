@@ -1,4 +1,4 @@
-name: Run Crypto Bot V67 FULL SMC
+name: Run Crypto Bot V68 UNIVERSAL
 
 on:
   schedule:
@@ -26,8 +26,9 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v67
+          key: bot-cache-v68
           restore-keys: |
+            bot-cache-v68-
             bot-cache-v67-
             bot-cache-
 
@@ -43,13 +44,15 @@ jobs:
           echo "ACTIVE:" && cat active.json
           echo "COOLDOWN:" && cat cooldown.json
 
-      - name: Run bot V67
+      - name: Run bot V68
         env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python bot.py --once
-          python bot.py --trend || true
+          echo "=== AFTER RUN ==="
           cat active.json
           cat winloss.json
 
@@ -64,4 +67,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v67
+          key
