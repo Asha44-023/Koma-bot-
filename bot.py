@@ -3,16 +3,13 @@ from datetime import datetime
 import pytz
 
 EAT = pytz.timezone("Africa/Nairobi")
-
-# MEXC SYMBOLS with underscore!
 SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT"]
-SYMBOL_MAP = {s:s for s in SYMBOLS}
 
-TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "YOUR_TOKEN"
-TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_CHAT"
+TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "8500000000:XXXX"
+TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_CHAT_ID"
 
-ACTIVE_FILE = "active.json"
 COOLDOWN_FILE = "cooldown.json"
+ACTIVE_FILE = "active.json"
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
 COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{}}
 if "signals" not in COOLDOWN: COOLDOWN={"signals":{}}
@@ -21,21 +18,18 @@ def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def tg(msg):
-    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=5)
+    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=8)
     except: pass
     print(msg)
 
 def kl(symbol, interval):
     try:
-        mexc_interval = interval
-        if interval == "Min240": mexc_interval = "Hour4"
-        if interval == "Min60": mexc_interval = "Min60"
-        if interval == "Min15": mexc_interval = "Min15"
-        if interval == "Day1": mexc_interval = "Day1"
+        mexc_interval = "Hour4" if interval=="Min240" else interval
         url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={mexc_interval}"
         r = requests.get(url, timeout=10).json()
         d = r["data"] if "data" in r else r
-        return {"o":[float(x) for x in d["open"][-200:]],"h":[float(x) for x in d["high"][-200:]],"l":[float(x) for x in d["low"][-200:]],"c":[float(x) for x in d["close"][-200:]]}
+        vols = d.get("vol", d.get("volume", d.get("amount", [0]*300)))
+        return {"o":[float(x) for x in d["open"][-200:]],"h":[float(x) for x in d["high"][-200:]],"l":[float(x) for x in d["low"][-200:]],"c":[float(x) for x in d["close"][-200:]],"v":[float(x) for x in vols[-200:]]}
     except Exception as e:
         print(f"kl err {symbol} {e}")
         return None
@@ -44,43 +38,69 @@ def get_live_price(s):
     try:
         url = f"https://contract.mexc.com/api/v1/contract/ticker?symbol={s}"
         r = requests.get(url, timeout=5).json()
-        data = r["data"] if "data" in r else r
-        return float(data["lastPrice"])
+        return float((r["data"] if "data" in r else r)["lastPrice"])
     except: return None
 
-def get_rsi(closes, period=14):
-    if len(closes)<period+1: return 50
-    gains,losses=0,0
-    for i in range(1,period+1):
-        d=closes[-i]-closes[-i-1]
-        if d>0: gains+=d
-        else: losses+=-d
-    if losses==0: return 80
-    return 100-(100/(1+gains/losses))
+def get_pvt(d):
+    if not d or len(d["c"])<30: return None,None,None
+    pvt=[0]
+    for i in range(1,len(d["c"])):
+        prev=d["c"][i-1] or 1
+        pvt.append(pvt[-1] + ((d["c"][i]-prev)/prev)*d["v"][i])
+    sma21=[sum(pvt[max(0,i-20):i+1])/len(pvt[max(0,i-20):i+1]) for i in range(len(pvt))]
+    sig=[sum(sma21[max(0,i-8):i+1])/len(sma21[max(0,i-8):i+1]) for i in range(len(sma21))]
+    return pvt,sma21,sig
 
-def get_crt_levels(d):
-    if not d: return None,None
-    return max(d["h"][-30:]), min(d["l"][-30:])
+def detect_25_shapes(d):
+    if not d: return None
+    c,h,l = d["c"],d["h"],d["l"]
+    def hh(n=10): return max(h[-n:])
+    def ll(n=10): return min(l[-n:])
+    rng20 = hh(20)-ll(20)
+    avg = sum(c[-20:])/20
 
-def analyze_4h_full(d,s):
-    if not d: return "NEUTRAL",0
-    ema50=sum(d["c"][-50:])/50
-    return ("BULL" if d["c"][-1]>ema50 else "BEAR"), ema50
+    if rng20 < avg*0.07: return "BOX_CONSOLIDATION"
+    if l[-1]>l[-10] and abs(h[-1]-h[-10])<(h[-1]*0.015): return "ASCENDING_TRIANGLE"
+    if h[-1]<h[-10] and abs(l[-1]-l[-10])<(l[-1]*0.015): return "DESCENDING_TRIANGLE"
+    if h[-1]<h[-10] and l[-1]>l[-10]: return "SYMMETRICAL_TRIANGLE"
+    if h[-1]<h[-5] and l[-1]<l[-5] and (h[-1]-l[-1])<(h[-5]-l[-5])*0.9: return "FALLING_WEDGE_BULLISH"
+    if h[-1]>h[-5] and l[-1]>l[-5] and (h[-1]-l[-1])<(h[-5]-l[-5])*0.9: return "RISING_WEDGE_BEARISH"
+    if c[-1]>c[-20]*1.05 and rng20 < avg*0.04: return "BULL_FLAG"
+    if c[-1]<c[-20]*0.95 and rng20 < avg*0.04: return "BEAR_FLAG"
+    if c[-1]>c[-10] and h[-1]<h[-5] and l[-1]>l[-5]: return "BULL_PENNANT"
+    if c[-1]<c[-10] and h[-1]<h[-5] and l[-1]>l[-5]: return "BEAR_PENNANT"
+    if abs(h[-1]-h[-15])<h[-1]*0.012: return "DOUBLE_TOP_BEARISH"
+    if abs(l[-1]-l[-15])<l[-1]*0.012: return "DOUBLE_BOTTOM_BULLISH"
+    if len(h)>25 and h[-15]>h[-5] and h[-15]>h[-25]: return "HEAD_SHOULDERS_BEARISH"
+    if len(l)>25 and l[-15]<l[-5] and l[-15]<l[-25]: return "INV_HEAD_SHOULDERS_BULLISH"
+    if c[-1]>hh(20)*1.002: return "BREAKOUT_BOX_TOP"
+    if c[-1]<ll(20)*0.998: return "BREAKDOWN_BOX_BOTTOM"
+    if c[-1]>c[-10] and l[-1]>l[-10]: return "ASCENDING_CHANNEL_BULL"
+    if c[-1]<c[-10] and h[-1]<h[-10]: return "DESCENDING_CHANNEL_BEAR"
+    if c[-20]<c[-10] and c[-1]>c[-10]: return "CUP_AND_HANDLE_BULLISH"
+    if abs(h[-1]-h[-8])<avg*0.01 and abs(l[-1]-l[-8])<avg*0.01: return "RECTANGLE_RANGE"
+    if h[-1]>h[-2] and l[-1]>l[-2] and c[-1]>c[-2]: return "HIGHER_HIGH_BULLISH"
+    if h[-1]<h[-2] and l[-1]<l[-2] and c[-1]<c[-2]: return "LOWER_LOW_BEARISH"
+    if c[-1]>c[-2] and h[-1]==hh(5): return "BULLISH_ENGULFING_BREAK"
+    if c[-1]<c[-2] and l[-1]==ll(5): return "BEARISH_ENGULFING_BREAK"
+    if rng20 < avg*0.12 and c[-1]>avg: return "ROUNDING_BOTTOM_BULLISH"
+    return "RANGE_CHOP"
 
-def detect_liquidity_1h(d):
-    if not d: return False,False
-    if d["h"][-1]>max(d["h"][-10:-1]): return True,False
-    if d["l"][-1]<min(d["l"][-10:-1]): return False,True
-    return False,False
-
-def fbs_strong_breakout_62(d15):
-    if not d15 or len(d15["c"])<3: return None,None,False
-    body=abs(d15["c"][-2]-d15["o"][-2]); prev=abs(d15["c"][-3]-d15["o"][-3])
-    if prev==0: return None,None,False
-    return f"FBS_{body/prev:.2f}", d15["c"][-2]>d15["o"][-2], body/prev>=0.62
-
-def get_tps(entry,is_buy,ch,cl):
-    return (entry+(ch-entry)*0.5, ch) if is_buy else (entry-(entry-cl)*0.5, cl)
+def get_tps_sl(entry, is_buy, d4h, d_daily):
+    atr = sum([d4h["h"][i]-d4h["l"][i] for i in range(-14,0)])/14
+    ch = max(d_daily["h"][-30:])
+    cl = min(d_daily["l"][-30:])
+    if is_buy:
+        sl = min(d4h["l"][-3:]) * 0.997
+        if sl>=entry*0.995: sl=entry*0.97
+        tp1 = entry + atr*1.5
+        tp2 = ch
+    else:
+        sl = max(d4h["h"][-3:]) * 1.003
+        if sl<=entry*1.005: sl=entry*1.03
+        tp1 = entry - atr*1.5
+        tp2 = cl
+    return tp1, tp2, sl, ch, cl
 
 def manage():
     for s,data in list(ACTIVE.items()):
@@ -89,7 +109,7 @@ def manage():
         entry,is_buy,sl=data["entry"],data["is_buy"],data["sl"]
         ch,cl=data.get("crt_high"),data.get("crt_low")
         if not ch: continue
-        tp1,tp2=get_tps(entry,is_buy,ch,cl)
+        tp1,tp2=data.get("tp1"),data.get("tp2")
         if is_buy and price<=sl or not is_buy and price>=sl:
             tg(f"❌ STOP {s} {price:.5f}\n{get_time()}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit"):
@@ -108,76 +128,80 @@ def poll_telegram_commands():
         for upd in r.get("result",[]):
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
-            if not text: continue
-            print(f"CMD: {text}")
             if "/status" in text.lower():
-                txt=f"V70 MEXC BOX {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
-                for s in SYMBOLS[:6]:
-                    d15=kl(s,"Min15"); price=get_live_price(s) or 0
-                    if not d15: continue
-                    txt+=f"{s} {price:.4f} RSI{int(get_rsi(d15['c']))}\n"
+                txt=f"V80 25 SHAPES + PVT {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                for s in SYMBOLS[:4]:
+                    d=kl(s,"Min240"); price=get_live_price(s) or 0
+                    if not d: continue
+                    _,sma,_=get_pvt(d) or (None,None,None)
+                    txt+=f"{s} {price:.4f} SMA{sma[-1]:.1f}\n" if sma else f"{s} {price}\n"
                 tg(txt)
-    except Exception as e: print(f"poll err {e}")
+    except: pass
 
 def scan():
     manage()
-    if len(ACTIVE)>=2: return
+    if len(ACTIVE)>=3: return
+    # BTC crash filter
+    try:
+        btc=kl("BTC_USDT","Min240")
+        if btc and btc["c"][-1] < btc["c"][-2]*0.97:
+            print("BTC DUMP PAUSE"); return
+    except: pass
+
     for s in SYMBOLS:
         if s in ACTIVE: continue
-        d_daily=kl(s,"Day1"); d240=kl(s,"Min240"); d15=kl(s,"Min15")
-        if not d240 or not d15: continue
-        rsi_15=get_rsi(d15["c"],14); ch,cl=get_crt_levels(d_daily)
-        live=get_live_price(s) or d15["c"][-1]
-        if not ch: continue
-        rng=ch-cl or 1
-        pct=(live-cl)/rng*100
-        if 15<pct<85: zone=f"MID {pct:.0f}%"
-        else: zone="JUNC"
-        is_mid=15<pct<85
-        bias,_=analyze_4h_full(d240,s)
-        bl,rl=detect_liquidity_1h(d15)
-        fbs,is_buy_fbs,is_strong=fbs_strong_breakout_62(d15)
-        is_buy=None
-        if is_strong and fbs: is_buy=is_buy_fbs
+        d_daily=kl(s,"Day1"); d4h=kl(s,"Min240"); d15=kl(s,"Min15")
+        if not d4h or not d_daily: continue
+
+        pvt,sma,sig = get_pvt(d4h)
+        if not pvt: continue
+        _,sma_d,_ = get_pvt(d_daily)
+        if not sma_d: continue
+
+        slope = sma[-1]-sma[-5]
+        if abs(slope) < abs(sma[-1])*0.0008: continue
+        if d4h["v"][-1] < sum(d4h["v"][-15:])/15 *1.15: continue
+        if (sma_d[-1]>sma_d[-5])!= (sma[-1]>sma[-5]): continue
+
+        shape = detect_25_shapes(d4h)
+        if shape in ["RANGE_CHOP","BOX_CONSOLIDATION","RECTANGLE_RANGE"]: continue
+
+        is_buy = True
+        if any(x in shape for x in ["BEARISH","BEAR","DESCENDING","BREAKDOWN","DOUBLE_TOP","HEAD_SHOULDERS","LOWER_LOW"]):
+            is_buy=False
+        if any(x in shape for x in ["BULLISH","BULL","ASCENDING","BREAKOUT","DOUBLE_BOTTOM","INV_HEAD","HIGHER_HIGH","CUP","FALLING_WEDGE"]):
+            is_buy=True
         else:
-            if bl: is_buy=True
-            if rl: is_buy=False
-        if is_buy is None: continue
-        if is_mid and not is_strong: continue
-        if bias=="BULL" and not is_buy: continue
-        if bias=="BEAR" and is_buy: continue
-        k=f"{s}_{'LONG' if is_buy else 'SHORT'}"
-        if time.time()-COOLDOWN["signals"].get(k,0)<1800: continue
-        entry=(d15["h"][-2]+d15["l"][-2])/2; sl=d15["l"][-2]*0.998 if is_buy else d15["h"][-2]*1.002
-        ACTIVE[s]={"entry":entry,"is_buy":is_buy,"time":time.time(),"sl":sl,"crt_high":ch,"crt_low":cl}; save_a()
+            is_buy = sma[-1]>sma[-5]
+
+        k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
+        if time.time()-COOLDOWN["signals"].get(k,0)<7200: continue
+
+        live=get_live_price(s) or d4h["c"][-1]
+        tp1,tp2,sl,ch,cl = get_tps_sl(live, is_buy, d4h, d_daily)
+        exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
+
+        ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"crt_high":ch,"crt_low":cl,"time":time.time()}; save_a()
         COOLDOWN["signals"][k]=time.time(); save_c()
-        tp1,tp2=get_tps(entry,is_buy,ch,cl)
-        exp_pct=((tp2-entry)/entry*100) if is_buy else ((entry-tp2)/entry*100)
-        if is_buy:
-            tg(f"""🟢 BUY {s} {zone}
+
+        tg(f"""{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s}
 ━━━━━━━━━━━━━━
-🟩 BUY BOX: {d15['l'][-2]:.5f} - {d15['h'][-2]:.5f}
-🟥 SELL BOX: {ch:.5f} (Long TP)
-TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%)
-ENTRY {entry:.5f} SL {sl:.5f}
-{fbs} 4H {bias} RSI {rsi_15:.0f}
-Live {live:.5f} {get_time()}""")
-        else:
-            tg(f"""🔴 SELL {s} {zone}
-━━━━━━━━━━━━━━
-🟥 SELL BOX: {d15['l'][-2]:.5f} - {d15['h'][-2]:.5f}
-🟩 BUY BOX: {cl:.5f} (Short TP)
-TP1 {tp1:.5f} TP2 {tp2:.5f} ({exp_pct:.1f}%)
-ENTRY {entry:.5f} SL {sl:.5f}
-{fbs} 4H {bias} RSI {rsi_15:.0f}
-Live {live:.5f} {get_time()}""")
+📐 SHAPE: {shape.replace('_',' ')}
+📊 PVT: {'GREEN ABOVE RED BULL ✅' if sma[-1]>sma[-5] else 'GREEN BELOW RED BEAR ✅'} SMA21
+💰 ENTRY {live:.5f}
+🛑 SL {sl:.5f} ({abs(live-sl)/live*100:.2f}%)
+🎯 TP1 {tp1:.5f}
+🎯 TP2 {tp2:.5f} ({exp:.1f}% to CRT)
+📦 CRT High {ch:.5f} Low {cl:.5f}
+⏰ {get_time()}""")
         break
 
 if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
 else:
+    tg(f"🚀 V80 STARTED 25 SHAPES + PVT + TP/SL {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
-        time.sleep(10)
+        time.sleep(30)
