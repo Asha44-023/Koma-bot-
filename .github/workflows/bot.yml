@@ -1,4 +1,5 @@
-name: Run Crypto Bot V63 TREND RIDE BULL LONG BEAR SHORT
+name: Run Crypto Bot V65.1 FINAL 9/9 July+AutoTP
+
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -25,10 +26,11 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v63-${{ github.run_id }}
+          key: bot-cache-v65-1-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v65-1-
+            bot-cache-v65-
             bot-cache-v63-
-            bot-cache-v61-
             bot-cache-
 
       - name: Ensure files
@@ -42,14 +44,14 @@ jobs:
           rm -f /tmp/bot.lock
           ls -la
 
-      - name: Run bot V63 TREND RIDE
+      - name: Run bot V65.1 FINAL 9/9
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V63 TREND RIDE BULL=ONLY LONG BEAR=ONLY SHORT ==="
+          echo "=== SCAN V65.1 FINAL 9/9 July Exact + AutoTP Hybrid ==="
           python bot.py --once || true
-          echo "=== OVERALL MARKET TREND + HOLDING ==="
+          echo "=== OVERALL MARKET TREND + SMART PLANS ==="
           python bot.py --trend || true
           echo "=== FILES ==="
           cat active.json || echo "no active"
@@ -68,4 +70,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v63-${{ github.run_id }}
+          key: bot-cache-v65-1-${{ github.run_id }}
