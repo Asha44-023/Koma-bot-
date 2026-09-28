@@ -1,4 +1,4 @@
-name: Run Crypto Bot V66.1 SIMPLE BUY SELL
+name: Run Crypto Bot V67 FULL SMC
 
 on:
   schedule:
@@ -26,47 +26,29 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v66-1-${{ github.run_id }}
+          key: bot-cache-v67-${{ github.run_id }}
           restore-keys: |
+            bot-cache-v67-
             bot-cache-v66-1-
-            bot-cache-v65-1-
             bot-cache-v65-
-            bot-cache-
 
-      - name: Ensure files
+      - name: Ensure files RESET for V67
         run: |
-          [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
-          [ -f active.json ] || echo '{}' > active.json
+          echo '{"signals":{}}' > cooldown.json
+          echo '{}' > active.json
           [ -f pump_cache.json ] || echo '{}' > pump_cache.json
           [ -f last_trend.json ] || echo '{"trend":"RANGE"}' > last_trend.json
           [ -f winloss.json ] || echo '{"wins":0,"losses":0,"history":[]}' > winloss.json
           [ -f week_tracker.json ] || echo '{"start_date":"2026-09-28","end_date":"2026-10-05"}' > week_tracker.json
           rm -f /tmp/bot.lock
           ls -la
+          cat bot.py | head -20
 
-      - name: Run bot V66.1 SIMPLE
+      - name: Run bot V67 FULL LOGIC
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "=== SCAN V66.1 SIMPLE BUY SELL + TP/SL + REVERSAL ==="
+          echo "=== SCAN V67 CRT+TBS+BOS+OB+FVG+62% ==="
           python bot.py --once || true
-          echo "=== OVERALL MARKET TREND ==="
-          python bot.py --trend || true
-          echo "=== FILES ==="
-          cat active.json || echo "no active"
-          cat winloss.json || echo "no winloss yet"
-          cat week_tracker.json || echo "no week yet"
-
-      - name: Save cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            cooldown.json
-            active.json
-            pump_cache.json
-            last_trend.json
-            winloss.json
-            week_tracker.json
-          key: bot-cache-v66-1-${{ github.run_id }}
+          echo "=== OVERALL
