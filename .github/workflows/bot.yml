@@ -2,7 +2,7 @@ name: Run Crypto Bot V80 25 SHAPES PVT
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Every 30 min for 4H scanner - no need every 2 min!
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -30,6 +30,7 @@ jobs:
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
+          ls -la *.py
 
       - name: Run bot V80 4 min loop
         env:
@@ -38,7 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          timeout 240 python v80.py || true
+          if [ -f v80.py ]; then timeout 240 python v80.py || true; else timeout 240 python bot.py || true; fi
           echo "===ACTIVE V80==="; cat active.json
           echo "===COOLDOWN==="; cat cooldown.json
 
@@ -49,4 +50,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v80-shapes-pvt-${{ github.run_id }} a 
+          key: bot-cache-v80-shapes-pvt-${{ github.run_id }}
