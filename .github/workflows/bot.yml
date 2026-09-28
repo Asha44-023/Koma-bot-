@@ -1,7 +1,7 @@
-name: Run Crypto Bot V68 UNIVERSAL
+name: Run Crypto Bot V69 MID ENABLED
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/10 * * * *' # every 10min so you catch MID moves fast like GRASS 0.55->0.69
   workflow_dispatch:
 
 jobs:
@@ -23,8 +23,9 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v68
+          key: bot-cache-v69-mid
           restore-keys: |
+            bot-cache-v69-
             bot-cache-
       - name: Ensure files
         run: |
@@ -42,7 +43,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python bot.py --once
+          echo "===ACTIVE==="
           cat active.json
+          echo "===COOLDOWN==="
+          cat cooldown.json
       - name: Save cache
         if: always()
         uses: actions/cache/save@v4
@@ -54,4 +58,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v68-${{ github.run_id }}
+          key: bot-cache-v69-mid-${{ github.run_id }}
