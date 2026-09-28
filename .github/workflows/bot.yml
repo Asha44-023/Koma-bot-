@@ -1,4 +1,4 @@
-name: Run Crypto Bot V69 MID ENABLED
+name: Run Crypto Bot V70 BOX STYLE
 on:
   schedule:
     - cron: '*/10 * * * *'
@@ -24,9 +24,9 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v69-mid
+          key: bot-cache-v70-box
           restore-keys: |
-            bot-cache-v69-
+            bot-cache-v70-
             bot-cache-
       - name: Ensure files
         run: |
@@ -63,4 +63,4 @@ jobs:
             last_trend.json
             winloss.json
             week_tracker.json
-          key: bot-cache-v69-mid-${{ github.run_id }}
+          key: bot-cache-v70-box-${{ github.run_id }}
