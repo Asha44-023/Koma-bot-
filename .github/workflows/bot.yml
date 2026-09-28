@@ -32,14 +32,14 @@ jobs:
           [ -f active.json ] || echo '{}' > active.json
           ls -la *.py
 
-      - name: Run bot V80 4 min loop
+      - name: Run bot V80
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          if [ -f v80.py ]; then timeout 240 python v80.py || true; else timeout 240 python bot.py || true; fi
+          if [ -f v80.py ]; then python v80.py --once || true; else python bot.py --once || true; fi
           echo "===ACTIVE V80==="; cat active.json
           echo "===COOLDOWN==="; cat cooldown.json
 
