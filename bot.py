@@ -141,7 +141,6 @@ def poll_telegram_commands():
 def scan():
     manage()
     if len(ACTIVE)>=3: return
-    # BTC crash filter
     try:
         btc=kl("BTC_USDT","Min240")
         if btc and btc["c"][-1] < btc["c"][-2]*0.97:
@@ -200,7 +199,8 @@ if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
 else:
-    tg(f"🚀 V80 STARTED 25 SHAPES + PVT + TP/SL {get_time()}")
+    # FIXED: NO SPAM - only log to console, not telegram every run
+    print(f"🚀 V80 STARTED 25 SHAPES + PVT + TP/SL {get_time()} - spam fixed, telegram only for BUY/SELL")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
