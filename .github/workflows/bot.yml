@@ -1,10 +1,8 @@
 name: Run Crypto Bot V86.1 FIXED CACHE
-
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -16,8 +14,8 @@ jobs:
           python-version: '3.11'
       - run: pip install requests pytz
 
-      - name: Restore cache V86.1
-        uses: actions/cache@v4
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
@@ -25,24 +23,25 @@ jobs:
           key: bot-cache-v86-1-${{ github.run_id }}
           restore-keys: |
             bot-cache-v86-1-
-            bot-cache-v86-rule012-div
-            
+
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
-          echo "=== ACTIVE BEFORE ==="; cat active.json
-          echo "=== COOLDOWN BEFORE ==="; cat cooldown.json
-          echo "=== BOT FILES ==="; ls -la *.py
+          cat active.json
+          cat cooldown.json
 
-      - name: Run bot V86.1
+      - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          # FORCE use bot.py only - no more v85 fallback!
-          if [ ! -f bot.py ]; then echo "bot.py NOT FOUND!"; ls -la; exit 1; fi
-          echo "FOUND BOT: bot.py"
-          python bot.py --once
-          echo "===ACTIVE V86.1 AFTER==="; cat active.json
-          echo "===COOLDOWN AFTER==="; cat cooldown.json
+        run: python bot.py --once
+
+      - name: Save cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            cooldown.json
+            active.json
+          key: bot-cache-v86-1-${{ github.run_id }}
