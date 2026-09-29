@@ -122,14 +122,20 @@ def get_tps_sl(entry, is_buy, d4h, d_daily):
     ch = max(d_daily["h"][-30:])
     cl = min(d_daily["l"][-30:])
     if is_buy:
-        sl = min(d4h["l"][-3:]) * 0.997
-        if sl>=entry*0.995: sl=entry*0.97
-        tp1 = entry + atr*1.5
+        swing_low = min(d4h["l"][-5:]) * 0.998
+        max_sl = entry * 0.965
+        sl = max(swing_low, max_sl)
+        if sl >= entry*0.995:
+            sl = entry * 0.965
+        tp1 = entry + atr*1.8
         tp2 = ch
     else:
-        sl = max(d4h["h"][-3:]) * 1.003
-        if sl<=entry*1.005: sl=entry*1.03
-        tp1 = entry - atr*1.5
+        swing_high = max(d4h["h"][-5:]) * 1.002
+        max_sl = entry * 1.035
+        sl = min(swing_high, max_sl)
+        if sl <= entry*1.005:
+            sl = entry * 1.035
+        tp1 = entry - atr*1.8
         tp2 = cl
     return tp1, tp2, sl, ch, cl
 
@@ -160,7 +166,7 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V82 ALT EDITION {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V83 ALT FIXED {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -191,7 +197,9 @@ def scan():
             print(f"{s} no data")
             continue
         pvt,sma,sig = get_pvt(d4h)
-        if not pvt: continue
+        if not pvt:
+            print(f"{s} no pvt")
+            continue
 
         rsi = get_rsi(d4h["c"])
         adx = get_adx(d4h)
@@ -200,29 +208,36 @@ def scan():
         shape = detect_25_shapes(d4h)
         print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x")
 
-        # === V82 100% ALT OKAY ===
         if adx < 12:
             print(f" -> BLOCKED ADX <12")
             continue
-        # VOL DISABLED FOR ALTS - your log proved it
-        # if vol_ratio < 0.3: continue
-        print(f" -> VOL OK {vol_ratio:.2f}x")
 
-        if shape in ["BOX_CONSOLIDATION","RECTANGLE_RANGE"]:
+        print(f" -> VOL OK {vol_ratio:.2f}x (disabled for alts)")
+
+        if shape in ["BOX_CONSOLIDATION","RECTANGLE_RANGE","RANGE_CHOP"]:
             print(f" -> BLOCKED SHAPE {shape}")
             continue
 
-        is_buy = True
-        if "FALLING_WEDGE_BULLISH" in shape: is_buy = True
-        elif any(x in shape for x in ["BEARISH","BEAR","DESCENDING","BREAKDOWN","DOUBLE_TOP","HEAD_SHOULDERS","LOWER_LOW"]):
-            is_buy=False
-        if any(x in shape for x in ["BULLISH","BULL","ASCENDING","BREAKOUT","DOUBLE_BOTTOM","INV_HEAD","HIGHER_HIGH","CUP"]):
-            is_buy=True
+        if "FALLING_WEDGE_BULLISH" in shape or "DOUBLE_BOTTOM" in shape or "INV_HEAD" in shape or "CUP_AND_HANDLE" in shape or "BREAKOUT_BOX_TOP" in shape or "BULL_FLAG" in shape or "ASCENDING" in shape or "HIGHER_HIGH" in shape or "BULL_PENNANT" in shape or "BULLISH_ENGULFING" in shape:
+            is_buy = True
+        elif "RISING_WEDGE_BEARISH" in shape or "DOUBLE_TOP" in shape or "HEAD_SHOULDERS" in shape or "BREAKDOWN_BOX_BOTTOM" in shape or "BEAR_FLAG" in shape or "DESCENDING" in shape or "LOWER_LOW" in shape or "BEAR_PENNANT" in shape or "BEARISH_ENGULFING" in shape:
+            is_buy = False
         else:
-            is_buy = sma[-1]>sma[-5]
+            is_buy = sma[-1] > sma[-5]
 
-        if is_buy and rsi>78: continue
-        if not is_buy and rsi<22: continue
+        if is_buy and "RISING_WEDGE_BEARISH" in shape:
+            print(f" -> SKIP BUY on RISING_WEDGE_BEARISH")
+            continue
+        if not is_buy and "FALLING_WEDGE_BULLISH" in shape:
+            print(f" -> SKIP SELL on FALLING_WEDGE_BULLISH")
+            continue
+
+        if is_buy and rsi>78:
+            print(f" -> BLOCKED RSI high {rsi:.1f}")
+            continue
+        if not is_buy and rsi<22:
+            print(f" -> BLOCKED RSI low {rsi:.1f}")
+            continue
 
         k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
         if time.time()-COOLDOWN["signals"].get(k,0)<3600:
@@ -232,6 +247,14 @@ def scan():
         live=get_live_price(s) or d4h["c"][-1]
         tp1,tp2,sl,ch,cl = get_tps_sl(live, is_buy, d4h, d_daily)
         exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
+        sl_pct = abs(live-sl)/live*100
+
+        if exp < 4.0:
+            print(f" -> BLOCKED TP too small {exp:.1f}% <4%")
+            continue
+        if sl_pct > 5.0:
+            print(f" -> BLOCKED SL too wide {sl_pct:.1f}% >5%")
+            continue
 
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"crt_high":ch,"crt_low":cl,"time":time.time()}; save_a()
         COOLDOWN["signals"][k]=time.time(); save_c()
@@ -242,12 +265,12 @@ def scan():
 📊 PVT: {'GREEN ABOVE RED BULL ✅' if sma[-1]>sma[-5] else 'GREEN BELOW RED BEAR ✅'}
 💪 RSI: {rsi:.1f} | ADX: {adx:.1f} TREND ✅
 💰 ENTRY {live:.5f}
-🛑 SL {sl:.5f} ({abs(live-sl)/live*100:.2f}%)
+🛑 SL {sl:.5f} ({sl_pct:.2f}%)
 🎯 TP1 {tp1:.5f}
 🎯 TP2 {tp2:.5f} ({exp:.1f}% to CRT)
 📦 CRT High {ch:.5f} Low {cl:.5f}
 ⏰ {get_time()}""")
-        print(f"*** SIGNAL SENT {s} ***")
+        print(f"*** SIGNAL SENT {s} {shape} ***")
         break
     print(f"=== SCAN DONE Hold:{list(ACTIVE.keys())} ===")
 
@@ -255,7 +278,7 @@ if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
 else:
-    print(f"🚀 V82 ALT EDITION STARTED {get_time()}")
+    print(f"🚀 V83 ALT FIXED STARTED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
