@@ -64,6 +64,13 @@ def get_rsi(c, period=14):
     rs=avg_gain/avg_loss
     return 100 - (100/(1+rs))
 
+def get_rsi_series(c, period=14):
+    rsis=[]
+    for i in range(len(c)):
+        if i<period: rsis.append(50)
+        else: rsis.append(get_rsi(c[:i+1], period))
+    return rsis
+
 def get_adx(d, period=14):
     try:
         h,l,c=d["h"],d["l"],d["c"]
@@ -117,24 +124,90 @@ def detect_25_shapes(d):
     if rng20 < avg*0.12 and c[-1]>avg: return "ROUNDING_BOTTOM_BULLISH"
     return "RANGE_CHOP"
 
+# ================= V86 EXACT RULE 0,1,2 =================
+MEME_LIST = ["FARTCOIN","JASMY","LAB","SENT","SIREN","KOMA"]
+CONTINUATION_BULL = ["BULL_FLAG","ASCENDING_TRIANGLE","ASCENDING_CHANNEL_BULL","CUP_AND_HANDLE_BULLISH","BULL_PENNANT","BREAKOUT_BOX_TOP","HIGHER_HIGH_BULLISH","BULLISH_ENGULFING_BREAK","ROUNDING_BOTTOM_BULLISH","BOX_CONSOLIDATION","RECTANGLE_RANGE","SYMMETRICAL_TRIANGLE"]
+CONTINUATION_BEAR = ["BEAR_FLAG","DESCENDING_TRIANGLE","DESCENDING_CHANNEL_BEAR","BEAR_PENNANT","BREAKDOWN_BOX_BOTTOM","LOWER_LOW_BEARISH","BEARISH_ENGULFING_BREAK","BOX_CONSOLIDATION","RECTANGLE_RANGE","SYMMETRICAL_TRIANGLE"]
+REVERSAL_BULL = ["FALLING_WEDGE_BULLISH","DOUBLE_BOTTOM_BULLISH","INV_HEAD_SHOULDERS_BULLISH"]
+REVERSAL_BEAR = ["RISING_WEDGE_BEARISH","DOUBLE_TOP_BEARISH","HEAD_SHOULDERS_BEARISH"]
+
+def check_divergence_bullish(prices, rsis):
+    # Last 20: two lows
+    try:
+        low1 = min(prices[-5:]); low2 = min(prices[-20:-5])
+        rsi_at_low1 = min(rsis[-5:]); rsi_at_low2 = min(rsis[-20:-5])
+        # Current floor lower but RSI floor higher = bullish div
+        if low1 < low2 and rsi_at_low1 > rsi_at_low2:
+            return True, f"Price {low2:.4f}->{low1:.4f} LL but RSI {rsi_at_low2:.1f}->{rsi_at_low1:.1f} HL"
+    except: pass
+    return False, ""
+
+def check_divergence_bearish(prices, rsis):
+    try:
+        high1 = max(prices[-5:]); high2 = max(prices[-20:-5])
+        rsi_at_high1 = max(rsis[-5:]); rsi_at_high2 = max(rsis[-20:-5])
+        if high1 > high2 and rsi_at_high1 < rsi_at_high2:
+            return True, f"Price {high2:.4f}->{high1:.4f} HH but RSI {rsi_at_high2:.1f}->{rsi_at_high1:.1f} LH"
+    except: pass
+    return False, ""
+
+def evaluate_v86(asset, shape, direction, current_rsi, prices, rsi_series):
+    # direction: "BUY" or "SELL"
+    # prices = last 20 closes, rsi_series = last 20 rsi
+
+    # RULE 0 MEME FIREWALL
+    is_meme = any(m in asset for m in MEME_LIST)
+    if is_meme:
+        last_24h_rsi = rsi_series[-6:] if len(rsi_series)>=6 else rsi_series
+        max_rsi_24h = max(last_24h_rsi) if last_24h_rsi else 0
+        min_rsi_24h = min(last_24h_rsi) if last_24h_rsi else 100
+        if max_rsi_24h > 85 and direction=="BUY":
+            return "CANCEL", f"RULE0 MEME PUMP BLOCK RSI {max_rsi_24h:.1f}>85"
+        if min_rsi_24h < 15 and direction=="SELL":
+            return "CANCEL", f"RULE0 MEME DUMP BLOCK RSI {min_rsi_24h:.1f}<15"
+
+    # Determine type
+    is_reversal = shape in REVERSAL_BULL + REVERSAL_BEAR
+    pattern_type = "Reversal" if is_reversal else "Continuation"
+
+    # RULE 1 CONTINUATION
+    if pattern_type=="Continuation":
+        if direction=="BUY":
+            if current_rsi > 68: return "CANCEL", f"CONT BUY overbought RSI {current_rsi:.1f}>68"
+            if current_rsi < 50: return "CANCEL", f"CONT BUY weak RSI {current_rsi:.1f}<50"
+            return "EXECUTE", f"CONT BUY sweet 50-68 RSI {current_rsi:.1f} ✅"
+        else:
+            if current_rsi < 32: return "CANCEL", f"CONT SELL oversold RSI {current_rsi:.1f}<32"
+            if current_rsi > 50: return "CANCEL", f"CONT SELL strong RSI {current_rsi:.1f}>50"
+            return "EXECUTE", f"CONT SELL sweet 32-50 RSI {current_rsi:.1f} ✅"
+
+    # RULE 2 REVERSAL
+    if pattern_type=="Reversal":
+        if direction=="BUY":
+            is_div, txt = check_divergence_bullish(prices, rsi_series)
+            if is_div: return "EXECUTE", f"REV BUY BULL DIV {txt} ✅"
+            if current_rsi < 35: return "EXECUTE", f"REV BUY oversold RSI {current_rsi:.1f}<35 ✅"
+            return "CANCEL", f"REV BUY no div RSI {current_rsi:.1f}"
+        else:
+            is_div, txt = check_divergence_bearish(prices, rsi_series)
+            if is_div: return "EXECUTE", f"REV SELL BEAR DIV {txt} ✅"
+            if current_rsi > 65: return "EXECUTE", f"REV SELL overbought RSI {current_rsi:.1f}>65 ✅"
+            return "CANCEL", f"REV SELL no div RSI {current_rsi:.1f}"
+
+    return "CANCEL", "Unknown"
+
 def get_tps_sl(entry, is_buy, d4h, d_daily):
     atr = sum([d4h["h"][i]-d4h["l"][i] for i in range(-14,0)])/14
     ch = max(d_daily["h"][-30:])
     cl = min(d_daily["l"][-30:])
     if is_buy:
-        swing_low = min(d4h["l"][-5:]) * 0.998
-        max_sl = entry * 0.965
-        sl = max(swing_low, max_sl)
-        if sl >= entry*0.995: sl = entry * 0.965
-        tp1 = entry + atr*1.8
-        tp2 = ch
+        sl = entry - (1.5 * atr)
+        tp2 = entry + (1.5 * atr * 2.0)
+        tp1 = entry + (1.5 * atr * 1.0) # halfway
     else:
-        swing_high = max(d4h["h"][-5:]) * 1.002
-        max_sl = entry * 1.035
-        sl = min(swing_high, max_sl)
-        if sl <= entry*1.005: sl = entry * 1.035
-        tp1 = entry - atr*1.8
-        tp2 = cl
+        sl = entry + (1.5 * atr)
+        tp2 = entry - (1.5 * atr * 2.0)
+        tp1 = entry - (1.5 * atr * 1.0)
     return tp1, tp2, sl, ch, cl
 
 def manage():
@@ -164,7 +237,7 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V85 STANDARD BUY+SELL {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V86 RULE0+1+2 {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -185,7 +258,7 @@ def scan():
             print("BTC DUMP PAUSE"); return
     except: pass
 
-    print(f"=== SCAN START {get_time()} ===")
+    print(f"=== SCAN V86 START {get_time()} ===")
     for s in SYMBOLS:
         if s in ACTIVE: print(f"{s} already active"); continue
         d_daily=kl(s,"Day1"); d4h=kl(s,"Min240")
@@ -193,78 +266,74 @@ def scan():
         pvt,sma,sig = get_pvt(d4h)
         if not pvt: print(f"{s} no pvt"); continue
 
-        rsi = get_rsi(d4h["c"]); adx = get_adx(d4h)
+        rsi = get_rsi(d4h["c"])
+        rsi_series_full = get_rsi_series(d4h["c"])
+        rsi_series_20 = rsi_series_full[-20:]
+        prices_20 = d4h["c"][-20:]
+        adx = get_adx(d4h)
         close = d4h["c"][-1]; ema20 = sum(d4h["c"][-20:])/20
-        daily_change = (close - d4h["o"][-1])/d4h["o"][-1]*100
         pvt_bull = sma[-1] > sma[-5]
         shape = detect_25_shapes(d4h)
 
-        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Daily:{daily_change:.1f}% PVT:{'BULL' if pvt_bull else 'BEAR'}")
+        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} PVT:{'BULL' if pvt_bull else 'BEAR'}")
 
         if adx < 18: print(f" -> BLOCKED ADX weak"); continue
 
-        # === SHAPES = DIRECTION BUY + SELL ===
-        BULL_SHAPES = ["FALLING_WEDGE_BULLISH","DOUBLE_BOTTOM_BULLISH","INV_HEAD_SHOULDERS_BULLISH","CUP_AND_HANDLE_BULLISH","BREAKOUT_BOX_TOP","BULL_FLAG","ASCENDING_TRIANGLE","ASCENDING_CHANNEL_BULL","HIGHER_HIGH_BULLISH","BULL_PENNANT","BULLISH_ENGULFING_BREAK","ROUNDING_BOTTOM_BULLISH"]
-        BEAR_SHAPES = ["RISING_WEDGE_BEARISH","DOUBLE_TOP_BEARISH","HEAD_SHOULDERS_BEARISH","BREAKDOWN_BOX_BOTTOM","BEAR_FLAG","DESCENDING_TRIANGLE","DESCENDING_CHANNEL_BEAR","LOWER_LOW_BEARISH","BEAR_PENNANT","BEARISH_ENGULFING_BREAK"]
-        MIDDLE_SHAPES = ["SYMMETRICAL_TRIANGLE","BOX_CONSOLIDATION","RECTANGLE_RANGE","RANGE_CHOP"]
-
+        # DIRECTION
         is_buy = None
-        if any(x in shape for x in BULL_SHAPES): is_buy = True
-        elif any(x in shape for x in BEAR_SHAPES): is_buy = False
-        elif shape in MIDDLE_SHAPES:
+        if shape in CONTINUATION_BULL or shape in REVERSAL_BULL: is_buy = True
+        elif shape in CONTINUATION_BEAR or shape in REVERSAL_BEAR: is_buy = False
+        else:
+            # middle shapes
             hh10 = max(d4h["h"][-10:]); ll10 = min(d4h["l"][-10:])
             if close > hh10*0.999 and pvt_bull: is_buy = True; print(f" -> MIDDLE {shape} BREAKOUT UP -> BUY")
             elif close < ll10*1.001 and not pvt_bull: is_buy = False; print(f" -> MIDDLE {shape} BREAKDOWN DOWN -> SELL")
             else: print(f" -> MIDDLE {shape} no breakout SKIP"); continue
-        else: print(f" -> SKIP {shape}"); continue
 
-        # === STANDARD TIGHT RSI OUT OF BOX 24-40 BUY / 60-76 SELL ===
-        if 42 <= rsi <= 58: print(f" -> BLOCKED BOX RSI {rsi:.1f} 42-58"); continue
-        if is_buy:
-            if not (24 <= rsi <= 40): print(f" -> BLOCKED BUY RSI {rsi:.1f} need 24-40"); continue
-        else:
-            if not (60 <= rsi <= 76): print(f" -> BLOCKED SELL RSI {rsi:.1f} need 60-76"); continue
+        direction = "BUY" if is_buy else "SELL"
+
+        # === V86 EVALUATION ===
+        decision, reason = evaluate_v86(s, shape, direction, rsi, prices_20, rsi_series_20)
+        print(f" -> {decision} {reason}")
+        if decision=="CANCEL": continue
 
         if is_buy and not pvt_bull: print(f" -> BLOCKED BUY PVT BEAR"); continue
         if not is_buy and pvt_bull: print(f" -> BLOCKED SELL PVT BULL"); continue
         if is_buy and close < ema20: print(f" -> BLOCKED BUY below EMA"); continue
         if not is_buy and close > ema20: print(f" -> BLOCKED SELL above EMA"); continue
-        if daily_change > 3.0 and not is_buy: print(f" -> BLOCKED SELL pump"); continue
-        if daily_change < -3.0 and is_buy: print(f" -> BLOCKED BUY dump"); continue
 
-        k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
+        k=f"{s}_{shape}_{direction}"
         if time.time()-COOLDOWN["signals"].get(k,0)<3600: print(f" -> COOLDOWN {k}"); continue
 
         live=get_live_price(s) or close
         tp1,tp2,sl,ch,cl = get_tps_sl(live, is_buy, d4h, d_daily)
-        exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
         sl_pct = abs(live-sl)/live*100
+        exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
         if exp < 4.0: print(f" -> BLOCKED TP {exp:.1f}% <4%"); continue
         if sl_pct > 5.0: print(f" -> BLOCKED SL {sl_pct:.1f}% >5%"); continue
 
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"crt_high":ch,"crt_low":cl,"time":time.time()}; save_a()
         COOLDOWN["signals"][k]=time.time(); save_c()
 
-        tg(f"""{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s}
+        tg(f"""{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s} V86
 ━━━━━━━━━━━━━━
-📐 SHAPE: {shape.replace('_',' ')} -> {'BULL' if is_buy else 'BEAR'}
-📊 PVT: {'GREEN ABOVE RED BULL ✅' if pvt_bull else 'GREEN BELOW RED BEAR ✅'}
-💪 RSI: {rsi:.1f} STANDARD {'24-40 BUY OUT OF BOX' if is_buy else '60-76 SELL OUT OF BOX'} ✅
-📈 ADX: {adx:.1f} + EMA20 ✅
+📐 SHAPE: {shape.replace('_',' ')} -> {direction} ({'Continuation' if shape not in REVERSAL_BULL+REVERSAL_BEAR else 'Reversal'})
+📊 PVT: {'BULL ✅' if pvt_bull else 'BEAR ✅'}
+📖 REASON: {reason}
+💪 RSI: {rsi:.1f} ADX: {adx:.1f}
 💰 ENTRY {live:.5f}
-🛑 SL {sl:.5f} ({sl_pct:.2f}%)
-🎯 TP1 {tp1:.5f} (1.8 ATR)
-🎯 TP2 {tp2:.5f} ({exp:.1f}% to CRT {'HIGH' if is_buy else 'LOW'})
-📦 CRT High {ch:.5f} Low {cl:.5f}
+🛑 SL {sl:.5f} ({sl_pct:.2f}%) 1.5 ATR
+🎯 TP1 {tp1:.5f} (1.0x BE move)
+🎯 TP2 {tp2:.5f} ({exp:.1f}% 2:1 RR)
 ⏰ {get_time()}""")
-        print(f"*** CLEAN SIGNAL {s} {shape} {'BUY' if is_buy else 'SELL'} ***")
+        print(f"*** V86 SIGNAL {s} {shape} {direction} ***")
         break
     print(f"=== SCAN DONE Hold:{list(ACTIVE.keys())} ===")
 
 if "--once" in sys.argv:
     poll_telegram_commands(); scan()
 else:
-    print(f"🚀 V85 BUY+SELL STANDARD CLEAN STARTED {get_time()}")
+    print(f"🚀 V86 CONTINUATION+REVERSAL DIV STARTED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
