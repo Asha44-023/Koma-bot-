@@ -1,4 +1,4 @@
-name: Run Crypto Bot V82 ALT EDITION FIXED
+name: Run Crypto Bot V83 ALT FIXED
 
 on:
   schedule:
@@ -16,14 +16,15 @@ jobs:
           python-version: '3.11'
       - run: pip install requests pytz
 
-      - name: Restore cache V82
+      - name: Restore cache V83
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v82-alt-fixed
+          key: bot-cache-v83-alt-fixed
           restore-keys: |
+            bot-cache-v83-
             bot-cache-v82-
             bot-cache-v81-
             bot-cache-v80-
@@ -37,28 +38,29 @@ jobs:
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
           echo "=== COOLDOWN BEFORE ==="; cat cooldown.json
+          echo "=== ACTIVE BEFORE ==="; cat active.json
 
-      - name: Run bot V82
+      - name: Run bot V83
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # PRIORITY bot.py for alts
+          # PRIORITY bot.py for alts - V83
           BOT_FILE=$(find . -name "bot.py" | head -n1)
           if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "v80.py" | head -n1); fi
           echo "FOUND BOT: $BOT_FILE"
           if [ -z "$BOT_FILE" ]; then echo "NO BOT FILE FOUND!"; exit 1; fi
           python "$BOT_FILE" --once
-          echo "===ACTIVE V82==="; cat active.json
+          echo "===ACTIVE V83 AFTER==="; cat active.json
           echo "===COOLDOWN AFTER==="; cat cooldown.json
 
-      - name: Save cache V82
+      - name: Save cache V83
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v82-alt-fixed
+          key: bot-cache-v83-alt-fixed
