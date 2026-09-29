@@ -1,4 +1,4 @@
-name: Run Crypto Bot V86 CONTINUATION + REVERSAL DIV
+name: Run Crypto Bot V86.1 FIXED CACHE
 
 on:
   schedule:
@@ -16,41 +16,33 @@ jobs:
           python-version: '3.11'
       - run: pip install requests pytz
 
-      - name: Restore cache V86
-        uses: actions/cache/restore@v4
+      - name: Restore cache V86.1
+        uses: actions/cache@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v86-rule012-div
-          
+          key: bot-cache-v86-1-${{ github.run_id }}
+          restore-keys: |
+            bot-cache-v86-1-
+            bot-cache-v86-rule012-div
+            
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
           echo "=== ACTIVE BEFORE ==="; cat active.json
           echo "=== COOLDOWN BEFORE ==="; cat cooldown.json
+          echo "=== BOT FILES ==="; ls -la *.py
 
-      - name: Run bot V86 CONT + REV
+      - name: Run bot V86.1
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          BOT_FILE=$(find . -name "bot.py" | head -n1)
-          if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "v86*.py" | head -n1); fi
-          if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "v85*.py" | head -n1); fi
-          echo "FOUND BOT: $BOT_FILE"
-          python "$BOT_FILE" --once
-          echo "===ACTIVE V86 AFTER==="; cat active.json
+          # FORCE use bot.py only - no more v85 fallback!
+          if [ ! -f bot.py ]; then echo "bot.py NOT FOUND!"; ls -la; exit 1; fi
+          echo "FOUND BOT: bot.py"
+          python bot.py --once
+          echo "===ACTIVE V86.1 AFTER==="; cat active.json
           echo "===COOLDOWN AFTER==="; cat cooldown.json
-
-      - name: Save cache V86
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            cooldown.json
-            active.json
-          key: bot-cache-v86-rule012-div
