@@ -160,7 +160,7 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V81 GRASS EDITION {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V82 ALT EDITION {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -190,58 +190,42 @@ def scan():
         if not d4h or not d_daily:
             print(f"{s} no data")
             continue
-
         pvt,sma,sig = get_pvt(d4h)
-        if not pvt:
-            print(f"{s} no pvt")
-            continue
-        _,sma_d,_ = get_pvt(d_daily)
-        if not sma_d: continue
+        if not pvt: continue
 
         rsi = get_rsi(d4h["c"])
         adx = get_adx(d4h)
         slope = sma[-1]-sma[-5]
         vol_ratio = d4h["v"][-1] / (sum(d4h["v"][-15:])/15) if sum(d4h["v"][-15:])>0 else 0
-
         shape = detect_25_shapes(d4h)
+        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x")
 
-        # LOUD LOG - you will see why
-        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x Slope:{slope:.2f}")
-
-        # === V81 LOOSE FILTERS FOR ALTS ===
+        # === V82 100% ALT OKAY ===
         if adx < 12:
             print(f" -> BLOCKED ADX <12")
             continue
-        if abs(slope) < abs(sma[-1])*0.0001:
-            print(f" -> BLOCKED SLOPE tiny")
-            continue
-        if vol_ratio < 0.90: # allow 0.9x not 1.15x
-            print(f" -> BLOCKED VOL {vol_ratio:.2f}")
-            continue
-        # DAILY VS 4H REMOVED FOR ALTS - this was killing GRASS!
-        # if (sma_d[-1]>sma_d[-5])!= (sma[-1]>sma[-5]): continue
+        # VOL DISABLED FOR ALTS - your log proved it
+        # if vol_ratio < 0.3: continue
+        print(f" -> VOL OK {vol_ratio:.2f}x")
 
-        if shape in ["RANGE_CHOP","BOX_CONSOLIDATION","RECTANGLE_RANGE"]:
+        if shape in ["BOX_CONSOLIDATION","RECTANGLE_RANGE"]:
             print(f" -> BLOCKED SHAPE {shape}")
             continue
 
         is_buy = True
-        if any(x in shape for x in ["BEARISH","BEAR","DESCENDING","BREAKDOWN","DOUBLE_TOP","HEAD_SHOULDERS","LOWER_LOW"]):
+        if "FALLING_WEDGE_BULLISH" in shape: is_buy = True
+        elif any(x in shape for x in ["BEARISH","BEAR","DESCENDING","BREAKDOWN","DOUBLE_TOP","HEAD_SHOULDERS","LOWER_LOW"]):
             is_buy=False
-        if any(x in shape for x in ["BULLISH","BULL","ASCENDING","BREAKOUT","DOUBLE_BOTTOM","INV_HEAD","HIGHER_HIGH","CUP","FALLING_WEDGE"]):
+        if any(x in shape for x in ["BULLISH","BULL","ASCENDING","BREAKOUT","DOUBLE_BOTTOM","INV_HEAD","HIGHER_HIGH","CUP"]):
             is_buy=True
         else:
             is_buy = sma[-1]>sma[-5]
 
-        if is_buy and rsi>78:
-            print(f" -> BLOCKED RSI high {rsi}")
-            continue
-        if not is_buy and rsi<22:
-            print(f" -> BLOCKED RSI low {rsi}")
-            continue
+        if is_buy and rsi>78: continue
+        if not is_buy and rsi<22: continue
 
         k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
-        if time.time()-COOLDOWN["signals"].get(k,0)<3600: # 1h cooldown not 2h
+        if time.time()-COOLDOWN["signals"].get(k,0)<3600:
             print(f" -> COOLDOWN {k}")
             continue
 
@@ -263,6 +247,7 @@ def scan():
 🎯 TP2 {tp2:.5f} ({exp:.1f}% to CRT)
 📦 CRT High {ch:.5f} Low {cl:.5f}
 ⏰ {get_time()}""")
+        print(f"*** SIGNAL SENT {s} ***")
         break
     print(f"=== SCAN DONE Hold:{list(ACTIVE.keys())} ===")
 
@@ -270,7 +255,7 @@ if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
 else:
-    print(f"🚀 V81 GRASS EDITION STARTED {get_time()}")
+    print(f"🚀 V82 ALT EDITION STARTED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
