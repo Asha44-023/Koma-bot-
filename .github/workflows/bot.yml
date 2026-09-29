@@ -1,4 +1,4 @@
-name: Run Crypto Bot V84 SMART TIGHT
+name: Run Crypto Bot V85 STANDARD BUY SELL CLEAN
 
 on:
   schedule:
@@ -16,18 +16,18 @@ jobs:
           python-version: '3.11'
       - run: pip install requests pytz
 
-      - name: Restore cache V84
+      - name: Restore cache V85
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v84-smart-tight
+          key: bot-cache-v85-standard-clean
           restore-keys: |
+            bot-cache-v85-
+            bot-cache-v84-smart-tight
             bot-cache-v84-
             bot-cache-v83-
-            bot-cache-v82-
-            bot-cache-v81-
 
       - name: Ensure files
         run: |
@@ -40,7 +40,7 @@ jobs:
           echo "=== COOLDOWN BEFORE ==="; cat cooldown.json
           echo "=== ACTIVE BEFORE ==="; cat active.json
 
-      - name: Run bot V84
+      - name: Run bot V85 BUY+SELL
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -48,20 +48,21 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           BOT_FILE=$(find . -name "bot.py" | head -n1)
+          if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "v85*.py" | head -n1); fi
           if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "v84*.py" | head -n1); fi
           if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "v8*.py" | head -n1); fi
           if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "*.py" | grep -E "bot|koma" | head -n1); fi
           echo "FOUND BOT: $BOT_FILE"
           if [ -z "$BOT_FILE" ]; then echo "NO BOT FILE FOUND!"; exit 1; fi
           python "$BOT_FILE" --once
-          echo "===ACTIVE V84 AFTER==="; cat active.json
+          echo "===ACTIVE V85 AFTER==="; cat active.json
           echo "===COOLDOWN AFTER==="; cat cooldown.json
 
-      - name: Save cache V84
+      - name: Save cache V85
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v84-smart-tight-${{ github.run_id }}
+          key: bot-cache-v85-standard-clean-${{ github.run_id }}
