@@ -29,10 +29,12 @@ jobs:
 
       - name: Ensure files
         run: |
+          echo "=== FILES IN REPO ==="
+          ls -la
+          echo "=== RECURSIVE ==="
+          find . -maxdepth 3 -name "*.py" -type f
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
-          echo "=== BEFORE ==="; cat cooldown.json; cat active.json
-          ls -la *.py
 
       - name: Run bot V81
         env:
@@ -41,7 +43,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python v80.py --once
+          BOT_FILE=$(find . -name "v80.py" | head -n1)
+          if [ -z "$BOT_FILE" ]; then BOT_FILE=$(find . -name "bot.py" | head -n1); fi
+          echo "FOUND BOT: $BOT_FILE"
+          if [ -z "$BOT_FILE" ]; then echo "NO BOT FILE FOUND!"; exit 1; fi
+          python "$BOT_FILE" --once
           echo "===ACTIVE V81==="; cat active.json
           echo "===COOLDOWN==="; cat cooldown.json
 
