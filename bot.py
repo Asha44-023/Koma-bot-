@@ -51,7 +51,6 @@ def get_pvt(d):
     sig=[sum(sma21[max(0,i-8):i+1])/len(sma21[max(0,i-8):i+1]) for i in range(len(sma21))]
     return pvt,sma21,sig
 
-# 100% BEST FILTERS
 def get_rsi(c, period=14):
     if len(c)<period+1: return 50
     gains=[]; losses=[]
@@ -161,7 +160,7 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V80 25 SHAPES + PVT RSI+ADX 100% BEST {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V81 GRASS EDITION {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -173,37 +172,58 @@ def poll_telegram_commands():
 
 def scan():
     manage()
-    if len(ACTIVE)>=3: return
+    if len(ACTIVE)>=3:
+        print(f"3 ACTIVE - SKIP {list(ACTIVE.keys())}")
+        return
     try:
         btc=kl("BTC_USDT","Min240")
         if btc and btc["c"][-1] < btc["c"][-2]*0.97:
             print("BTC DUMP PAUSE"); return
     except: pass
 
+    print(f"=== SCAN START {get_time()} ===")
     for s in SYMBOLS:
-        if s in ACTIVE: continue
-        d_daily=kl(s,"Day1"); d4h=kl(s,"Min240"); d15=kl(s,"Min15")
-        if not d4h or not d_daily: continue
+        if s in ACTIVE:
+            print(f"{s} already active skip")
+            continue
+        d_daily=kl(s,"Day1"); d4h=kl(s,"Min240")
+        if not d4h or not d_daily:
+            print(f"{s} no data")
+            continue
 
         pvt,sma,sig = get_pvt(d4h)
-        if not pvt: continue
+        if not pvt:
+            print(f"{s} no pvt")
+            continue
         _,sma_d,_ = get_pvt(d_daily)
         if not sma_d: continue
 
-        # 100% BEST FILTERS
         rsi = get_rsi(d4h["c"])
         adx = get_adx(d4h)
-        if adx < 18: continue # No trend = no trade
-        # Avoid overbought/oversold
-        # RSI filter added
-
         slope = sma[-1]-sma[-5]
-        if abs(slope) < abs(sma[-1])*0.0008: continue
-        if d4h["v"][-1] < sum(d4h["v"][-15:])/15 *1.15: continue
-        if (sma_d[-1]>sma_d[-5])!= (sma[-1]>sma[-5]): continue
+        vol_ratio = d4h["v"][-1] / (sum(d4h["v"][-15:])/15) if sum(d4h["v"][-15:])>0 else 0
 
         shape = detect_25_shapes(d4h)
-        if shape in ["RANGE_CHOP","BOX_CONSOLIDATION","RECTANGLE_RANGE"]: continue
+
+        # LOUD LOG - you will see why
+        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x Slope:{slope:.2f}")
+
+        # === V81 LOOSE FILTERS FOR ALTS ===
+        if adx < 12:
+            print(f" -> BLOCKED ADX <12")
+            continue
+        if abs(slope) < abs(sma[-1])*0.0001:
+            print(f" -> BLOCKED SLOPE tiny")
+            continue
+        if vol_ratio < 0.90: # allow 0.9x not 1.15x
+            print(f" -> BLOCKED VOL {vol_ratio:.2f}")
+            continue
+        # DAILY VS 4H REMOVED FOR ALTS - this was killing GRASS!
+        # if (sma_d[-1]>sma_d[-5])!= (sma[-1]>sma[-5]): continue
+
+        if shape in ["RANGE_CHOP","BOX_CONSOLIDATION","RECTANGLE_RANGE"]:
+            print(f" -> BLOCKED SHAPE {shape}")
+            continue
 
         is_buy = True
         if any(x in shape for x in ["BEARISH","BEAR","DESCENDING","BREAKDOWN","DOUBLE_TOP","HEAD_SHOULDERS","LOWER_LOW"]):
@@ -213,12 +233,17 @@ def scan():
         else:
             is_buy = sma[-1]>sma[-5]
 
-        # RSI confirmation for BEST
-        if is_buy and rsi>72: continue
-        if not is_buy and rsi<28: continue
+        if is_buy and rsi>78:
+            print(f" -> BLOCKED RSI high {rsi}")
+            continue
+        if not is_buy and rsi<22:
+            print(f" -> BLOCKED RSI low {rsi}")
+            continue
 
         k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
-        if time.time()-COOLDOWN["signals"].get(k,0)<7200: continue
+        if time.time()-COOLDOWN["signals"].get(k,0)<3600: # 1h cooldown not 2h
+            print(f" -> COOLDOWN {k}")
+            continue
 
         live=get_live_price(s) or d4h["c"][-1]
         tp1,tp2,sl,ch,cl = get_tps_sl(live, is_buy, d4h, d_daily)
@@ -239,12 +264,13 @@ def scan():
 📦 CRT High {ch:.5f} Low {cl:.5f}
 ⏰ {get_time()}""")
         break
+    print(f"=== SCAN DONE Hold:{list(ACTIVE.keys())} ===")
 
 if "--once" in sys.argv:
     poll_telegram_commands()
     scan()
 else:
-    print(f"🚀 V80 STARTED 25 SHAPES + PVT + RSI+ADX 100% BEST {get_time()}")
+    print(f"🚀 V81 GRASS EDITION STARTED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
