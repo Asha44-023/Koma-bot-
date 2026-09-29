@@ -1,4 +1,4 @@
-name: Run Crypto Bot V80 25 SHAPES PVT
+name: Run Crypto Bot V81 GRASS EDITION
 
 on:
   schedule:
@@ -16,38 +16,40 @@ jobs:
           python-version: '3.11'
       - run: pip install requests pytz
 
-      - name: Restore cache V80
+      - name: Restore cache V81
         uses: actions/cache/restore@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v80-shapes-pvt-${{ github.run_id }}
+          key: bot-cache-v81-grass-fixed
           restore-keys: |
-            bot-cache-v80-shapes-pvt-
+            bot-cache-v81-
+            bot-cache-v80-
 
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
+          echo "=== BEFORE ==="; cat cooldown.json; cat active.json
           ls -la *.py
 
-      - name: Run bot V80
+      - name: Run bot V81
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          if [ -f v80.py ]; then python v80.py --once || true; else python bot.py --once || true; fi
-          echo "===ACTIVE V80==="; cat active.json
+          python v80.py --once
+          echo "===ACTIVE V81==="; cat active.json
           echo "===COOLDOWN==="; cat cooldown.json
 
-      - name: Save cache V80
+      - name: Save cache V81
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v80-shapes-pvt-${{ github.run_id }}
+          key: bot-cache-v81-grass-fixed
