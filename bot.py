@@ -3,7 +3,7 @@ from datetime import datetime
 import pytz
 
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT"]
+SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","FET_USDT","IO_USDT","RENDER_USDT","AR_USDT","AKT_USDT"]
 
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "8500000000:XXXX"
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_CHAT_ID"
@@ -125,16 +125,14 @@ def get_tps_sl(entry, is_buy, d4h, d_daily):
         swing_low = min(d4h["l"][-5:]) * 0.998
         max_sl = entry * 0.965
         sl = max(swing_low, max_sl)
-        if sl >= entry*0.995:
-            sl = entry * 0.965
+        if sl >= entry*0.995: sl = entry * 0.965
         tp1 = entry + atr*1.8
         tp2 = ch
     else:
         swing_high = max(d4h["h"][-5:]) * 1.002
         max_sl = entry * 1.035
         sl = min(swing_high, max_sl)
-        if sl <= entry*1.005:
-            sl = entry * 1.035
+        if sl <= entry*1.005: sl = entry * 1.035
         tp1 = entry - atr*1.8
         tp2 = cl
     return tp1, tp2, sl, ch, cl
@@ -154,7 +152,7 @@ def manage():
                 data["tp1_hit"]=True; data["sl"]=entry; save_a()
                 tg(f"✅ TP1 {s} {price:.5f} SL→BE\n{get_time()}")
         if is_buy and price>=tp2 or not is_buy and price<=tp2:
-            tg(f"✅✅ TP2 JUNCTION {s} {price:.5f} BOX COMPLETE\n{get_time()}"); del ACTIVE[s]; save_a()
+            tg(f"✅✅ TP2 JUNCTION {s} {price:.5f} CRT BOX COMPLETE\n{get_time()}"); del ACTIVE[s]; save_a()
 
 LAST_ID=0
 def poll_telegram_commands():
@@ -166,7 +164,7 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V84 SMART TIGHT {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V85 STANDARD BUY+SELL {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -189,157 +187,84 @@ def scan():
 
     print(f"=== SCAN START {get_time()} ===")
     for s in SYMBOLS:
-        if s in ACTIVE:
-            print(f"{s} already active skip")
-            continue
+        if s in ACTIVE: print(f"{s} already active"); continue
         d_daily=kl(s,"Day1"); d4h=kl(s,"Min240")
-        if not d4h or not d_daily:
-            print(f"{s} no data")
-            continue
+        if not d4h or not d_daily: print(f"{s} no data"); continue
         pvt,sma,sig = get_pvt(d4h)
-        if not pvt:
-            print(f"{s} no pvt")
-            continue
+        if not pvt: print(f"{s} no pvt"); continue
 
-        rsi = get_rsi(d4h["c"])
-        adx = get_adx(d4h)
-        slope = sma[-1]-sma[-5]
-        vol_ratio = d4h["v"][-1] / (sum(d4h["v"][-15:])/15) if sum(d4h["v"][-15:])>0 else 0
+        rsi = get_rsi(d4h["c"]); adx = get_adx(d4h)
+        close = d4h["c"][-1]; ema20 = sum(d4h["c"][-20:])/20
+        daily_change = (close - d4h["o"][-1])/d4h["o"][-1]*100
+        pvt_bull = sma[-1] > sma[-5]
         shape = detect_25_shapes(d4h)
 
-        # === NEW SMART ADDITIONS - NO SUBTRACT ===
-        close = d4h["c"][-1]
-        open_4h = d4h["o"][-1]
-        ema20 = sum(d4h["c"][-20:])/20
-        ema20_prev = sum(d4h["c"][-25:-5])/20
-        daily_change = (close - open_4h)/open_4h*100
-        pvt_bull = sma[-1] > sma[-5] # GREEN ABOVE RED BULL
+        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Daily:{daily_change:.1f}% PVT:{'BULL' if pvt_bull else 'BEAR'}")
 
-        # Momentum score for confluence
-        mom_score = 0
-        if rsi < 48: mom_score -=1
-        if rsi > 62: mom_score +=1
-        if pvt_bull: mom_score +=1
-        else: mom_score -=1
-        if adx > 25:
-            if close > ema20 and ema20 > ema20_prev: mom_score +=1
-            if close < ema20 and ema20 < ema20_prev: mom_score -=1
+        if adx < 18: print(f" -> BLOCKED ADX weak"); continue
 
-        is_shape_bear = "RISING_WEDGE_BEARISH" in shape or "DESCENDING" in shape or "DOUBLE_TOP" in shape or "HEAD_SHOULDERS" in shape
-        is_shape_bull = "FALLING_WEDGE_BULLISH" in shape or "ASCENDING" in shape or "DOUBLE_BOTTOM" in shape or "INV_HEAD" in shape
+        # === SHAPES = DIRECTION BUY + SELL ===
+        BULL_SHAPES = ["FALLING_WEDGE_BULLISH","DOUBLE_BOTTOM_BULLISH","INV_HEAD_SHOULDERS_BULLISH","CUP_AND_HANDLE_BULLISH","BREAKOUT_BOX_TOP","BULL_FLAG","ASCENDING_TRIANGLE","ASCENDING_CHANNEL_BULL","HIGHER_HIGH_BULLISH","BULL_PENNANT","BULLISH_ENGULFING_BREAK","ROUNDING_BOTTOM_BULLISH"]
+        BEAR_SHAPES = ["RISING_WEDGE_BEARISH","DOUBLE_TOP_BEARISH","HEAD_SHOULDERS_BEARISH","BREAKDOWN_BOX_BOTTOM","BEAR_FLAG","DESCENDING_TRIANGLE","DESCENDING_CHANNEL_BEAR","LOWER_LOW_BEARISH","BEAR_PENNANT","BEARISH_ENGULFING_BREAK"]
+        MIDDLE_SHAPES = ["SYMMETRICAL_TRIANGLE","BOX_CONSOLIDATION","RECTANGLE_RANGE","RANGE_CHOP"]
 
-        print(f"{s} Shape:{shape} ADX:{adx:.1f} RSI:{rsi:.1f} Vol:{vol_ratio:.2f}x Mom:{mom_score} Daily:{daily_change:.1f}% PVT:{'BULL' if pvt_bull else 'BEAR'}")
+        is_buy = None
+        if any(x in shape for x in BULL_SHAPES): is_buy = True
+        elif any(x in shape for x in BEAR_SHAPES): is_buy = False
+        elif shape in MIDDLE_SHAPES:
+            hh10 = max(d4h["h"][-10:]); ll10 = min(d4h["l"][-10:])
+            if close > hh10*0.999 and pvt_bull: is_buy = True; print(f" -> MIDDLE {shape} BREAKOUT UP -> BUY")
+            elif close < ll10*1.001 and not pvt_bull: is_buy = False; print(f" -> MIDDLE {shape} BREAKDOWN DOWN -> SELL")
+            else: print(f" -> MIDDLE {shape} no breakout SKIP"); continue
+        else: print(f" -> SKIP {shape}"); continue
 
-        if adx < 12:
-            print(f" -> BLOCKED ADX <12")
-            continue
-
-        # === TIGHT RSI FOR 4HR - YOUR REQUEST 75-80 / 20-25 ===
-        # OLD: rsi>78 block, rsi<22 block — NOW TIGHTER
-        # SELL must be 70-80, BUY must be 20-30 — stops overshoot
-        # This is the TIGHT you asked!
-
-        # === SMART FILTER 1: Daily pump/dump ===
-        if daily_change > 3.0:
-            print(f" -> BLOCKED DAILY PUMP +{daily_change:.1f}% — No SELL (like GRASS today)")
-            continue
-        if daily_change < -3.0:
-            print(f" -> BLOCKED DAILY DUMP {daily_change:.1f}% — No BUY")
-            continue
-
-        # === SMART FILTER 2: CONFLICT — Shape vs Momentum ===
-        if is_shape_bear and mom_score >= 2:
-            print(f" -> BLOCKED CONFLICT Shape BEAR but Mom BULL {mom_score} -> should be BUY not SELL! Like GRASS/JASMY today")
-            continue
-        if is_shape_bull and mom_score <= -2:
-            print(f" -> BLOCKED CONFLICT Shape BULL but Mom BEAR {mom_score} -> should be SELL")
-            continue
-
-        # === SMART FILTER 3: PVT must agree with RSI ===
-        if not pvt_bull and rsi > 65:
-            # PVT bear but RSI high bull — overshoot risk
-            print(f" -> BLOCKED PVT BEAR but RSI {rsi:.1f} high — overshoot")
-            # don't block fully, but need extra check
-            pass
-
-        print(f" -> VOL OK {vol_ratio:.2f}x (disabled for alts)")
-
-        if shape in ["BOX_CONSOLIDATION","RECTANGLE_RANGE","RANGE_CHOP"]:
-            print(f" -> BLOCKED SHAPE {shape}")
-            continue
-
-        if "FALLING_WEDGE_BULLISH" in shape or "DOUBLE_BOTTOM" in shape or "INV_HEAD" in shape or "CUP_AND_HANDLE" in shape or "BREAKOUT_BOX_TOP" in shape or "BULL_FLAG" in shape or "ASCENDING" in shape or "HIGHER_HIGH" in shape or "BULL_PENNANT" in shape or "BULLISH_ENGULFING" in shape:
-            is_buy = True
-        elif "RISING_WEDGE_BEARISH" in shape or "DOUBLE_TOP" in shape or "HEAD_SHOULDERS" in shape or "BREAKDOWN_BOX_BOTTOM" in shape or "BEAR_FLAG" in shape or "DESCENDING" in shape or "LOWER_LOW" in shape or "BEAR_PENNANT" in shape or "BEARISH_ENGULFING" in shape:
-            is_buy = False
-        else:
-            is_buy = sma[-1] > sma[-5]
-
-        if is_buy and "RISING_WEDGE_BEARISH" in shape:
-            print(f" -> SKIP BUY on RISING_WEDGE_BEARISH")
-            continue
-        if not is_buy and "FALLING_WEDGE_BULLISH" in shape:
-            print(f" -> SKIP SELL on FALLING_WEDGE_BULLISH")
-            continue
-
-        # === TIGHT RSI FINAL - 4HR ULTRA TIGHT ===
+        # === STANDARD TIGHT RSI OUT OF BOX 24-40 BUY / 60-76 SELL ===
+        if 42 <= rsi <= 58: print(f" -> BLOCKED BOX RSI {rsi:.1f} 42-58"); continue
         if is_buy:
-            if rsi > 32 or rsi < 20: # BUY only 20-32 tight — your 20-25 inside
-                print(f" -> BLOCKED TIGHT RSI BUY need 20-32, got {rsi:.1f} (overshoot protection)")
-                continue
+            if not (24 <= rsi <= 40): print(f" -> BLOCKED BUY RSI {rsi:.1f} need 24-40"); continue
         else:
-            if rsi < 68 or rsi > 82: # SELL only 68-82 tight — your 75-80 inside
-                print(f" -> BLOCKED TIGHT RSI SELL need 68-82, got {rsi:.1f} (overshoot protection)")
-                continue
+            if not (60 <= rsi <= 76): print(f" -> BLOCKED SELL RSI {rsi:.1f} need 60-76"); continue
 
-        # === PVT AGREEMENT - MANDATORY ===
-        if is_buy and not pvt_bull:
-            print(f" -> BLOCKED BUY needs PVT BULL GREEN ABOVE RED, got BEAR")
-            continue
-        if not is_buy and pvt_bull:
-            print(f" -> BLOCKED SELL needs PVT BEAR GREEN BELOW RED, got BULL (like GRASS today)")
-            continue
+        if is_buy and not pvt_bull: print(f" -> BLOCKED BUY PVT BEAR"); continue
+        if not is_buy and pvt_bull: print(f" -> BLOCKED SELL PVT BULL"); continue
+        if is_buy and close < ema20: print(f" -> BLOCKED BUY below EMA"); continue
+        if not is_buy and close > ema20: print(f" -> BLOCKED SELL above EMA"); continue
+        if daily_change > 3.0 and not is_buy: print(f" -> BLOCKED SELL pump"); continue
+        if daily_change < -3.0 and is_buy: print(f" -> BLOCKED BUY dump"); continue
 
         k=f"{s}_{shape}_{ 'LONG' if is_buy else 'SHORT'}"
-        if time.time()-COOLDOWN["signals"].get(k,0)<3600:
-            print(f" -> COOLDOWN {k}")
-            continue
+        if time.time()-COOLDOWN["signals"].get(k,0)<3600: print(f" -> COOLDOWN {k}"); continue
 
-        live=get_live_price(s) or d4h["c"][-1]
+        live=get_live_price(s) or close
         tp1,tp2,sl,ch,cl = get_tps_sl(live, is_buy, d4h, d_daily)
         exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
         sl_pct = abs(live-sl)/live*100
-
-        if exp < 4.0:
-            print(f" -> BLOCKED TP too small {exp:.1f}% <4%")
-            continue
-        if sl_pct > 5.0:
-            print(f" -> BLOCKED SL too wide {sl_pct:.1f}% >5%")
-            continue
+        if exp < 4.0: print(f" -> BLOCKED TP {exp:.1f}% <4%"); continue
+        if sl_pct > 5.0: print(f" -> BLOCKED SL {sl_pct:.1f}% >5%"); continue
 
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"crt_high":ch,"crt_low":cl,"time":time.time()}; save_a()
         COOLDOWN["signals"][k]=time.time(); save_c()
 
         tg(f"""{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s}
 ━━━━━━━━━━━━━━
-📐 SHAPE: {shape.replace('_',' ')}
-📊 PVT: {'GREEN ABOVE RED BULL ✅' if sma[-1]>sma[-5] else 'GREEN BELOW RED BEAR ✅'}
-💪 RSI: {rsi:.1f} TIGHT 4HR | ADX: {adx:.1f} TREND ✅ | MomScore:{mom_score}
+📐 SHAPE: {shape.replace('_',' ')} -> {'BULL' if is_buy else 'BEAR'}
+📊 PVT: {'GREEN ABOVE RED BULL ✅' if pvt_bull else 'GREEN BELOW RED BEAR ✅'}
+💪 RSI: {rsi:.1f} STANDARD {'24-40 BUY OUT OF BOX' if is_buy else '60-76 SELL OUT OF BOX'} ✅
+📈 ADX: {adx:.1f} + EMA20 ✅
 💰 ENTRY {live:.5f}
 🛑 SL {sl:.5f} ({sl_pct:.2f}%)
-🎯 TP1 {tp1:.5f}
-🎯 TP2 {tp2:.5f} ({exp:.1f}% to CRT)
+🎯 TP1 {tp1:.5f} (1.8 ATR)
+🎯 TP2 {tp2:.5f} ({exp:.1f}% to CRT {'HIGH' if is_buy else 'LOW'})
 📦 CRT High {ch:.5f} Low {cl:.5f}
 ⏰ {get_time()}""")
-        print(f"*** SIGNAL SENT {s} {shape} ***")
+        print(f"*** CLEAN SIGNAL {s} {shape} {'BUY' if is_buy else 'SELL'} ***")
         break
     print(f"=== SCAN DONE Hold:{list(ACTIVE.keys())} ===")
 
 if "--once" in sys.argv:
-    poll_telegram_commands()
-    scan()
+    poll_telegram_commands(); scan()
 else:
-    print(f"🚀 V84 SMART TIGHT STARTED {get_time()}")
+    print(f"🚀 V85 BUY+SELL STANDARD CLEAN STARTED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
