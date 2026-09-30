@@ -47,4 +47,4 @@ jobs:
             active.json
             early.json
             last_id.json
-          key: bot-cache-v86-4
+          key: bot-cache-v86-4-${{ github.run_id }}
