@@ -27,7 +27,6 @@ jobs:
           key: bot-cache-v86-4
           restore-keys: |
             bot-cache-v86-4
-            bot-cache-v86-3
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
@@ -48,4 +47,4 @@ jobs:
             active.json
             early.json
             last_id.json
-          key: bot-cache-v86-4-${{ github.run_id }}
+          key: bot-cache-v86-4
