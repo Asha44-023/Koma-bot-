@@ -151,41 +151,46 @@ def check_divergence_bearish(prices, rsis):
     except: pass
     return False, ""
 
-def evaluate_v86_3(asset, shape, direction, current_rsi, prices, rsi_series, adx, wedge_top_ratio):
+def evaluate_v86_3_fixed(asset, shape, direction, current_rsi, prices, rsi_series, adx, wedge_top_ratio, wedge_bot_ratio):
     is_meme = any(m in asset for m in MEME_LIST)
     if is_meme:
         max_rsi_24h = max(rsi_series[-6:]) if len(rsi_series)>=6 else 0
         min_rsi_24h = min(rsi_series[-6:]) if len(rsi_series)>=6 else 100
-        if max_rsi_24h > 85 and direction=="BUY": return "CANCEL", f"MEME PUMP BLOCK {max_rsi_24h:.1f}>85"
-        if min_rsi_24h < 15 and direction=="SELL": return "CANCEL", f"MEME DUMP BLOCK {min_rsi_24h:.1f}<15"
-    if direction=="SELL" and current_rsi > 72 and adx > 35:
+        if max_rsi_24h > 88 and direction=="BUY": return "CANCEL", f"MEME PUMP BLOCK {max_rsi_24h:.1f}>88"
+        if min_rsi_24h < 12 and direction=="SELL": return "CANCEL", f"MEME DUMP BLOCK {min_rsi_24h:.1f}<12"
+    if shape in ["BOX_CONSOLIDATION","RECTANGLE_RANGE","RANGE_CHOP"]:
+        if current_rsi <= 42 and direction=="BUY":
+            shape = "DOUBLE_BOTTOM_BULLISH"
+        if current_rsi >= 58 and direction=="SELL":
+            shape = "DOUBLE_TOP_BEARISH"
+    if direction=="SELL" and current_rsi > 68 and adx > 28:
         if shape in REVERSAL_BEAR or wedge_top_ratio >= 0.97:
             return "EXECUTE", f"MY_BRAIN TOP RSI {current_rsi:.1f} ADX {adx:.1f} {shape}"
-    if direction=="BUY" and current_rsi < 28 and adx > 35:
-        if shape in REVERSAL_BULL:
+    if direction=="BUY" and current_rsi < 32 and adx > 28:
+        if shape in REVERSAL_BULL or wedge_bot_ratio <= 1.03:
             return "EXECUTE", f"MY_BRAIN BOTTOM RSI {current_rsi:.1f} ADX {adx:.1f} {shape}"
     is_reversal = shape in REVERSAL_BULL + REVERSAL_BEAR
     if not is_reversal:
         if direction=="BUY":
-            if current_rsi > 70: return "CANCEL", f"CONT BUY overbought {current_rsi:.1f}>70"
-            if current_rsi < 48: return "CANCEL", f"CONT BUY weak {current_rsi:.1f}<48"
-            return "EXECUTE", f"CONT BUY 48-70 RSI {current_rsi:.1f}"
+            if current_rsi > 72: return "CANCEL", f"CONT BUY overbought {current_rsi:.1f}>72"
+            if current_rsi < 30: return "CANCEL", f"CONT BUY too weak {current_rsi:.1f}<30"
+            return "EXECUTE", f"CONT BUY 30-72 RSI {current_rsi:.1f}"
         else:
-            if current_rsi < 30: return "CANCEL", f"CONT SELL oversold {current_rsi:.1f}<30"
-            if current_rsi > 52:
-                if adx > 40 and current_rsi <= 75: return "EXECUTE", f"CONT SELL ADX {adx:.1f} allow RSI {current_rsi:.1f}"
-                return "CANCEL", f"CONT SELL strong {current_rsi:.1f}>52"
-            return "EXECUTE", f"CONT SELL 30-52 RSI {current_rsi:.1f}"
+            if current_rsi < 28: return "CANCEL", f"CONT SELL oversold {current_rsi:.1f}<28"
+            if current_rsi > 58:
+                if adx >= 28 and current_rsi <= 75: return "EXECUTE", f"CONT SELL ADX {adx:.1f} allow RSI {current_rsi:.1f}"
+                return "CANCEL", f"CONT SELL strong {current_rsi:.1f}>58 without ADX"
+            return "EXECUTE", f"CONT SELL 28-58 RSI {current_rsi:.1f}"
     else:
         if direction=="BUY":
             is_div, txt = check_divergence_bullish(prices, rsi_series)
             if is_div: return "EXECUTE", f"REV BUY DIV {txt}"
-            if current_rsi < 38: return "EXECUTE", f"REV BUY oversold {current_rsi:.1f}<38"
+            if current_rsi < 45: return "EXECUTE", f"REV BUY oversold {current_rsi:.1f}<45"
             return "CANCEL", f"REV BUY no div {current_rsi:.1f}"
         else:
             is_div, txt = check_divergence_bearish(prices, rsi_series)
             if is_div: return "EXECUTE", f"REV SELL DIV {txt}"
-            if current_rsi > 62: return "EXECUTE", f"REV SELL overbought {current_rsi:.1f}>62"
+            if current_rsi > 58: return "EXECUTE", f"REV SELL overbought {current_rsi:.1f}>58"
             return "CANCEL", f"REV SELL no div {current_rsi:.1f}"
     return "CANCEL", "Unknown"
 
@@ -223,7 +228,7 @@ def poll_telegram_commands():
             LAST_ID=upd["update_id"]
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V86.3 EARLY ALERT {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V86.4 FIXED {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -239,7 +244,7 @@ def scan():
         btc=kl("BTC_USDT","Min240")
         if btc and btc["c"][-1] < btc["c"][-2]*0.97: return
     except: pass
-    print(f"=== SCAN V86.3 EARLY START {get_time()} ===")
+    print(f"=== SCAN V86.4 FIXED START {get_time()} ===")
     for s in SYMBOLS:
         if s in ACTIVE: continue
         d_daily=kl(s,"Day1"); d4h=kl(s,"Min240")
@@ -250,34 +255,28 @@ def scan():
         rsi_series = get_rsi_series(d4h["c"])
         rsi_20 = rsi_series[-20:]; prices_20 = d4h["c"][-20:]
         adx = get_adx(d4h)
-        close = d4h["c"][-1]; ema20 = sum(d4h["c"][-20:])/20
+        close = d4h["c"][-1]
         pvt_bull = sma[-1] > sma[-5]
         shape = detect_25_shapes(d4h)
         wedge_top = max(d4h["h"][-20:]); wedge_bot = min(d4h["l"][-20:])
         top_ratio = close / wedge_top if wedge_top else 0
         bot_ratio = close / wedge_bot if wedge_bot else 1
         print(f"{s} {shape} RSI:{rsi:.1f} ADX:{adx:.1f} Top:{top_ratio:.3f} Bot:{bot_ratio:.3f}")
-
-        # ===== EARLY ALERT 5-15 MIN BEFORE (NEW) =====
-        # Early TOP forming
-        if rsi >= 62 and rsi < 72 and adx >= 28 and top_ratio >= 0.95:
-            is_rising = len(rsi_20)>=3 and rsi_20[-1] > rsi_20[-2] > rsi_20[-3]
-            if is_rising and shape in REVERSAL_BEAR+["RISING_WEDGE_BEARISH","DOUBLE_TOP_BEARISH","RECTANGLE_RANGE","BOX_CONSOLIDATION"]:
-                if time.time() - EARLY.get(s+"_TOP",0) > 3600: # 1h cooldown for early
+        if rsi >= 55 and rsi < 72 and adx >= 25 and top_ratio >= 0.94:
+            is_rising = len(rsi_20)>=3 and rsi_20[-1] > rsi_20[-2]
+            if is_rising and shape in REVERSAL_BEAR+["RISING_WEDGE_BEARISH","DOUBLE_TOP_BEARISH","RECTANGLE_RANGE","BOX_CONSOLIDATION","RANGE_CHOP","DESCENDING_TRIANGLE"]:
+                if time.time() - EARLY.get(s+"_TOP",0) > 1800:
                     EARLY[s+"_TOP"]=time.time(); save_e()
                     live=get_live_price(s) or close
-                    tg(f"⚠️ EARLY TOP FORMING {s} V86.3\n📈 Price {live:.5f} near top {wedge_top:.5f} ({top_ratio*100:.1f}%)\n📊 RSI {rsi:.1f} climbing → 72+ (was {rsi_20[-3]:.1f}->{rsi_20[-1]:.1f})\n💪 ADX {adx:.1f} strengthening\n⏰ In ~5-15min expect SELL at {wedge_top:.5f}\n👉 Prepare limit SELL now\n⏰ {get_time()}")
-
-        # Early BOTTOM forming
-        if rsi <= 38 and rsi > 28 and adx >= 28 and bot_ratio <= 1.06:
-            is_falling = len(rsi_20)>=3 and rsi_20[-1] < rsi_20[-2] < rsi_20[-3]
-            if is_falling and shape in REVERSAL_BULL+["FALLING_WEDGE_BULLISH","DOUBLE_BOTTOM_BULLISH"]:
-                if time.time() - EARLY.get(s+"_BOT",0) > 3600:
+                    tg(f"⚠️ EARLY TOP {s} V86.4\nPrice {live:.5f} near top {wedge_top:.5f} ({top_ratio*100:.1f}%)\nRSI {rsi:.1f} -> 68+\nADX {adx:.1f}\nExpect SELL soon\n{get_time()}")
+        if rsi <= 48 and rsi > 25 and adx >= 25 and bot_ratio <= 1.08:
+            is_falling = len(rsi_20)>=3 and rsi_20[-1] < rsi_20[-2]
+            if is_falling and shape in REVERSAL_BULL+["FALLING_WEDGE_BULLISH","DOUBLE_BOTTOM_BULLISH","BOX_CONSOLIDATION","RECTANGLE_RANGE","RANGE_CHOP"]:
+                if time.time() - EARLY.get(s+"_BOT",0) > 1800:
                     EARLY[s+"_BOT"]=time.time(); save_e()
                     live=get_live_price(s) or close
-                    tg(f"⚠️ EARLY BOTTOM FORMING {s} V86.3\n📉 Price {live:.5f} near bot {wedge_bot:.5f}\n📊 RSI {rsi:.1f} falling → 28 (was {rsi_20[-3]:.1f}->{rsi_20[-1]:.1f})\n💪 ADX {adx:.1f}\n⏰ In ~5-15min expect BUY\n👉 Prepare limit BUY\n⏰ {get_time()}")
-
-        if adx < 18: continue
+                    tg(f"⚠️ EARLY BOTTOM {s} V86.4\nPrice {live:.5f} near bot {wedge_bot:.5f}\nRSI {rsi:.1f} -> 32\nADX {adx:.1f}\nExpect BUY soon\n{get_time()}")
+        if adx < 15: continue
         is_buy = None
         if shape in CONTINUATION_BULL or shape in REVERSAL_BULL: is_buy = True
         elif shape in CONTINUATION_BEAR or shape in REVERSAL_BEAR: is_buy = False
@@ -287,31 +286,29 @@ def scan():
             elif close < ll10*1.001 and not pvt_bull: is_buy = False
             else: continue
         direction = "BUY" if is_buy else "SELL"
-        decision, reason = evaluate_v86_3(s, shape, direction, rsi, prices_20, rsi_20, adx, top_ratio)
+        decision, reason = evaluate_v86_3_fixed(s, shape, direction, rsi, prices_20, rsi_20, adx, top_ratio, bot_ratio)
         print(f" -> {decision} {reason}")
         if decision=="CANCEL": continue
         if is_buy and not pvt_bull:
             if "MY_BRAIN" not in reason and rsi >= 35: continue
         if not is_buy and pvt_bull:
-            if "MY_BRAIN" not in reason and not (rsi > 70 and adx > 35):
-                breakdown = min(d4h["l"][-10:])
-                tg(f"⏳ PENDING SELL {s}\nBreakdown {breakdown:.5f} watch\n{get_time()}")
+            if "MY_BRAIN" not in reason and not (rsi > 65 and adx > 28):
                 continue
-        if time.time() - COOLDOWN["signals"].get(s, 0) < 7200: continue
+        if time.time() - COOLDOWN["signals"].get(s, 0) < 5400: continue
         live=get_live_price(s) or close
         tp1,tp2,sl,ch,cl = get_tps_sl(live, is_buy, d4h, d_daily)
         sl_pct = abs(live-sl)/live*100
         exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
-        if exp < 4.0 or sl_pct > 5.0: continue
+        if exp < 3.5 or sl_pct > 5.5: continue
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"crt_high":ch,"crt_low":cl,"time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
-        tg(f"{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s} V86.3\nSHAPE: {shape} -> {direction}\nREASON: {reason}\nRSI: {rsi:.1f} ADX: {adx:.1f}\nENTRY {live:.5f}\nSL {sl:.5f} ({sl_pct:.2f}%)\nTP2 {tp2:.5f} ({exp:.1f}%)\n{get_time()}")
+        tg(f"{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s} V86.4\nSHAPE: {shape} -> {direction}\nREASON: {reason}\nRSI: {rsi:.1f} ADX: {adx:.1f}\nENTRY {live:.5f}\nSL {sl:.5f} ({sl_pct:.2f}%)\nTP2 {tp2:.5f} ({exp:.1f}%)\n{get_time()}")
         break
 
 if "--once" in sys.argv:
     poll_telegram_commands(); scan()
 else:
-    print(f"🚀 V86.3 EARLY ALERT STARTED {get_time()}")
+    print(f"🚀 V86.4 FIXED STARTED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
