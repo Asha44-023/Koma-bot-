@@ -1,10 +1,10 @@
-name: Run Crypto Bot V86.4 FIXED
+name: Run Crypto Bot V87 HOLD
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 concurrency:
-  group: koma-bot
+  group: koma-bot-v87
   cancel-in-progress: true
 jobs:
   run-bot:
@@ -24,9 +24,9 @@ jobs:
             active.json
             early.json
             last_id.json
-          key: bot-cache-v86-4
+          key: bot-cache-v87-hold
           restore-keys: |
-            bot-cache-v86-4
+            bot-cache-v87-hold
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
@@ -37,7 +37,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
+        run: python koma_rsi_47_bot_v87.py --once
       - name: Save cache
         uses: actions/cache/save@v4
         if: always()
@@ -47,4 +47,4 @@ jobs:
             active.json
             early.json
             last_id.json
-          key: bot-cache-v86-4-${{ github.run_id }}
+          key: bot-cache-v87-hold-${{ github.run_id }}
