@@ -24,15 +24,16 @@ jobs:
             active.json
             early.json
             last_id.json
-          key: bot-cache-v87-hold
+          key: bot-cache-v87-1-hold
           restore-keys: |
-            bot-cache-v87-hold
+            bot-cache-v87-1-hold
       - name: Ensure files
         run: |
-          [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
+          [ -f cooldown.json ] || echo '{"signals":{},"dir":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
           [ -f early.json ] || echo '{}' > early.json
           [ -f last_id.json ] || echo '{"id":0}' > last_id.json
+          python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('dir',{}); json.dump(d,open(f,'w'))"
       - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -47,4 +48,4 @@ jobs:
             active.json
             early.json
             last_id.json
-          key: bot-cache-v87-hold-${{ github.run_id }}
+          key: bot-cache-v87-1-hold-${{ github.run_id }}
