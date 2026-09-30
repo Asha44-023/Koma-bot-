@@ -1,7 +1,7 @@
-name: Run Crypto Bot V86.1 FIXED CACHE
+name: Run Crypto Bot V86.3 EARLY
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/5 * * * *'   # check every 5min for early alerts (was 30min too slow)
   workflow_dispatch:
 jobs:
   run-bot:
@@ -20,16 +20,20 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v86-1-${{ github.run_id }}
+            early.json
+          key: bot-cache-v86-3
           restore-keys: |
+            bot-cache-v86-3
             bot-cache-v86-1-
 
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
-          cat active.json
-          cat cooldown.json
+          [ -f early.json ] || echo '{}' > early.json
+          echo "=== ACTIVE ==="; cat active.json
+          echo "=== COOLDOWN ==="; cat cooldown.json
+          echo "=== EARLY ==="; cat early.json
 
       - name: Run bot
         env:
@@ -44,4 +48,5 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v86-1-${{ github.run_id }}
+            early.json
+          key: bot-cache-v86-3
