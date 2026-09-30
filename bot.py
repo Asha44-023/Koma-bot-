@@ -11,14 +11,19 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_C
 COOLDOWN_FILE = "cooldown.json"
 ACTIVE_FILE = "active.json"
 EARLY_FILE = "early.json"
+LAST_FILE = "last_id.json"
+
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
 COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{}}
 EARLY = json.load(open(EARLY_FILE)) if os.path.exists(EARLY_FILE) else {}
+LAST_DATA = json.load(open(LAST_FILE)) if os.path.exists(LAST_FILE) else {"id":0}
 if "signals" not in COOLDOWN: COOLDOWN={"signals":{}}
+LAST_ID = LAST_DATA.get("id",0)
 
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def save_e(): json.dump(EARLY, open(EARLY_FILE,"w"))
+def save_last(): json.dump({"id":LAST_ID}, open(LAST_FILE,"w"))
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def tg(msg):
@@ -218,7 +223,6 @@ def manage():
         if is_buy and price>=tp2 or not is_buy and price<=tp2:
             tg(f"✅✅ TP2 {s} {price:.5f}\n{get_time()}"); del ACTIVE[s]; save_a()
 
-LAST_ID=0
 def poll_telegram_commands():
     global LAST_ID
     try:
@@ -226,6 +230,7 @@ def poll_telegram_commands():
         r=requests.get(url, timeout=5).json()
         for upd in r.get("result",[]):
             LAST_ID=upd["update_id"]
+            save_last()
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
                 txt=f"V86.4 FIXED {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
