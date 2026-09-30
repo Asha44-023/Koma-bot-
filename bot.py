@@ -5,11 +5,10 @@ import pytz
 EAT = pytz.timezone("Africa/Nairobi")
 SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT"]
 
-# NEW: COIN-SPECIFIC RSI - based on your GRASS 0.51->0.81 pump
 COIN_PROFILES = {
     "FARTCOIN_USDT": {"ob": 76, "os": 24, "label": "EXTREME"},
     "SIREN_USDT": {"ob": 76, "os": 24, "label": "EXTREME"},
-    "GRASS_USDT": {"ob": 72, "os": 28, "label": "FAST"}, # your coin: 59% pump needs 72
+    "GRASS_USDT": {"ob": 72, "os": 28, "label": "FAST"},
     "KOMA_USDT": {"ob": 73, "os": 27, "label": "EXTREME"},
     "LAB_USDT": {"ob": 73, "os": 27, "label": "EXTREME"},
     "JASMY_USDT": {"ob": 70, "os": 30, "label": "FAST"},
@@ -31,6 +30,7 @@ COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else 
 EARLY = json.load(open(EARLY_FILE)) if os.path.exists(EARLY_FILE) else {}
 LAST_DATA = json.load(open(LAST_FILE)) if os.path.exists(LAST_FILE) else {"id":0}
 if "signals" not in COOLDOWN: COOLDOWN={"signals":{}}
+if "dir" not in COOLDOWN: COOLDOWN["dir"]={}
 LAST_ID = LAST_DATA.get("id",0)
 
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
@@ -169,7 +169,6 @@ def check_divergence_bearish(prices, rsis):
     except: pass
     return False, ""
 
-# NEW: HOLD / REVERSAL CHECKER - BUY AND SELL
 def check_hold_or_reversal(s, current_rsi, adx, close, direction):
     profile = COIN_PROFILES.get(s, {"ob":58,"os":42,"label":"NORMAL"})
     OB = profile["ob"]; OS = profile["os"]; LABEL = profile["label"]
@@ -185,12 +184,10 @@ def check_hold_or_reversal(s, current_rsi, adx, close, direction):
         if not is_buy and current_rsi < OS and adx < 22:
             return f"⚠️ REVERSAL {s} SELL->BUY? {LABEL} RSI {current_rsi:.1f}<{OS} ADX {adx:.1f} dropping - PnL {pnl:.1f}% consider close"
     last_sig = COOLDOWN["signals"].get(s,0)
+    last_dir = COOLDOWN.get("dir",{}).get(s,"")
     if time.time() - last_sig < 5400:
         mins = int((5400 - (time.time()-last_sig))/60)
-        if direction=="BUY":
-            return f"HOLD ⏳ {s} {LABEL} BUY sent {mins}m ago RSI {current_rsi:.1f} - waiting TP, not new BUY"
-        else:
-            return f"HOLD ⏳ {s} {LABEL} SELL sent {mins}m ago RSI {current_rsi:.1f} - waiting TP, not new SELL"
+        return f"HOLD ⏳ {s} {LABEL} {last_dir} sent {mins}m ago RSI {current_rsi:.1f} - waiting TP, not new {direction}"
     return None
 
 def evaluate_v86_3_fixed(asset, shape, direction, current_rsi, prices, rsi_series, adx, wedge_top_ratio, wedge_bot_ratio):
@@ -272,7 +269,7 @@ def poll_telegram_commands():
             save_last()
             text=upd.get("message",{}).get("text","").strip()
             if "/status" in text.lower():
-                txt=f"V87 DYNAMIC HOLD {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
+                txt=f"V87.1 FIXED {get_time()} Hold:{list(ACTIVE.keys()) or 'None'}\n"
                 for s in SYMBOLS[:4]:
                     d=kl(s,"Min240"); price=get_live_price(s) or 0
                     if not d: continue
@@ -284,16 +281,13 @@ def poll_telegram_commands():
 
 def scan():
     manage()
-    if len(ACTIVE)>=3: return
+    is_full = len(ACTIVE)>=3
     try:
         btc=kl("BTC_USDT","Min240")
         if btc and btc["c"][-1] < btc["c"][-2]*0.97: return
     except: pass
-    print(f"=== SCAN V87 HOLD+REVERSAL START {get_time()} ===")
+    print(f"=== SCAN V87.1 HOLD+REVERSAL START {get_time()} ===")
     for s in SYMBOLS:
-        if s in ACTIVE:
-            # still check HOLD for active positions
-            pass
         d_daily=kl(s,"Day1"); d4h=kl(s,"Min240")
         if not d4h or not d_daily: continue
         pvt,sma,sig = get_pvt(d4h)
@@ -336,7 +330,6 @@ def scan():
             else: continue
         direction = "BUY" if is_buy else "SELL"
 
-        # HOLD / REVERSAL - BOTH BUY AND SELL - TELEGRAM
         hold_msg = check_hold_or_reversal(s, rsi, adx, close, direction)
         if hold_msg:
             if time.time() - EARLY.get(s+"_HOLD",0) > 2700:
@@ -345,6 +338,9 @@ def scan():
                 print(f"HOLD TG: {hold_msg}")
             if s in ACTIVE or time.time() - COOLDOWN["signals"].get(s,0) < 5400:
                 continue
+
+        if is_full and s not in ACTIVE:
+            continue
 
         decision, reason = evaluate_v86_3_fixed(s, shape, direction, rsi, prices_20, rsi_20, adx, top_ratio, bot_ratio)
         print(f" -> {decision} {reason}")
@@ -361,14 +357,16 @@ def scan():
         exp = ((tp2-live)/live*100) if is_buy else ((live-tp2)/live*100)
         if exp < 3.5 or sl_pct > 5.5: continue
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"crt_high":ch,"crt_low":cl,"time":time.time()}; save_a()
-        COOLDOWN["signals"][s]=time.time(); save_c()
+        COOLDOWN["signals"][s]=time.time()
+        COOLDOWN["dir"][s]=direction
+        save_c()
         tg(f"{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s} V87 {profile['label']}\nSHAPE: {shape} -> {direction}\nREASON: {reason}\nRSI: {rsi:.1f} (OB {profile['ob']}/OS {profile['os']}) ADX: {adx:.1f}\nENTRY {live:.5f}\nSL {sl:.5f} ({sl_pct:.2f}%)\nTP2 {tp2:.5f} ({exp:.1f}%)\n{get_time()}")
         break
 
 if "--once" in sys.argv:
     poll_telegram_commands(); scan()
 else:
-    print(f"🚀 V87 HOLD+REVERSAL STARTED {get_time()}")
+    print(f"🚀 V87.1 HOLD+REVERSAL FIXED {get_time()}")
     while True:
         try: poll_telegram_commands(); scan()
         except Exception as e: print(e)
