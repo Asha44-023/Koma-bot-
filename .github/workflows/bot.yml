@@ -37,7 +37,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python koma_rsi_47_bot_v87.py --once
+        run: python bot.py --once
       - name: Save cache
         uses: actions/cache/save@v4
         if: always()
