@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: koma-bot
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -23,6 +23,7 @@ jobs:
             cooldown.json
             active.json
             early.json
+            last_id.json
           key: bot-cache-v86-4
           restore-keys: |
             bot-cache-v86-4
@@ -32,6 +33,7 @@ jobs:
           [ -f cooldown.json ] || echo '{"signals":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
           [ -f early.json ] || echo '{}' > early.json
+          [ -f last_id.json ] || echo '{"id":0}' > last_id.json
       - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -45,4 +47,5 @@ jobs:
             cooldown.json
             active.json
             early.json
+            last_id.json
           key: bot-cache-v86-4-${{ github.run_id }}
