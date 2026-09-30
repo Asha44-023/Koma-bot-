@@ -1,7 +1,7 @@
-name: Run Crypto Bot V86.3 EARLY
+name: Run Crypto Bot V86.4 FIXED
 on:
   schedule:
-    - cron: '*/5 * * * *'   # check every 5min for early alerts (was 30min too slow)
+    - cron: '*/5 * * * *'   # check every 5min for early alerts
   workflow_dispatch:
 jobs:
   run-bot:
@@ -21,10 +21,10 @@ jobs:
             cooldown.json
             active.json
             early.json
-          key: bot-cache-v86-3
+          key: bot-cache-v86-4
           restore-keys: |
+            bot-cache-v86-4
             bot-cache-v86-3
-            bot-cache-v86-1-
 
       - name: Ensure files
         run: |
@@ -39,7 +39,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
+        run: python fixed_bot.py --once
 
       - name: Save cache
         uses: actions/cache/save@v4
@@ -49,4 +49,4 @@ jobs:
             cooldown.json
             active.json
             early.json
-          key: bot-cache-v86-3
+          key: bot-cache-v86-4-${{ github.run_id }}
