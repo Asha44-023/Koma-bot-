@@ -6,7 +6,7 @@ SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_US
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "8500000000:XXXX"
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_CHAT_ID"
 COOLDOWN_FILE, ACTIVE_FILE = "cooldown.json", "active.json"
-ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
+ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {})
 COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{}}
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
 if "signals" not in COOLDOWN: COOLDOWN["signals"]={}
@@ -48,22 +48,23 @@ def find_pool(arr, cur_price, lookback=80):
     if not cands: return None
     return max(cands, key=lambda k: cands[k])
 
-def guard_15_5(d15, d5):
+def guard_15_5_prop(d15, d5, bias):
     c5,h5,l5,v5 = d5["c"], d5["h"], d5["l"], d5["v"]
     if len(c5)<60: return None, None, "short"
     floor_15 = find_pool(d15["l"], c5[-1], 96)
     ceil_15 = find_pool(d15["h"], c5[-1], 96)
-    if not floor_15 and not ceil_15: return None, None, "no 15M pool"
+    if bias=="BUY" and not floor_15: return None, None, f"BUY bias but no 15M floor"
+    if bias=="SELL" and not ceil_15: return None, None, f"SELL bias but no 15M ceil"
     med_wick = sorted([h5[i]-l5[i] for i in range(-30,-2)])[14]
     med_vol = sorted(v5[-30:-2])[14] or 1
     sw = {"h":h5[-2],"l":l5[-2],"v":v5[-2]}
     now = c5[-1]
     absorbed = (sw["h"]-sw["l"]) > med_wick*1.2 and sw["v"] > med_vol*1.2
-    if floor_15 and sw["l"] < floor_15 and now > floor_15 and now > (sw["h"]+sw["l"])/2 and absorbed:
+    if bias=="BUY" and floor_15 and sw["l"] < floor_15 and now > floor_15 and now > (sw["h"]+sw["l"])/2 and absorbed:
         return "BUY", floor_15, f"swept 15M {floor_15:.5f} {sw['v']/med_vol:.1f}x"
-    if ceil_15 and sw["h"] > ceil_15 and now < ceil_15 and now < (sw["h"]+sw["l"])/2 and absorbed:
+    if bias=="SELL" and ceil_15 and sw["h"] > ceil_15 and now < ceil_15 and now < (sw["h"]+sw["l"])/2 and absorbed:
         return "SELL", ceil_15, f"swept 15M {ceil_15:.5f} {sw['v']/med_vol:.1f}x"
-    return None, None, f"wait f:{floor_15} c:{ceil_15}"
+    return None, None, f"wait {bias} f:{floor_15} c:{ceil_15}"
 
 COOLDOWN_MAP = {"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
 DEFAULT_CD = 3600
@@ -81,34 +82,43 @@ def scan():
             tg(f"✅✅ TP2 {s} {p:.5f}\n{get_time()}"); del ACTIVE[s]; save_a()
 
     if len(ACTIVE)>=3: return
-    print(f"=== V90 15M BEST {get_time()} ===")
+    print(f"=== V91 PROP {get_time()} ===")
     for s in SYMBOLS:
         d5 = kl(s,"Min5"); d15 = kl(s,"Min15"); d4 = kl(s,"Hour4"); d1 = kl(s,"Day1")
         if not d5 or not d15 or not d4 or not d1: continue
+
+        # PROP: Daily decides direction
         daily_trend = "up" if d1["c"][-1] > d1["c"][-20] else "down"
+        bias = "BUY" if daily_trend=="up" else "SELL"
+
         floor_d = find_pool(d1["l"], d5["c"][-1], 100)
         ceil_d = find_pool(d1["h"], d5["c"][-1], 100)
         floor_4 = find_pool(d4["l"], d5["c"][-1], 80)
         ceil_4 = find_pool(d4["h"], d5["c"][-1], 80)
-        direction, pool_15, reason = guard_15_5(d15, d5)
-        if direction=="BUY" and daily_trend=="down" and floor_d and d5["c"][-1] < floor_d: direction=None
-        if direction=="SELL" and daily_trend=="up" and ceil_d and d5["c"][-1] > ceil_d: direction=None
-        print(f"{s} D:{floor_d}/{ceil_d} 4H:{floor_4}/{ceil_4} 15M:{pool_15} 5M:{reason} -> {direction}")
+
+        # BLOCK if no daily structure to sell/buy into
+        if bias=="BUY" and not floor_d:
+            print(f"{s} SKIP BUY bias but no Daily floor")
+            continue
+        if bias=="SELL" and not ceil_d:
+            print(f"{s} SKIP SELL bias but no Daily ceiling")
+            continue
+
+        direction, pool_15, reason = guard_15_5_prop(d15, d5, bias)
+        print(f"{s} BIAS:{bias} D:{floor_d}/{ceil_d} 4H:{floor_4}/{ceil_4} 15M:{pool_15} 5M:{reason} -> {direction}")
         if not direction: continue
+
         cd = COOLDOWN_MAP.get(s, DEFAULT_CD)
         if time.time()-COOLDOWN["signals"].get(s,0)<cd: continue
         live = get_live_price(s) or d5["c"][-1]
         atr5 = sum([d5["h"][i]-d5["l"][i] for i in range(-20,0)])/20
         is_buy = direction=="BUY"
-        if is_buy:
-            sl = min(live-atr5*3, pool_15*0.997)
-        else:
-            sl = max(live+atr5*3, pool_15*1.003)
+        sl = min(live-atr5*3, pool_15*0.997) if is_buy else max(live+atr5*3, pool_15*1.003)
         tp1 = live+atr5*3 if is_buy else live-atr5*3
         tp2 = live+atr5*6 if is_buy else live-atr5*6
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
-        tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s}\n{reason}\n15M pool {pool_15:.5f} | 4H wall {floor_4 if is_buy else ceil_4}\nDaily {floor_d}/{ceil_d} trend {daily_trend}\nENTRY {live:.5f} SL {sl:.5f} TP2 {tp2:.5f}\n{get_time()}")
+        tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s} BIAS {bias}\n{reason}\n15M pool {pool_15:.5f} | 4H wall {floor_4 if is_buy else ceil_4}\nDaily {floor_d}/{ceil_d} trend {daily_trend}\nENTRY {live:.5f} SL {sl:.5f} TP2 {tp2:.5f}\n{get_time()}")
         break
 
 if "--once" in sys.argv: scan()
