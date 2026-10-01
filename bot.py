@@ -11,12 +11,10 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID") or "YOUR_C
 COOLDOWN_FILE = "cooldown.json"
 ACTIVE_FILE = "active.json"
 EARLY_FILE = "early.json"
-LAST_FILE = "last_id.json"
 
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
 COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{}}
 EARLY = json.load(open(EARLY_FILE)) if os.path.exists(EARLY_FILE) else {}
-LAST_DATA = json.load(open(LAST_FILE)) if os.path.exists(LAST_FILE) else {"id":0}
 if "signals" not in COOLDOWN: COOLDOWN={"signals":{}}
 if "dir" not in COOLDOWN: COOLDOWN["dir"]={}
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
@@ -34,9 +32,25 @@ def kl(symbol, interval):
     try:
         url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}"
         r = requests.get(url, timeout=10).json()
-        d = r["data"] if "data" in r else r
-        vols = d.get("vol", d.get("volume", d.get("amount", [0]*300)))
-        return {"o":[float(x) for x in d["open"][-200:]],"h":[float(x) for x in d["high"][-200:]],"l":[float(x) for x in d["low"][-200:]],"c":[float(x) for x in d["close"][-200:]],"v":[float(x) for x in vols[-200:]]}
+        data = r.get("data", r)
+        if isinstance(data, dict) and "data" in data:
+            data = data["data"]
+        # list format [[time,open,high,low,close,vol],...]
+        if isinstance(data, list) and len(data)>0 and isinstance(data[0], (list, tuple)):
+            o = [float(x[1]) for x in data[-200:]]
+            h = [float(x[2]) for x in data[-200:]]
+            l = [float(x[3]) for x in data[-200:]]
+            c = [float(x[4]) for x in data[-200:]]
+            v = [float(x[5]) if len(x)>5 else 0 for x in data[-200:]]
+            return {"o":o,"h":h,"l":l,"c":c,"v":v}
+        # dict format
+        o = data.get("open") or data.get("o")
+        h = data.get("high") or data.get("h")
+        l = data.get("low") or data.get("l")
+        c = data.get("close") or data.get("c")
+        v = data.get("vol") or data.get("volume") or data.get("amount") or [0]*200
+        if not o: raise Exception(f"bad keys {list(data.keys())[:8]}")
+        return {"o":[float(x) for x in o[-200:]],"h":[float(x) for x in h[-200:]],"l":[float(x) for x in l[-200:]],"c":[float(x) for x in c[-200:]],"v":[float(x) for x in v[-200:]]}
     except Exception as e:
         print(f"kl err {symbol} {e}")
         return None
@@ -49,11 +63,19 @@ def get_live_price(s):
     except: return None
 
 def find_real_pool(arr):
-    arr=arr[-50:]
-    for i in range(len(arr)-3):
-        if abs(arr[i]-arr[i+1])/arr[i]<0.004 and abs(arr[i]-arr[i+2])/arr[i]<0.004:
-            return arr[i]
-    return None
+    arr = arr[-80:]
+    cur = arr[-1]
+    candidates = {}
+    for val in arr:
+        if abs(val-cur)/cur < 0.005: continue # skip too close
+        key = round(val, 6)
+        # count touches within 0.3%
+        cnt = sum(1 for x in arr if abs(x-val)/val < 0.003)
+        if cnt >= 3:
+            candidates[val]=cnt
+    if not candidates: return None
+    # return most touched
+    return max(candidates, key=lambda k: candidates[k])
 
 def institutional_guard(symbol, d):
     c,h,l,v = d["c"], d["h"], d["l"], d["v"]
@@ -61,6 +83,8 @@ def institutional_guard(symbol, d):
 
     floor = find_real_pool(l)
     ceiling = find_real_pool(h)
+    if not floor and not ceiling:
+        return None, None, f"no real pool", None
 
     median_wick = sorted([h[i]-l[i] for i in range(-30,-2)])[14]
     median_vol = sorted(v[-30:-2])[14] or 1
@@ -71,35 +95,37 @@ def institutional_guard(symbol, d):
     absorbed = wick_size > median_wick*1.5 and sweep["v"] > median_vol*1.5
 
     wall_signal = None
-    # FIX: WALL only if ACTIVE + profit + opposite wall near
     if symbol in ACTIVE:
         is_buy = ACTIVE[symbol]["is_buy"]
         entry = ACTIVE[symbol]["entry"]
         if is_buy and ceiling and now_c > entry:
             dist = abs(ceiling-now_c)/now_c
             if dist < 0.008 and time.time()-COOLDOWN["wall"].get(symbol,0)>1800:
-                wall_signal = f"⚠️ WALL CLOSE {symbol} LONG profit {now_c:.5f} wall {ceiling:.5f} {dist:.2%} CLOSE & flip SHORT ready"
+                wall_signal = f"⚠️ WALL CLOSE {symbol} LONG profit {now_c:.5f} wall {ceiling:.5f} CLOSE & flip SHORT"
         if not is_buy and floor and now_c < entry:
             dist = abs(now_c-floor)/now_c
             if dist < 0.008 and time.time()-COOLDOWN["wall"].get(symbol,0)>1800:
-                wall_signal = f"⚠️ WALL CLOSE {symbol} SHORT profit {now_c:.5f} wall {floor:.5f} {dist:.2%} CLOSE & flip LONG ready"
+                wall_signal = f"⚠️ WALL CLOSE {symbol} SHORT profit {now_c:.5f} wall {floor:.5f} CLOSE & flip LONG"
 
     if floor:
         swept = sweep["l"] < floor
         reclaimed = now_c > floor and now_c > (sweep["h"]+sweep["l"])/2
-        if swept and absorbed and reclaimed and abs(now_c-floor)/now_c < 0.02:
+        if swept and absorbed and reclaimed:
             return "BUY", floor, f"SL POOL swept {floor:.5f} wick {wick_size/median_wick:.1f}x vol {sweep['v']/median_vol:.1f}x", wall_signal
     if ceiling:
         swept = sweep["h"] > ceiling
         reclaimed = now_c < ceiling and now_c < (sweep["h"]+sweep["l"])/2
-        if swept and absorbed and reclaimed and abs(ceiling-now_c)/now_c < 0.02:
+        if swept and absorbed and reclaimed:
             return "SELL", ceiling, f"BUY POOL swept {ceiling:.5f} wick {wick_size/median_wick:.1f}x vol {sweep['v']/median_vol:.1f}x", wall_signal
 
-    return None, None, f"no sweep floor {floor} ceil {ceiling}", wall_signal
+    return None, None, f"waiting floor {floor} ceil {ceiling}", wall_signal
 
 def get_tps_sl(entry, is_buy, d):
     atr = sum([d["h"][i]-d["l"][i] for i in range(-14,0)])/14
-    return (entry+atr*1.5, entry+atr*3, entry-atr*1.5) if is_buy else (entry-atr*1.5, entry-atr*3, entry+atr*1.5)
+    if is_buy:
+        return entry+atr*1.5, entry+atr*3, entry-atr*1.5
+    else:
+        return entry-atr*1.5, entry-atr*3, entry+atr*1.5
 
 def manage():
     for s,data in list(ACTIVE.items()):
