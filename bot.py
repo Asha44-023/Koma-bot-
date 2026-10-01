@@ -37,14 +37,11 @@ def get_live_price(s):
         return float((r.get("data", r))["lastPrice"])
     except: return None
 
-# === V93.1 ZONES - DIRECTIONAL FIX ===
 def find_pool_zones(arr, cur_price, lookback=100, tol=0.015, is_floor=True):
     arr = arr[-lookback:]
     if is_floor:
-        # floor must be BELOW current price
         filt = [float(v) for v in arr if v < cur_price and 0.003 < (cur_price - v)/cur_price < 0.15]
     else:
-        # ceil must be ABOVE current price
         filt = [float(v) for v in arr if v > cur_price and 0.003 < (v - cur_price)/cur_price < 0.15]
     if not filt:
         return None, 0
@@ -56,8 +53,7 @@ def find_pool_zones(arr, cur_price, lookback=100, tol=0.015, is_floor=True):
                 b.append(v); placed=True; break
         if not placed:
             buckets.append([v])
-    if not buckets:
-        return None, 0
+    if not buckets: return None, 0
     best = max(buckets, key=len)
     if len(best) >= 2:
         return float(sum(best)/len(best)), len(best)
@@ -77,44 +73,45 @@ def find_fractal(arr_h, arr_l, is_low=True, lookback=80):
                 res.append(float(arr[i]))
     return res
 
-def find_pool(arr, cur_price, lookback=80, tol=0.008):
-    # legacy wrapper
-    zone, cnt = find_pool_zones(arr, cur_price, lookback, tol, is_floor=True)
-    return zone
-
 def guard_15_5_prop(d15, d5, bias):
-    c5,h5,l5,v5 = d5["c"], d5["h"], d5["l"], d5["v"]
-    if len(c5)<60: return None, None, "short"
+    c5,h5,l5,v5,o5 = d5["c"], d5["h"], d5["l"], d5["v"], d5["o"]
+    if len(c5)<60: return None, None, "short", None, None
     cur = c5[-1]
     floor_15, cnt_l = find_pool_zones(d15["l"], cur, 96, 0.012, is_floor=True)
     ceil_15, cnt_h = find_pool_zones(d15["h"], cur, 96, 0.012, is_floor=False)
 
-    # fractal fallback
     if not floor_15:
-        f = find_fractal(d15["h"], d15["l"], is_low=True, lookback=80)
+        f = find_fractal(d15["h"], d15["l"], True, 80)
         f = [x for x in f if x < cur and 0.003 < (cur-x)/cur < 0.15]
         if f:
             floor_15 = min(f, key=lambda x: abs(x-cur)); cnt_l=1
     if not ceil_15:
-        f = find_fractal(d15["h"], d15["l"], is_low=False, lookback=80)
+        f = find_fractal(d15["h"], d15["l"], False, 80)
         f = [x for x in f if x > cur and 0.003 < (x-cur)/cur < 0.15]
         if f:
             ceil_15 = min(f, key=lambda x: abs(x-cur)); cnt_h=1
 
-    if bias=="BUY" and not floor_15: return None, None, f"BUY bias no floor BELOW cur {cur:.5f}"
-    if bias=="SELL" and not ceil_15: return None, None, f"SELL bias no ceil ABOVE cur {cur:.5f}"
+    if bias=="BUY" and not floor_15: return None, None, f"no floor BELOW {cur:.4f}", floor_15, ceil_15
+    if bias=="SELL" and not ceil_15: return None, None, f"no ceil ABOVE {cur:.4f}", floor_15, ceil_15
 
     med_wick = sorted([h5[i]-l5[i] for i in range(-30,-2)])[14]
     med_vol = sorted(v5[-30:-2])[14] or 1
-    sw = {"h":h5[-2],"l":l5[-2],"v":v5[-2], "o": d5["o"][-2], "c": d5["c"][-2]}
+    sw = {"h":h5[-2],"l":l5[-2],"v":v5[-2], "o": o5[-2], "c": c5[-2]}
     now = cur
-    absorbed = (sw["h"]-sw["l"]) > med_wick*1.2 and sw["v"] > med_vol*1.2
+    absorbed = (sw["h"]-sw["l"]) > med_wick*1.1 and sw["v"] > med_vol*1.1
+    wick_ok_buy = (min(sw["o"],sw["c"]) - sw["l"]) > abs(sw["o"]-sw["c"])*0.8 if bias=="BUY" else True
+    wick_ok_sell = (sw["h"] - max(sw["o"],sw["c"])) > abs(sw["o"]-sw["c"])*0.8 if bias=="SELL" else True
 
-    if bias=="BUY" and floor_15 and sw["l"] < floor_15 and now > floor_15 and now > (sw["h"]+sw["l"])/2 and absorbed:
-        return "BUY", floor_15, f"swept 15M LOW ZONE {floor_15:.5f} x{cnt_l} {sw['v']/med_vol:.1f}x vol"
-    if bias=="SELL" and ceil_15 and sw["h"] > ceil_15 and now < ceil_15 and now < (sw["h"]+sw["l"])/2 and absorbed:
-        return "SELL", ceil_15, f"swept 15M HIGH ZONE {ceil_15:.5f} x{cnt_h} {sw['v']/med_vol:.1f}x vol"
-    return None, None, f"wait {bias} f:{floor_15}({cnt_l})/c:{ceil_15}({cnt_h}) cur:{cur:.5f}"
+    if bias=="BUY" and floor_15 and sw["l"] < floor_15 and now > floor_15:
+        if not absorbed: return None, floor_15, f"wait sweep f:{floor_15:.5f} but no vol {sw['v']/med_vol:.1f}x", floor_15, ceil_15
+        if now > (sw["h"]+sw["l"])/2 and wick_ok_buy:
+            return "BUY", floor_15, f"swept LOW {floor_15:.5f} x{cnt_l} vol{sw['v']/med_vol:.1f}x", floor_15, ceil_15
+    if bias=="SELL" and ceil_15 and sw["h"] > ceil_15 and now < ceil_15:
+        if not absorbed: return None, ceil_15, f"wait sweep c:{ceil_15:.5f} but no vol {sw['v']/med_vol:.1f}x", floor_15, ceil_15
+        if now < (sw["h"]+sw["l"])/2 and wick_ok_sell:
+            return "SELL", ceil_15, f"swept HIGH {ceil_15:.5f} x{cnt_h} vol{sw['v']/med_vol:.1f}x", floor_15, ceil_15
+
+    return None, floor_15 if bias=="BUY" else ceil_15, f"wait {bias} f:{floor_15}({cnt_l})/c:{ceil_15}({cnt_h}) cur:{cur:.5f} vol:{sw['v']/med_vol:.1f}x", floor_15, ceil_15
 
 COOLDOWN_MAP = {"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
 DEFAULT_CD = 3600
@@ -131,34 +128,20 @@ def scan():
         if (is_buy and p >= data["tp2"]) or (not is_buy and p <= data["tp2"]):
             tg(f"✅✅ TP2 {s} {p:.5f}\n{get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V93.1 ZONES FIXED {get_time()} ===")
+    print(f"=== V93.2 ZONES {get_time()} ===")
     for s in SYMBOLS:
         d5 = kl(s,"Min5"); d15 = kl(s,"Min15"); d4 = kl(s,"Hour4"); d1 = kl(s,"Day1")
         if not d5 or not d15 or not d4 or not d1: continue
         daily_trend = "up" if d1["c"][-1] > d1["c"][-20] else "down"
         bias = "BUY" if daily_trend=="up" else "SELL"
-        floor_d, cnt_dl = find_pool_zones(d1["l"], d5["c"][-1], 100, 0.02, is_floor=True)
-        ceil_d, cnt_dh = find_pool_zones(d1["h"], d5["c"][-1], 100, 0.02, is_floor=False)
-        floor_4, cnt_4l = find_pool_zones(d4["l"], d5["c"][-1], 80, 0.015, is_floor=True)
-        ceil_4, cnt_4h = find_pool_zones(d4["h"], d5["c"][-1], 80, 0.015, is_floor=False)
+        floor_d, cnt_dl = find_pool_zones(d1["l"], d5["c"][-1], 100, 0.02, True)
+        ceil_d, cnt_dh = find_pool_zones(d1["h"], d5["c"][-1], 100, 0.02, False)
+        floor_4, cnt_4l = find_pool_zones(d4["l"], d5["c"][-1], 80, 0.015, True)
+        ceil_4, cnt_4h = find_pool_zones(d4["h"], d5["c"][-1], 80, 0.015, False)
 
-        # fractal fallback for Daily/4H bias
-        if bias=="BUY" and not floor_d and not floor_4:
-            f = find_fractal(d1["h"], d1["l"], True) + find_fractal(d4["h"], d4["l"], True)
-            f = [x for x in f if x < d5["c"][-1] and (d5["c"][-1]-x)/d5["c"][-1] < 0.15]
-            if not f:
-                print(f"{s} SKIP BUY no floor BELOW"); continue
-            floor_d = min(f, key=lambda x: abs(x-d5["c"][-1])); cnt_dl=1
-
-        if bias=="SELL" and not ceil_d and not ceil_4:
-            f = find_fractal(d1["h"], d1["l"], False) + find_fractal(d4["h"], d4["l"], False)
-            f = [x for x in f if x > d5["c"][-1] and (x-d5["c"][-1])/d5["c"][-1] < 0.15]
-            if not f:
-                print(f"{s} SKIP SELL no ceil ABOVE"); continue
-            ceil_d = min(f, key=lambda x: abs(x-d5["c"][-1])); cnt_dh=1
-
-        direction, pool_15, reason = guard_15_5_prop(d15, d5, bias)
-        print(f"{s} BIAS:{bias} D:{floor_d}({cnt_dl})/{ceil_d}({cnt_dh}) 4H:{floor_4}({cnt_4l})/{ceil_4}({cnt_4h}) 15M:{pool_15} -> {direction} | {reason}")
+        direction, pool_15, reason, f15, c15 = guard_15_5_prop(d15, d5, bias)
+        # NEW LOG: always show actual zones
+        print(f"{s} BIAS:{bias} D:{floor_d}({cnt_dl})/{ceil_d}({cnt_dh}) 4H:{floor_4}({cnt_4l})/{ceil_4}({cnt_4h}) 15M:f:{f15}({cnt_l if 'cnt_l' in locals() else ''})/c:{c15} -> {direction} | {reason}")
         if not direction: continue
         cd = COOLDOWN_MAP.get(s, DEFAULT_CD)
         if time.time()-COOLDOWN["signals"].get(s,0)<cd: continue
