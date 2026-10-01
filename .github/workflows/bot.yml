@@ -1,4 +1,4 @@
-name: Run Crypto Bot V90 15M HUNT
+name: Run Crypto Bot V91 PROP BIAS
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v90-15m
+  group: koma-bot-v91-prop
   cancel-in-progress: true
 
 jobs:
@@ -25,14 +25,15 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v90-15m
+          key: bot-cache-v91-prop
           restore-keys: |
-            bot-cache-v90-15m
-      - name: Ensure files
+            bot-cache-v91-prop
+      - name: Ensure files - RESET bad active trade
         run: |
           [ -f cooldown.json ] || echo '{"signals":{},"wall":{}}' > cooldown.json
-          [ -f active.json ] || echo '{}' > active.json
+          echo '{}' > active.json
           python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('wall',{}); json.dump(d,open(f,'w'))"
+          cat active.json
       - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -45,4 +46,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v90-15m
+          key: bot-cache-v91-prop-${{ github.run_id }}
