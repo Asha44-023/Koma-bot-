@@ -1,4 +1,4 @@
-name: Run Crypto Bot V88 5M INSTITUTIONAL
+name: Run Crypto Bot V90 15M HUNT
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v88-5m
+  group: koma-bot-v90-15m
   cancel-in-progress: true
 
 jobs:
@@ -25,18 +25,14 @@ jobs:
           path: |
             cooldown.json
             active.json
-            early.json
-            last_id.json
-          key: bot-cache-v88-5m-hold
+          key: bot-cache-v90-15m
           restore-keys: |
-            bot-cache-v88-5m-hold
+            bot-cache-v90-15m
       - name: Ensure files
         run: |
-          [ -f cooldown.json ] || echo '{"signals":{},"dir":{},"wall":{}}' > cooldown.json
+          [ -f cooldown.json ] || echo '{"signals":{},"wall":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
-          [ -f early.json ] || echo '{}' > early.json
-          [ -f last_id.json ] || echo '{"id":0}' > last_id.json
-          python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('dir',{}); d.setdefault('wall',{}); json.dump(d,open(f,'w'))"
+          python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('wall',{}); json.dump(d,open(f,'w'))"
       - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -49,6 +45,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-            early.json
-            last_id.json
-          key: bot-cache-v88-5m-hold-${{ github.run_id }}
+          key: bot-cache-v90-15m
