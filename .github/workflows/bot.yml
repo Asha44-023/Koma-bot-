@@ -1,4 +1,4 @@
-name: Run Crypto Bot V91 PROP BIAS
+name: Run Crypto Bot V92 ZONES
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v91-prop
+  group: koma-bot-v92-zones
   cancel-in-progress: true
 
 jobs:
@@ -26,9 +26,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v91-prop
+          key: bot-cache-v92-zones
           restore-keys: |
-            bot-cache-v91-prop
+            bot-cache-v92-zones
 
       - name: Ensure files
         run: |
@@ -49,4 +49,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v91-prop
+          key: bot-cache-v92-zones
