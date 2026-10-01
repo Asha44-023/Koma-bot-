@@ -41,10 +41,11 @@ def find_pool(arr, cur_price, lookback=80):
     arr = arr[-lookback:]
     cands = {}
     for v in arr:
-        if abs(v-cur_price)/cur_price < 0.005: continue
-        if abs(v-cur_price)/cur_price > 0.08: continue
-        cnt = sum(1 for x in arr if abs(x-v)/v < 0.004)
-        if cnt >= 3: cands[v]=cnt
+        # FIXED: relaxed filters
+        if abs(v-cur_price)/cur_price < 0.003: continue
+        if abs(v-cur_price)/cur_price > 0.12: continue
+        cnt = sum(1 for x in arr if abs(x-v)/v < 0.006)
+        if cnt >= 2: cands[v]=cnt
     if not cands: return None
     return max(cands, key=lambda k: cands[k])
 
@@ -66,7 +67,6 @@ def guard_5m(d):
     return None, None, f"wait f:{floor} c:{ceil}"
 
 def scan():
-    # manage TP/SL
     for s, data in list(ACTIVE.items()):
         p = get_live_price(s)
         if not p: continue
@@ -79,19 +79,17 @@ def scan():
             tg(f"✅✅ TP2 {s} {p:.5f}\n{get_time()}"); del ACTIVE[s]; save_a()
 
     if len(ACTIVE)>=3: return
-    print(f"=== V88 5M+4H+DAILY {get_time()} ===")
+    print(f"=== V88 FIX {get_time()} ===")
     for s in SYMBOLS:
         d5 = kl(s,"Min5"); d4 = kl(s,"Hour4"); d1 = kl(s,"Day1")
         if not d5 or not d4 or not d1: continue
 
-        # DAILY FILTER
         daily_trend = "up" if d1["c"][-1] > d1["c"][-20] else "down"
         floor_d = find_pool(d1["l"], d5["c"][-1], 100)
         ceil_d = find_pool(d1["h"], d5["c"][-1], 100)
         floor_4 = find_pool(d4["l"], d5["c"][-1], 80)
         ceil_4 = find_pool(d4["h"], d5["c"][-1], 80)
 
-        # 4H WALL ALERT
         if s in ACTIVE:
             now = d5["c"][-1]; entry = ACTIVE[s]["entry"]; is_buy = ACTIVE[s]["is_buy"]
             profit = (now-entry)/entry if is_buy else (entry-now)/entry
@@ -102,19 +100,20 @@ def scan():
                     tg(f"⚠️ 4H WALL CLOSE {s} SHORT +{profit:.2%} wall {floor_4:.5f}\n{get_time()}"); COOLDOWN["wall"][s]=time.time(); save_c()
 
         direction, pool, reason = guard_5m(d5)
-        # daily filter - no counter trend
-        if direction=="BUY" and daily_trend=="down" and d5["c"][-1] < floor_d: direction=None
-        if direction=="SELL" and daily_trend=="up" and d5["c"][-1] > ceil_d: direction=None
+        if direction=="BUY" and daily_trend=="down" and floor_d and d5["c"][-1] < floor_d: direction=None
+        if direction=="SELL" and daily_trend=="up" and ceil_d and d5["c"][-1] > ceil_d: direction=None
 
         print(f"{s} D:{floor_d}/{ceil_d} 4H:{floor_4}/{ceil_4} 5M:{reason} -> {direction}")
         if not direction: continue
         if time.time()-COOLDOWN["signals"].get(s,0)<3600: continue
+
         live = get_live_price(s) or d5["c"][-1]
-        atr = sum([d4["h"][i]-d4["l"][i] for i in range(-14,0)])/14
+        # FIXED: use 5M ATR not 4H
+        atr5 = sum([d5["h"][i]-d5["l"][i] for i in range(-20,0)])/20
         is_buy = direction=="BUY"
-        sl = live-atr*1.5 if is_buy else live+atr*1.5
-        tp1 = live+atr*1.5 if is_buy else live-atr*1.5
-        tp2 = live+atr*3 if is_buy else live-atr*3
+        sl = live-atr5*3 if is_buy else live+atr5*3
+        tp1 = live+atr5*3 if is_buy else live-atr5*3
+        tp2 = live+atr5*6 if is_buy else live-atr5*6
         ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
         COOLDOWN["signals"][s]=time.time(); save_c()
         tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s}\n5M {reason}\n4H wall {floor_4 if is_buy else ceil_4}\nDaily {floor_d}/{ceil_d} trend {daily_trend}\nENTRY {live:.5f} SL {sl:.5f} TP2 {tp2:.5f}\n{get_time()}")
