@@ -20,12 +20,10 @@ LAST_DATA = json.load(open(LAST_FILE)) if os.path.exists(LAST_FILE) else {"id":0
 if "signals" not in COOLDOWN: COOLDOWN={"signals":{}}
 if "dir" not in COOLDOWN: COOLDOWN["dir"]={}
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
-LAST_ID = LAST_DATA.get("id",0)
 
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def save_e(): json.dump(EARLY, open(EARLY_FILE,"w"))
-def save_last(): json.dump({"id":LAST_ID}, open(LAST_FILE,"w"))
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def tg(msg):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":msg}, timeout=8)
@@ -34,8 +32,7 @@ def tg(msg):
 
 def kl(symbol, interval):
     try:
-        mexc_interval = interval
-        url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={mexc_interval}"
+        url = f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}"
         r = requests.get(url, timeout=10).json()
         d = r["data"] if "data" in r else r
         vols = d.get("vol", d.get("volume", d.get("amount", [0]*300)))
@@ -51,61 +48,58 @@ def get_live_price(s):
         return float((r["data"] if "data" in r else r)["lastPrice"])
     except: return None
 
-# --- INSTITUTIONAL GUARD - NO FIXED FIGURES + 5M + WALL EARLY ---
+def find_real_pool(arr):
+    arr=arr[-50:]
+    for i in range(len(arr)-3):
+        if abs(arr[i]-arr[i+1])/arr[i]<0.004 and abs(arr[i]-arr[i+2])/arr[i]<0.004:
+            return arr[i]
+    return None
+
 def institutional_guard(symbol, d):
     c,h,l,v = d["c"], d["h"], d["l"], d["v"]
-    if len(c) < 60: return None, None, "short data", None
+    if len(c) < 60: return None, None, "short", None
 
-    recent_lows = l[-50:]
-    recent_highs = h[-50:]
-    try:
-        floor = sorted(recent_lows)[len(recent_lows)//4]
-        ceiling = sorted(recent_highs)[-len(recent_highs)//4]
-    except:
-        floor = min(l[-21:-2]); ceiling = max(h[-21:-2])
+    floor = find_real_pool(l)
+    ceiling = find_real_pool(h)
 
-    typical_wicks = [h[i]-l[i] for i in range(-30,-2)]
-    typical_vol = v[-30:-2]
-    median_wick = sorted(typical_wicks)[len(typical_wicks)//2]
-    median_vol = sorted(typical_vol)[len(typical_vol)//2] if sorted(typical_vol)[len(typical_vol)//2]!=0 else 1
+    median_wick = sorted([h[i]-l[i] for i in range(-30,-2)])[14]
+    median_vol = sorted(v[-30:-2])[14] or 1
 
-    sweep = {"h":h[-2], "l":l[-2], "c":c[-2], "o":d["o"][-2], "v":v[-2]}
-    now = {"c":c[-1], "h":h[-1], "l":l[-1]}
+    sweep = {"h":h[-2], "l":l[-2], "v":v[-2]}
+    now_c = c[-1]
+    wick_size = sweep["h"]-sweep["l"]
+    absorbed = wick_size > median_wick*1.5 and sweep["v"] > median_vol*1.5
 
-    wick_size = sweep["h"] - sweep["l"]
-    absorbed = wick_size > median_wick * 1.2 and sweep["v"] > median_vol * 1.2
-
-    dist_floor = abs(now["c"] - floor) / now["c"]
-    dist_ceil = abs(ceiling - now["c"]) / now["c"]
-    bias_long = dist_floor < dist_ceil
-    nearest_pool = floor if bias_long else ceiling
-
-    # WALL CLOSE early check - 5m ahead
     wall_signal = None
-    if min(dist_floor, dist_ceil) < 0.008: # 0.8% from wall
-        if time.time() - COOLDOWN["wall"].get(symbol,0) > 1800:
-            wall_signal = f"⚠️ WALL CLOSE {symbol} price {now['c']:.5f} pool {nearest_pool:.5f} {min(dist_floor,dist_ceil):.2%} - if in profit CLOSE & flip ready"
+    # FIX: WALL only if ACTIVE + profit + opposite wall near
+    if symbol in ACTIVE:
+        is_buy = ACTIVE[symbol]["is_buy"]
+        entry = ACTIVE[symbol]["entry"]
+        if is_buy and ceiling and now_c > entry:
+            dist = abs(ceiling-now_c)/now_c
+            if dist < 0.008 and time.time()-COOLDOWN["wall"].get(symbol,0)>1800:
+                wall_signal = f"⚠️ WALL CLOSE {symbol} LONG profit {now_c:.5f} wall {ceiling:.5f} {dist:.2%} CLOSE & flip SHORT ready"
+        if not is_buy and floor and now_c < entry:
+            dist = abs(now_c-floor)/now_c
+            if dist < 0.008 and time.time()-COOLDOWN["wall"].get(symbol,0)>1800:
+                wall_signal = f"⚠️ WALL CLOSE {symbol} SHORT profit {now_c:.5f} wall {floor:.5f} {dist:.2%} CLOSE & flip LONG ready"
 
-    if bias_long:
+    if floor:
         swept = sweep["l"] < floor
-        reclaimed = now["c"] > floor and now["c"] > (sweep["h"]+sweep["l"])/2
-        if swept and absorbed and reclaimed:
+        reclaimed = now_c > floor and now_c > (sweep["h"]+sweep["l"])/2
+        if swept and absorbed and reclaimed and abs(now_c-floor)/now_c < 0.02:
             return "BUY", floor, f"SL POOL swept {floor:.5f} wick {wick_size/median_wick:.1f}x vol {sweep['v']/median_vol:.1f}x", wall_signal
-    else:
+    if ceiling:
         swept = sweep["h"] > ceiling
-        reclaimed = now["c"] < ceiling and now["c"] < (sweep["h"]+sweep["l"])/2
-        if swept and absorbed and reclaimed:
+        reclaimed = now_c < ceiling and now_c < (sweep["h"]+sweep["l"])/2
+        if swept and absorbed and reclaimed and abs(ceiling-now_c)/now_c < 0.02:
             return "SELL", ceiling, f"BUY POOL swept {ceiling:.5f} wick {wick_size/median_wick:.1f}x vol {sweep['v']/median_vol:.1f}x", wall_signal
 
-    return None, None, f"waiting floor {floor:.5f} ceil {ceiling:.5f} bias {'LONG' if bias_long else 'SHORT'}", wall_signal
+    return None, None, f"no sweep floor {floor} ceil {ceiling}", wall_signal
 
 def get_tps_sl(entry, is_buy, d):
     atr = sum([d["h"][i]-d["l"][i] for i in range(-14,0)])/14
-    if is_buy:
-        sl = entry - (atr * 1.5); tp2 = entry + (atr * 3); tp1 = entry + (atr * 1.5)
-    else:
-        sl = entry + (atr * 1.5); tp2 = entry - (atr * 3); tp1 = entry - (atr * 1.5)
-    return tp1, tp2, sl
+    return (entry+atr*1.5, entry+atr*3, entry-atr*1.5) if is_buy else (entry-atr*1.5, entry-atr*3, entry+atr*1.5)
 
 def manage():
     for s,data in list(ACTIVE.items()):
@@ -125,22 +119,16 @@ def manage():
 def scan():
     manage()
     if len(ACTIVE)>=3: return
-    print(f"=== SCAN V88 5M INSTITUTIONAL {get_time()} ===")
+    print(f"=== SCAN V88 5M {get_time()} ===")
     for s in SYMBOLS:
-        d5m=kl(s,"Min5") # 5m for clean + early
-        d4h=kl(s,"Min240")
+        d5m=kl(s,"Min5"); d4h=kl(s,"Min240")
         if not d5m: continue
         direction, pool, reason, wall = institutional_guard(s, d5m)
-
-        # send wall early first
         if wall:
-            tg(f"{wall}\n{get_time()}")
-            COOLDOWN["wall"][s]=time.time(); save_c()
-
+            tg(f"{wall}\n{get_time()}"); COOLDOWN["wall"][s]=time.time(); save_c()
         print(f"{s} {reason} -> {direction}")
         if not direction: continue
         if time.time() - COOLDOWN["signals"].get(s,0) < 3600: continue
-
         live=get_live_price(s) or d5m["c"][-1]
         is_buy = direction=="BUY"
         tp1,tp2,sl = get_tps_sl(live, is_buy, d4h or d5m)
@@ -149,10 +137,9 @@ def scan():
         tg(f"{'🟢 BUY READY' if is_buy else '🔴 SELL READY'} {s} V88 5M\nPOOL: {pool:.5f}\n{reason}\nENTRY {live:.5f}\nSL {sl:.5f}\nTP2 {tp2:.5f}\n{get_time()}")
         break
 
-if "--once" in sys.argv:
-    scan()
+if "--once" in sys.argv: scan()
 else:
-    print(f"🚀 V88 5M INSTITUTIONAL {get_time()}")
+    print(f"🚀 V88 5M {get_time()}")
     while True:
         try: scan()
         except Exception as e: print(e)
