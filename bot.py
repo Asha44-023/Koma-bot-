@@ -17,7 +17,6 @@ def tg(m):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":m}, timeout=8)
     except: pass
     print(m)
-
 def kl(symbol, interval):
     sec_map = {"Min5":300,"Min15":900,"Hour4":14400,"Day1":86400}
     sec = sec_map.get(interval, 300)
@@ -30,13 +29,11 @@ def kl(symbol, interval):
         if not isinstance(d, dict) or "open" not in d: return None
         return {"o":[float(x) for x in d["open"][-200:]],"h":[float(x) for x in d["high"][-200:]],"l":[float(x) for x in d["low"][-200:]],"c":[float(x) for x in d["close"][-200:]],"v":[float(x) for x in (d.get("vol") or [0]*200)[-200:]]}
     except: return None
-
 def get_live_price(s):
     try:
         r = requests.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={s}", timeout=5).json()
         return float((r.get("data", r))["lastPrice"])
     except: return None
-
 def find_pool_zones(arr, cur_price, lookback=100, tol=0.015, is_floor=True):
     arr = arr[-lookback:]
     if is_floor:
@@ -55,7 +52,6 @@ def find_pool_zones(arr, cur_price, lookback=100, tol=0.015, is_floor=True):
     if len(best) >= 2: return float(sum(best)/len(best)), len(best)
     nearest = min(filt, key=lambda x: abs(x-cur_price))
     return float(nearest), 1
-
 def find_fractal(arr_h, arr_l, is_low=True, lookback=80):
     arr = arr_l if is_low else arr_h
     arr = arr[-lookback:]
@@ -66,7 +62,6 @@ def find_fractal(arr_h, arr_l, is_low=True, lookback=80):
         else:
             if arr[i] > arr[i-1] and arr[i] > arr[i-2] and arr[i] > arr[i+1] and arr[i] > arr[i+2]: res.append(float(arr[i]))
     return res
-
 def guard_15_5_prop(d15, d5, bias):
     c5,h5,l5,v5,o5 = d5["c"], d5["h"], d5["l"], d5["v"], d5["o"]
     if len(c5)<60: return None, None, "short", None, None, 0, 0
@@ -102,11 +97,12 @@ def guard_15_5_prop(d15, d5, bias):
                 wick_high = sw["h"] - max(sw["o"],sw["c"])
                 if wick_high > body*0.6:
                     return "SELL", ceil_15, f"swept HIGH {ceil_15:.5f} x{cnt_h} k-{k} vol{sw['v']/med_vol:.1f}x", floor_15, ceil_15, cnt_l, cnt_h
-    return None, floor_15 if bias=="BUY" else ceil_15, f"wait {bias} f:{floor_15:.5f}({cnt_l})/c:{ceil_15:.5f}({cnt_h}) cur:{cur:.5f}", floor_15, ceil_15, cnt_l, cnt_h
-
+    ff = f"{floor_15:.5f}" if floor_15 else "None"
+    cc = f"{ceil_15:.5f}" if ceil_15 else "None"
+    pool_show = floor_15 if bias=="BUY" else ceil_15
+    return None, pool_show, f"wait {bias} f:{ff}({cnt_l})/c:{cc}({cnt_h}) cur:{cur:.5f}", floor_15, ceil_15, cnt_l, cnt_h
 COOLDOWN_MAP = {"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
 DEFAULT_CD = 3600
-
 def scan():
     for s, data in list(ACTIVE.items()):
         p = get_live_price(s)
@@ -121,36 +117,45 @@ def scan():
     if len(ACTIVE)>=3: return
     print(f"=== V93.3A BEST A-MODE {get_time()} ===")
     for s in SYMBOLS:
-        d5 = kl(s,"Min5"); d15 = kl(s,"Min15"); d4 = kl(s,"Hour4"); d1 = kl(s,"Day1")
-        if not d5 or not d15 or not d4 or not d1: continue
-        daily_trend = "up" if d1["c"][-1] > d1["c"][-20] else "down"
-        bias = "BUY" if daily_trend=="up" else "SELL"
-        floor_d, cnt_dl = find_pool_zones(d1["l"], d5["c"][-1], 100, 0.02, True)
-        ceil_d, cnt_dh = find_pool_zones(d1["h"], d5["c"][-1], 100, 0.02, False)
-        floor_4, cnt_4l = find_pool_zones(d4["l"], d5["c"][-1], 80, 0.015, True)
-        ceil_4, cnt_4h = find_pool_zones(d4["h"], d5["c"][-1], 80, 0.015, False)
-        direction, pool_15, reason, f15, c15, cnt_l, cnt_h = guard_15_5_prop(d15, d5, bias)
-        fd = f"{floor_d:.5f}" if floor_d else "None"
-        cd = f"{ceil_d:.5f}" if ceil_d else "None"
-        f4 = f"{floor_4:.5f}" if floor_4 else "None"
-        c4 = f"{ceil_4:.5f}" if ceil_4 else "None"
-        ff = f"{f15:.5f}" if f15 else "None"
-        cc = f"{c15:.5f}" if c15 else "None"
-        print(f"{s} BIAS:{bias} D:{fd}({cnt_dl})/{cd}({cnt_dh}) 4H:{f4}({cnt_4l})/{c4}({cnt_4h}) 15M:f:{ff}({cnt_l})/c:{cc}({cnt_h}) -> {direction} | {reason}")
-        if not direction: continue
-        cdsec = COOLDOWN_MAP.get(s, DEFAULT_CD)
-        if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
-        live = get_live_price(s) or d5["c"][-1]
-        atr5 = sum([d5["h"][i]-d5["l"][i] for i in range(-20,0)])/20
-        is_buy = direction=="BUY"
-        sl = min(live-atr5*2.5, pool_15*0.997) if is_buy else max(live+atr5*2.5, pool_15*1.003)
-        tp1 = live+atr5*3 if is_buy else live-atr5*3
-        tp2 = live+atr5*6 if is_buy else live-atr5*6
-        ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
-        COOLDOWN["signals"][s]=time.time(); save_c()
-        tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s} BIAS {bias}\n{reason}\nZONE 15M {pool_15:.5f} | 4H {floor_4 if is_buy else ceil_4} | D {floor_d if is_buy else ceil_d}\nENTRY {live:.5f} SL {sl:.5f} TP2 {tp2:.5f}\n{get_time()}")
-        break
-
+        try:
+            d5 = kl(s,"Min5"); d15 = kl(s,"Min15"); d4 = kl(s,"Hour4"); d1 = kl(s,"Day1")
+            if not d5 or not d15 or not d4 or not d1: continue
+            daily_trend = "up" if d1["c"][-1] > d1["c"][-20] else "down"
+            bias = "BUY" if daily_trend=="up" else "SELL"
+            floor_d, cnt_dl = find_pool_zones(d1["l"], d5["c"][-1], 100, 0.02, True)
+            ceil_d, cnt_dh = find_pool_zones(d1["h"], d5["c"][-1], 100, 0.02, False)
+            floor_4, cnt_4l = find_pool_zones(d4["l"], d5["c"][-1], 80, 0.015, True)
+            ceil_4, cnt_4h = find_pool_zones(d4["h"], d5["c"][-1], 80, 0.015, False)
+            direction, pool_15, reason, f15, c15, cnt_l, cnt_h = guard_15_5_prop(d15, d5, bias)
+            fd = f"{floor_d:.5f}" if floor_d else "None"
+            cd = f"{ceil_d:.5f}" if ceil_d else "None"
+            f4 = f"{floor_4:.5f}" if floor_4 else "None"
+            c4 = f"{ceil_4:.5f}" if ceil_4 else "None"
+            ff = f"{f15:.5f}" if f15 else "None"
+            cc = f"{c15:.5f}" if c15 else "None"
+            print(f"{s} BIAS:{bias} D:{fd}({cnt_dl})/{cd}({cnt_dh}) 4H:{f4}({cnt_4l})/{c4}({cnt_4h}) 15M:f:{ff}({cnt_l})/c:{cc}({cnt_h}) -> {direction} | {reason}")
+            if not direction: continue
+            cdsec = COOLDOWN_MAP.get(s, DEFAULT_CD)
+            if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
+            live = get_live_price(s) or d5["c"][-1]
+            atr5 = sum([d5["h"][i]-d5["l"][i] for i in range(-20,0)])/20
+            is_buy = direction=="BUY"
+            sl = min(live-atr5*2.5, pool_15*0.997) if is_buy else max(live+atr5*2.5, pool_15*1.003)
+            tp1 = live+atr5*3 if is_buy else live-atr5*3
+            tp2 = live+atr5*6 if is_buy else live-atr5*6
+            f4_show = f"{floor_4:.5f}" if floor_4 else "None"
+            c4_show = f"{ceil_4:.5f}" if ceil_4 else "None"
+            fd_show = f"{floor_d:.5f}" if floor_d else "None"
+            cd_show = f"{ceil_d:.5f}" if ceil_d else "None"
+            zone_4 = f4_show if is_buy else c4_show
+            zone_d = fd_show if is_buy else cd_show
+            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
+            COOLDOWN["signals"][s]=time.time(); save_c()
+            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s} BIAS {bias}\n{reason}\nZONE 15M {pool_15:.5f} | 4H {zone_4} | D {zone_d}\nENTRY {live:.5f} SL {sl:.5f} TP2 {tp2:.5f}\n{get_time()}")
+            break
+        except Exception as e:
+            print(f"SKIP {s} error: {e}")
+            continue
 if "--once" in sys.argv: scan()
 else:
     while True:
