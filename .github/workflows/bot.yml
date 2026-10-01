@@ -19,6 +19,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests pytz
+
       - name: Restore cache
         uses: actions/cache/restore@v4
         with:
@@ -28,17 +29,19 @@ jobs:
           key: bot-cache-v91-prop
           restore-keys: |
             bot-cache-v91-prop
-      - name: Ensure files - RESET bad active trade
+
+      - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{},"wall":{}}' > cooldown.json
-          echo '{}' > active.json
+          [ -f active.json ] || echo '{}' > active.json
           python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('wall',{}); json.dump(d,open(f,'w'))"
-          cat active.json
+
       - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
+
       - name: Save cache
         uses: actions/cache/save@v4
         if: always()
@@ -46,4 +49,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v91-prop-${{ github.run_id }}
+          key: bot-cache-v91-prop
