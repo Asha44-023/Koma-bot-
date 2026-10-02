@@ -1,4 +1,4 @@
-name: Run Crypto Bot V93 ZONES
+name: Run Crypto Bot V97 PURE PRICE
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v93-zones
+  group: koma-bot-v97-pure
   cancel-in-progress: true
 
 jobs:
@@ -26,9 +26,9 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v93-zones
+          key: bot-cache-v97-pure
           restore-keys: |
-            bot-cache-v93-zones
+            bot-cache-v97-pure
 
       - name: Ensure files
         run: |
@@ -49,4 +49,6 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v93-zones
+          key: bot-cache-v97-pure-${{ github.run_id }}
+          restore-keys: |
+            bot-cache-v97-pure
