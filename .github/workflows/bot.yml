@@ -1,4 +1,4 @@
-name: Run Crypto Bot V97.6 SCALP FIXED
+name: Run Crypto Bot V98 ICT SWEEP
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v97-6-fixed
+  group: koma-bot-v98-ict-sweep
   cancel-in-progress: true
 
 jobs:
@@ -26,10 +26,10 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v97-6
+          key: bot-cache-v98
           restore-keys: |
+            bot-cache-v98
             bot-cache-v97-6
-            bot-cache-v97-5
 
       - name: Ensure files
         run: |
@@ -50,6 +50,6 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v97-6-${{ github.run_id }}
+          key: bot-cache-v98-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v97-6
+            bot-cache-v98
