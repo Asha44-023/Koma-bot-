@@ -35,7 +35,6 @@ def get_live_price(s):
         return float((r.get("data", r))["lastPrice"])
     except: return None
 
-# === V98 ICT LOGIC FROM NOTEBOOK ===
 def detect_4h_trend(d4):
     lows = d4["l"][-20:]; highs = d4["h"][-20:]; hl=0; lh=0
     for i in range(1,len(lows)):
@@ -92,37 +91,26 @@ def detect_station_and_parking(d15):
     else: parking="NEUTRAL_MIDDLE"
     return {"HH":HH,"LL":LL,"mid":mid,"tick":tick,"touches":touches,"cnt_lower":cnt_lower,"cnt_middle":cnt_middle,"cnt_upper":cnt_upper,"parking":parking,"face":face,"range_ticks":range_ticks}
 
-# NOTEBOOK PANEL 3: FVG
 def detect_FVG(d):
-    # bullish FVG: low[2] > high[0]
-    # bearish FVG: high[2] < low[0]
     h=d["h"]; l=d["l"]; fvg_bull=[]; fvg_bear=[]
     for i in range(2, len(h)):
-        if l[i] > h[i-2]: # bullish gap
-            fvg_bull.append((h[i-2], l[i], i))
-        if h[i] < l[i-2]: # bearish gap
-            fvg_bear.append((h[i], l[i-2], i))
-    return fvg_bull[-3:], fvg_bear[-3:] # last 3
+        if l[i] > h[i-2]: fvg_bull.append((h[i-2], l[i], i))
+        if h[i] < l[i-2]: fvg_bear.append((h[i], l[i-2], i))
+    return fvg_bull[-3:], fvg_bear[-3:]
 
-# NOTEBOOK PANEL 3: MSS + BOS
 def detect_MSS_BOS(d):
-    # MSS = break of recent swing
     h=d["h"][-20:]; l=d["l"][-20:]; c=d["c"][-1]
     last_swing_high=max(h[:-3])
     last_swing_low=min(l[:-3])
     bos_bull = c > last_swing_high
     bos_bear = c < last_swing_low
-    # MSS = close beyond + wick confirmation
     mss_bull = c > last_swing_high and h[-1] > last_swing_high
     mss_bear = c < last_swing_low and l[-1] < last_swing_low
     return bos_bull, bos_bear, mss_bull, mss_bear, last_swing_high, last_swing_low
 
-# NOTEBOOK PANEL 1: TRUE LIQUIDITY POOL - EQUAL HIGHS/LOWS SWEEP
 def detect_true_liquidity_pool(d15, d5):
-    # look for equal highs/lows in last 40 candles (liquidity)
     h15=d15["h"][-40:]; l15=d15["l"][-40:]
     tick=get_pure_tick(d15)
-    # find clusters of similar highs (within 5 ticks)
     pools_high=[]; pools_low=[]
     for i in range(len(h15)):
         cluster=[x for x in h15 if abs(x-h15[i]) < 5*tick]
@@ -132,72 +120,59 @@ def detect_true_liquidity_pool(d15, d5):
         if len(cluster)>=3: pools_low.append(l15[i])
     eq_high = max(pools_high) if pools_high else max(h15)
     eq_low = min(pools_low) if pools_low else min(l15)
-
-    # did recent 5m candle SWEEP it?
     h5_max=max(d5["h"][-5:]); l5_min=min(d5["l"][-5:])
     upper_sweep = h5_max > eq_high
     lower_sweep = l5_min < eq_low
     upper_dist = (h5_max - eq_high)/tick if upper_sweep else 0
     lower_dist = (eq_low - l5_min)/tick if lower_sweep else 0
-
     return eq_high, eq_low, upper_sweep, lower_sweep, upper_dist, lower_dist
 
 def guard_Aplus(d15, d5, bias):
     station=detect_station_and_parking(d15)
     if not station: return None, None, "no station", None, None, 0,0,None
-
     HH, LL = station["HH"], station["LL"]
     tick=station["tick"]; curr=d15["c"][-1]
     range_abs=HH-LL
-
-    # ICT filters
     fvg_bull, fvg_bear = detect_FVG(d5)
     bos_bull, bos_bear, mss_bull, mss_bear, swing_h, swing_l = detect_MSS_BOS(d5)
     eq_high, eq_low, upper_sweep, lower_sweep, upper_dist, lower_dist = detect_true_liquidity_pool(d15, d5)
 
+    # V98.1 FIX: MUST RECLAIM - this is what you spotted
+    if lower_sweep and curr <= eq_low:
+        return None, None, f"INVALID BUY no reclaim curr {curr:.5f} <= EqL {eq_low:.5f} sweep {int(lower_dist)}t", HH, LL, station['cnt_lower'], station['cnt_upper'], station
+    if upper_sweep and curr >= eq_high:
+        return None, None, f"INVALID SELL no reject curr {curr:.5f} >= EqH {eq_high:.5f} sweep {int(upper_dist)}t", HH, LL, station['cnt_lower'], station['cnt_upper'], station
+
     direction=None; pool_15=None; reason_extra=""
 
-    # PANEL 1 LOGIC: liquidity sweep must happen
     if bias=="up":
-        # need lower sweep + BOS up
-        if lower_sweep and (bos_bull or mss_bull or station["parking"]!="DISTRIBUTION_UPPER"):
-            if lower_dist>=2 or station["touches"]>=15: # at least 2 ticks sweep
+        if lower_sweep and curr > eq_low and (bos_bull or mss_bull or station["parking"]!="DISTRIBUTION_UPPER"):
+            if lower_dist>=2 or station["touches"]>=15:
                 direction="BUY"; pool_15=eq_low - 2*tick
-                reason_extra=f"SweepL {int(lower_dist)}t EqL {eq_low:.5f}"
+                reason_extra=f"SweepL {int(lower_dist)}t EqL {eq_low:.5f} RECLAIM"
     elif bias=="down":
-        if upper_sweep and (bos_bear or mss_bear or station["parking"]!="ACCUMULATION_LOWER"):
+        if upper_sweep and curr < eq_high and (bos_bear or mss_bear or station["parking"]!="ACCUMULATION_LOWER"):
             if upper_dist>=2 or station["touches"]>=15:
                 direction="SELL"; pool_15=eq_high + 2*tick
-                reason_extra=f"SweepH {int(upper_dist)}t EqH {eq_high:.5f}"
-    else: # neutral bias uses parking
-        if station["parking"]=="ACCUMULATION_LOWER" and lower_sweep:
-            direction="BUY"; pool_15=eq_low - 2*tick; reason_extra=f"SweepL {int(lower_dist)}t"
-        elif station["parking"]=="DISTRIBUTION_UPPER" and upper_sweep:
-            direction="SELL"; pool_15=eq_high + 2*tick; reason_extra=f"SweepH {int(upper_dist)}t"
-        elif lower_sweep and curr < station["mid"]:
-            direction="BUY"; pool_15=eq_low - 2*tick; reason_extra=f"SweepL {int(lower_dist)}t NEUTRAL"
-        elif upper_sweep and curr > station["mid"]:
-            direction="SELL"; pool_15=eq_high + 2*tick; reason_extra=f"SweepH {int(upper_dist)}t NEUTRAL"
+                reason_extra=f"SweepH {int(upper_dist)}t EqH {eq_high:.5f} REJECT"
+    else:
+        if station["parking"]=="ACCUMULATION_LOWER" and lower_sweep and curr > eq_low:
+            direction="BUY"; pool_15=eq_low - 2*tick; reason_extra=f"SweepL {int(lower_dist)}t RECLAIM"
+        elif station["parking"]=="DISTRIBUTION_UPPER" and upper_sweep and curr < eq_high:
+            direction="SELL"; pool_15=eq_high + 2*tick; reason_extra=f"SweepH {int(upper_dist)}t REJECT"
 
     if not direction:
-        return None, None, f"no sweep up:{upper_sweep}({int(upper_dist)}t) down:{lower_sweep}({int(lower_dist)}t) BOS up:{bos_bull} down:{bos_bear}", HH, LL, station['cnt_lower'], station['cnt_upper'], station
+        return None, None, f"no valid reclaim up:{upper_sweep} down:{lower_sweep} BOS up:{bos_bull} down:{bos_bear} curr {curr:.5f} EqL {eq_low:.5f} EqH {eq_high:.5f}", HH, LL, station['cnt_lower'], station['cnt_upper'], station
 
-    # PANEL 4 LOGIC: SL outside FVG + min 40% range (fixes SENT bug)
     min_dist = range_abs * 0.4
     if direction=="BUY":
-        # SL below pool, not inside FVG
-        if curr - pool_15 < min_dist:
-            pool_15 = curr - min_dist
-        # check if SL inside bullish FVG -> move below FVG
+        if curr - pool_15 < min_dist: pool_15 = curr - min_dist
         for fvg_low, fvg_high, idx in fvg_bull:
-            if pool_15 > fvg_low and pool_15 < fvg_high:
-                pool_15 = fvg_low - 2*tick
+            if pool_15 > fvg_low and pool_15 < fvg_high: pool_15 = fvg_low - 2*tick
     else:
-        if pool_15 - curr < min_dist:
-            pool_15 = curr + min_dist
+        if pool_15 - curr < min_dist: pool_15 = curr + min_dist
         for fvg_high, fvg_low, idx in fvg_bear:
-            if pool_15 < fvg_low and pool_15 > fvg_high:
-                pool_15 = fvg_low + 2*tick
+            if pool_15 < fvg_low and pool_15 > fvg_high: pool_15 = fvg_low + 2*tick
 
     reason=f"A+ {direction} {station['face']} {station['parking']} {reason_extra} touch{station['touches']} range{int(station['range_ticks'])}"
     return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station
@@ -218,7 +193,7 @@ def scan():
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V98 ICT LIQ SWEEP {get_time()} ===")
+    print(f"=== V98.1 RECLAIM FIX {get_time()} ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -241,7 +216,6 @@ def scan():
             is_buy=direction=="BUY"
             tick=station["tick"]; range_abs=HH-LL
             sl=pool_15
-            # TP from FVG logic (panel 3+4)
             tp1=live+range_abs*1.5 if is_buy else live-range_abs*1.5
             tp2=live+range_abs*3 if is_buy else live-range_abs*3
             last_hour_range = max(d5["h"][-12:]) - min(d5["l"][-12:])
