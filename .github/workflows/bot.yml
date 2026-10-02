@@ -1,4 +1,4 @@
-name: Run Crypto Bot V98 ICT SWEEP
+name: Run Crypto Bot V98.1 RECLAIM FIX
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v98-ict-sweep
+  group: koma-bot-v98-1-reclaim
   cancel-in-progress: true
 
 jobs:
@@ -26,15 +26,17 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v98
+          key: bot-cache-v98-1
           restore-keys: |
+            bot-cache-v98-1
             bot-cache-v98
-            bot-cache-v97-6
 
       - name: Ensure files
         run: |
           [ -f cooldown.json ] || echo '{"signals":{},"wall":{}}' > cooldown.json
           [ -f active.json ] || echo '{}' > active.json
+          cat active.json
+          cat cooldown.json
           python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('wall',{}); json.dump(d,open(f,'w')); print(d)"
 
       - name: Run bot
@@ -50,6 +52,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v98-${{ github.run_id }}
-          restore-keys: |
-            bot-cache-v98
+          key: bot-cache-v98-1-${{ github.run_id }}
