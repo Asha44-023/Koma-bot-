@@ -60,14 +60,14 @@ def detect_station_and_parking(d15):
     if HH == LL: return None
     tick = get_pure_tick(d15)
     mid = (HH + LL) / 2
-    zone_low = mid - 2*tick
-    zone_high = mid + 2*tick
+    zone_low = mid - 8*tick
+    zone_high = mid + 8*tick
     touches=0
     for cl in c:
         if zone_low <= cl <= zone_high: touches+=1
     range_ticks = (HH-LL) / tick if tick!=0 else 9999
-    if touches < 15: return None
-    if range_ticks > 100: return None
+    if touches < 12: return None
+    if range_ticks > 150: return None
     third = (HH - LL) / 3
     lower_thr = LL + third; upper_thr = LL + third*2
     cnt_lower=0; cnt_middle=0; cnt_upper=0
@@ -89,7 +89,7 @@ def detect_station_and_parking(d15):
     if len(d15["c"]) >= 80:
         HH2 = max(d15["h"][-80:-40]); LL2 = min(d15["l"][-80:-40]); mid2 = (HH2+LL2)/2
         range2_ticks = (HH2-LL2)/tick if tick!=0 else 9999
-        if range2_ticks < 100:
+        if range2_ticks < 150:
             gap_ticks = abs(mid - mid2)/tick if tick!=0 else 9999
             if 10 < gap_ticks < 80: is_staircase=True
     face="Rectangle"
@@ -106,16 +106,15 @@ def detect_station_and_parking(d15):
 
 def guard_Aplus(d15, d5, trend_4h):
     station = detect_station_and_parking(d15)
-    if not station: return None, None, "no station 15+closes in 2-tick zone", None, None, 0, 0
+    if not station: return None, None, "no station 12+closes in 8-tick zone", None, None, 0, 0
     c5 = d15["c"]; h5 = d15["h"]; l5 = d15["l"]
     HH = station["HH"]; LL = station["LL"]; tick = station["tick"]; face = station["face"]; parking = station["parking"]
-    # ROUNDED LOGIC - BREAKS RIGHT MOSTLY
     if face == "Rounded Top":
         if not (parking == "DISTRIBUTION_UPPER" and trend_4h == "down"):
-            return None, (HH+LL)/2, f"SKIP {face} {parking} L{station['cnt_lower']} M{station['cnt_middle']} U{station['cnt_upper']} needs DISTRIBUTION+down to SELL", HH, LL, station['cnt_lower'], station['cnt_upper']
+            return None, (HH+LL)/2, f"SKIP {face} {parking} needs DIST+down to SELL", HH, LL, station['cnt_lower'], station['cnt_upper']
     if face == "Rounded Bottom":
         if not (parking == "ACCUMULATION_LOWER" and trend_4h == "up"):
-            return None, (HH+LL)/2, f"SKIP {face} {parking} L{station['cnt_lower']} M{station['cnt_middle']} U{station['cnt_upper']} needs ACCUM+up to BUY", HH, LL, station['cnt_lower'], station['cnt_upper']
+            return None, (HH+LL)/2, f"SKIP {face} {parking} needs ACCUM+up to BUY", HH, LL, station['cnt_lower'], station['cnt_upper']
     direction=None
     lower_thr = LL + (HH-LL)/3; upper_thr = LL + (HH-LL)/3*2
     max_k = 5 if "Flag" in face else 3
@@ -156,7 +155,7 @@ def scan():
         if (is_buy and p >= data["tp2"]) or (not is_buy and p <= data["tp2"]):
             tg(f"TP2 {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V97 MAGIC A+ PURE PRICE ROUNDED BREAKS RIGHT {get_time()} ===")
+    print(f"=== V97.1 MAGIC A+ PURE PRICE 8-TICK ZONE {get_time()} ===")
     for s in SYMBOLS:
         try:
             d5 = kl(s,"Min5"); d15 = kl(s,"Min15"); d4 = kl(s,"Hour4"); d1 = kl(s,"Day1")
