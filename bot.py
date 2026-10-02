@@ -60,11 +60,11 @@ def detect_station_and_parking(d15):
     if HH==LL: return None
     tick=get_pure_tick(d15)
     mid=(HH+LL)/2
-    zone_low=mid-15*tick; zone_high=mid+15*tick # V97.5 15-tick
+    zone_low=mid-18*tick; zone_high=mid+18*tick # V97.6 18-tick
     touches=sum(1 for cl in c if zone_low <= cl <= zone_high)
     range_ticks=(HH-LL)/tick if tick!=0 else 9999
-    if touches<8: return None # V97.5 was 10
-    if range_ticks>220: return None # was 180
+    if touches<6: return None # V97.6 looser
+    if range_ticks>250: return None
     third=(HH-LL)/3; lower_thr=LL+third; upper_thr=LL+third*2
     cnt_lower=0; cnt_middle=0; cnt_upper=0
     for cl in c:
@@ -85,7 +85,7 @@ def detect_station_and_parking(d15):
     if len(d15["c"])>=80:
         HH2=max(d15["h"][-80:-40]); LL2=min(d15["l"][-80:-40]); mid2=(HH2+LL2)/2
         range2_ticks=(HH2-LL2)/tick if tick!=0 else 9999
-        if range2_ticks<220:
+        if range2_ticks<250:
             gap_ticks=abs(mid-mid2)/tick if tick!=0 else 9999
             if 10<gap_ticks<80: is_staircase=True
     face="Rectangle"
@@ -101,36 +101,30 @@ def detect_station_and_parking(d15):
     return {"HH":HH,"LL":LL,"mid":mid,"tick":tick,"touches":touches,"cnt_lower":cnt_lower,"cnt_middle":cnt_middle,"cnt_upper":cnt_upper,"parking":parking,"face":face,"range_ticks":range_ticks,"is_staircase":is_staircase}
 def guard_Aplus(d15, d5, trend_4h):
     station=detect_station_and_parking(d15)
-    if not station: return None, None, "no station 8+ in 15-tick", None, None, 0, 0, None
+    if not station: return None, None, "no station 6+ in 18-tick", None, None, 0, 0, None
     c5=d15["c"]; h5=d15["h"]; l5=d15["l"]; curr=c5[-1]
     HH=station["HH"]; LL=station["LL"]; tick=station["tick"]; face=station["face"]; parking=station["parking"]
-    # V97.5: no block on neutral if high quality
     direction=None
     lower_thr=LL+(HH-LL)/3; upper_thr=LL+(HH-LL)/3*2
-    # SWEEP CHECK
     has_bear_sweep = any(h>HH for h in h5[-3:])
     has_bull_sweep = any(ll<LL for ll in l5[-3:])
-    # A+ logic
     if parking=="ACCUMULATION_LOWER":
         if has_bull_sweep and curr>LL: direction="BUY"
-        elif station['touches']>=25 and curr<=lower_thr and curr>LL: direction="BUY" # no sweep needed if high touch
+        elif station['touches']>=20 and curr<=lower_thr and curr>LL: direction="BUY"
     if parking=="DISTRIBUTION_UPPER":
         if has_bear_sweep and curr<HH: direction="SELL"
-        elif station['touches']>=25 and curr>=upper_thr and curr<HH: direction="SELL"
+        elif station['touches']>=20 and curr>=upper_thr and curr<HH: direction="SELL"
     if not direction and parking=="NEUTRAL_MIDDLE":
-        if station['touches']>=20:
-            # scalp both edges
+        if station['touches']>=15:
             dist_to_HH = abs(curr-HH); dist_to_LL = abs(curr-LL)
-            if dist_to_HH < dist_to_LL and curr<HH and (has_bear_sweep or station['touches']>=28):
+            if dist_to_HH < dist_to_LL and curr<HH and (has_bear_sweep or station['touches']>=22):
                 direction="SELL"
-            elif dist_to_LL <= dist_to_HH and curr>LL and (has_bull_sweep or station['touches']>=28):
+            elif dist_to_LL <= dist_to_HH and curr>LL and (has_bull_sweep or station['touches']>=22):
                 direction="BUY"
-            # bias based
             if not direction:
                 if trend_4h=="up" and curr>LL: direction="BUY"
                 elif trend_4h=="down" and curr<HH: direction="SELL"
                 elif trend_4h=="neutral":
-                    # your screenshot case: Rectangle NEUTRAL touch33 should SELL at top half
                     if curr >= station['mid']: direction="SELL"
                     else: direction="BUY"
     if not direction:
@@ -156,7 +150,7 @@ def scan():
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V97.5 SCALP LOOSE-SWEEP {get_time()} ===")
+    print(f"=== V97.6 SCALP FIXED {get_time()} ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -165,7 +159,8 @@ def scan():
             daily_trend="up" if d1["c"][-1] > d1["c"][-20] else "down"
             bias=trend_4h if trend_4h!="neutral" else daily_trend
             bias_str="BUY" if bias=="up" else "SELL"
-            direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station = guard_Aplus(d15, d5, trend_4h)
+            # V97.6 FIX: pass bias not raw 4H so display matches
+            direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station = guard_Aplus(d15, d5, bias)
             print(f"{s} 4H:{trend_4h} BIAS:{bias_str} -> {direction} | {reason}")
             if not direction: continue
             cdsec=COOLDOWN_MAP.get(s, DEFAULT_CD)
@@ -184,8 +179,14 @@ def scan():
             range_abs=HH-LL
             tp1=live+range_abs*1.5 if is_buy else live-range_abs*1.5
             tp2=live+range_abs*3 if is_buy else live-range_abs*3
-            eta_min = int((range_abs*3)/max(0.00001, max(d5["h"][-12:])-min(d5["l"][-12:]))*60)
-            eta_str = f"{max(15,eta_min)}-{max(30,eta_min*2)} min"
+            # V97.6 FIX: capped EST HOLD
+            last_hour_range = max(d5["h"][-12:]) - min(d5["l"][-12:])
+            if last_hour_range>0:
+                eta_min = int((range_abs*2)/last_hour_range*60)
+                eta_min = max(15, min(180, eta_min))
+                eta_str = f"{eta_min}-{eta_min*2} min"
+            else:
+                eta_str = "30-60 min"
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             color="🟢🟢🟢 BUY" if is_buy else "🔴🔴🔴 SELL"
