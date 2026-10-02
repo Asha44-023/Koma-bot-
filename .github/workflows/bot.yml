@@ -1,4 +1,4 @@
-name: Run Crypto Bot V97.3 SCALP-IN-TREND
+name: Run Crypto Bot V97.4 SCALP LOOSE
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v97-3-scalp
+  group: koma-bot-v97-4-loose
   cancel-in-progress: true
 
 jobs:
@@ -26,10 +26,10 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v97-3
+          key: bot-cache-v97-4
           restore-keys: |
+            bot-cache-v97-4
             bot-cache-v97-3
-            bot-cache-v97-pure
 
       - name: Ensure files
         run: |
@@ -50,6 +50,6 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v97-3-${{ github.run_id }}
+          key: bot-cache-v97-4-${{ github.run_id }}
           restore-keys: |
-            bot-cache-v97-3
+            bot-cache-v97-4
