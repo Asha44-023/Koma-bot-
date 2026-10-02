@@ -60,11 +60,12 @@ def detect_station_and_parking(d15):
     if HH==LL: return None
     tick=get_pure_tick(d15)
     mid=(HH+LL)/2
-    zone_low=mid-8*tick; zone_high=mid+8*tick
+    # V97.4: 12-tick zone (was 8) to fix "no station 12+ in 8-tick"
+    zone_low=mid-12*tick; zone_high=mid+12*tick
     touches=sum(1 for cl in c if zone_low <= cl <= zone_high)
     range_ticks=(HH-LL)/tick if tick!=0 else 9999
-    if touches<12: return None
-    if range_ticks>150: return None
+    if touches<10: return None # was 12
+    if range_ticks>180: return None # was 150
     third=(HH-LL)/3; lower_thr=LL+third; upper_thr=LL+third*2
     cnt_lower=0; cnt_middle=0; cnt_upper=0
     for cl in c:
@@ -85,7 +86,7 @@ def detect_station_and_parking(d15):
     if len(d15["c"])>=80:
         HH2=max(d15["h"][-80:-40]); LL2=min(d15["l"][-80:-40]); mid2=(HH2+LL2)/2
         range2_ticks=(HH2-LL2)/tick if tick!=0 else 9999
-        if range2_ticks<150:
+        if range2_ticks<180:
             gap_ticks=abs(mid-mid2)/tick if tick!=0 else 9999
             if 10<gap_ticks<80: is_staircase=True
     face="Rectangle"
@@ -101,12 +102,13 @@ def detect_station_and_parking(d15):
     return {"HH":HH,"LL":LL,"mid":mid,"tick":tick,"touches":touches,"cnt_lower":cnt_lower,"cnt_middle":cnt_middle,"cnt_upper":cnt_upper,"parking":parking,"face":face,"range_ticks":range_ticks,"is_staircase":is_staircase}
 def guard_Aplus(d15, d5, trend_4h):
     station=detect_station_and_parking(d15)
-    if not station: return None, None, "no station 12+ in 8-tick", None, None, 0, 0, None
+    if not station: return None, None, "no station 10+ in 12-tick", None, None, 0, 0, None
     c5=d15["c"]; h5=d15["h"]; l5=d15["l"]
     HH=station["HH"]; LL=station["LL"]; tick=station["tick"]; face=station["face"]; parking=station["parking"]
-    # V97.3 FIX: No neutral for Flag/Staircase
+    # V97.4 FIX: Allow neutral if HIGH QUALITY station (your SIREN case)
     if face in ["Flag Down","Flag Up","Staircase"] and trend_4h=="neutral":
-        return None, (HH+LL)/2, f"SKIP {face} needs real trend not neutral {parking}", HH, LL, station['cnt_lower'], station['cnt_upper'], station
+        if not (station['touches']>=24 and station['range_ticks']<55):
+            return None, (HH+LL)/2, f"SKIP {face} needs trend (neutral weak) {parking} touch{station['touches']}", HH, LL, station['cnt_lower'], station['cnt_upper'], station
     if face=="Rounded Top":
         if not (parking=="DISTRIBUTION_UPPER" and trend_4h=="down"):
             return None, (HH+LL)/2, f"SKIP {face} {parking} needs DIST+down SELL", HH, LL, station['cnt_lower'], station['cnt_upper'], station
@@ -129,6 +131,10 @@ def guard_Aplus(d15, d5, trend_4h):
         elif trend_4h=="down" and face in ["Rectangle","Coil","Staircase","Flag Up","Rounded Top"]:
             for k in range(1,4):
                 if h5[-k]>HH and c5[-1]<HH: direction="SELL"; break
+        elif trend_4h=="neutral" and station['touches']>=24:
+            # allow neutral scalps if very parked
+            if face in ["Flag Down","Rectangle","Coil"] and c5[-1]<HH and h5[-2]>HH: direction="SELL"
+            if face in ["Flag Up","Rectangle","Coil"] and c5[-1]>LL and l5[-2]<LL: direction="BUY"
     if not direction and station["is_staircase"] and trend_4h!="neutral":
         if trend_4h=="up" and c5[-1]>LL: direction="BUY"
         elif trend_4h=="down" and c5[-1]<HH: direction="SELL"
@@ -140,15 +146,14 @@ def guard_Aplus(d15, d5, trend_4h):
     return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station
 
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
-DEFAULT_CD=3600
+DEFAULT_CD=1800
 def scan():
     for s, data in list(ACTIVE.items()):
         p=get_live_price(s)
         if not p: continue
         entry, is_buy, sl = data["entry"], data["is_buy"], data["sl"]
         if time.time()-data.get("time", time.time()) > 14400:
-            tg(f"⏰ 4H CLOSE {s} {p:.5f} {get_time()} - time out")
-            del ACTIVE[s]; save_a(); continue
+            tg(f"⏰ 4H CLOSE {s} {p:.5f} {get_time()} - time out"); del ACTIVE[s]; save_a(); continue
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             tg(f"🔴🔴 STOP {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
@@ -156,7 +161,7 @@ def scan():
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V97.3 SCALP-IN-TREND {get_time()} ===")
+    print(f"=== V97.4 SCALP-IN-TREND LOOSE {get_time()} ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -187,22 +192,19 @@ def scan():
             tp2=live+range_abs*3 if is_buy else live-range_abs*3
             last_hour_range = max(d5["h"][-12:]) - min(d5["l"][-12:])
             if last_hour_range>0:
-                eta_hours = (range_abs*3)/last_hour_range
-                eta_min = int(eta_hours*60)
+                eta_min = int((range_abs*3)/last_hour_range*60)
                 eta_str = f"{max(15,eta_min)}- {max(30,eta_min*2)} min"
             else:
                 eta_str = "30-90 min"
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
             COOLDOWN["signals"][s]=time.time()
-            COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}
-            save_c()
+            COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             color="🟢🟢🟢 BUY" if is_buy else "🔴🔴🔴 SELL"
             msg=f"{color} A+ {s}\n4H {trend_4h} BIAS {bias.upper()} {reason}\nENTRY {live:.6f}\nSL {sl:.6f} 🔴\nTP1 {tp1:.6f} 🟡\nTP2 {tp2:.6f} 🟢\n⏱️ EST HOLD: {eta_str}\n⏰ AUTO-CLOSE: 4H\n{get_time()}"
             tg(msg)
             break
         except Exception as e:
-            print(f"SKIP {s} error: {e}")
-            continue
+            print(f"SKIP {s} error: {e}"); continue
 
 if "--once" in sys.argv: scan()
 else:
