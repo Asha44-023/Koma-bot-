@@ -16,6 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install deps
+        run: pip install requests pytz numpy
+
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -23,16 +27,22 @@ jobs:
             cooldown.json
           key: bot-cache-v100-final
           restore-keys: bot-cache-v100-final-
+
       - name: Ensure files
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{}' > cooldown.json
           cat active.json
+          cat cooldown.json
+
       - name: Run bot
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py
+
       - uses: actions/cache/save@v4
         if: always()
         with:
