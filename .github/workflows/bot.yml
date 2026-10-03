@@ -1,4 +1,4 @@
-name: Run Crypto Bot V98.1 RECLAIM FIX
+name: Run Crypto Bot V99 BIAS FLIP
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v98-1-reclaim
+  group: koma-bot-v99-bias-flip
   cancel-in-progress: true
 
 jobs:
@@ -26,10 +26,10 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v98-1
+          key: bot-cache-v99
           restore-keys: |
+            bot-cache-v99
             bot-cache-v98-1
-            bot-cache-v98
 
       - name: Ensure files
         run: |
@@ -37,19 +37,4 @@ jobs:
           [ -f active.json ] || echo '{}' > active.json
           cat active.json
           cat cooldown.json
-          python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault('signals',{}); d.setdefault('wall',{}); json.dump(d,open(f,'w')); print(d)"
-
-      - name: Run bot
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
-
-      - name: Save cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            cooldown.json
-            active.json
-          key: bot-cache-v98-1-${{ github.run_id }}
+          python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault
