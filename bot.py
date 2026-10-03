@@ -42,6 +42,14 @@ def get_daily_bias_TW(d1):
     if W_close < T_low: return "BEARISH"
     return "NEUTRAL"
 
+def detect_4h_trend_fallback(d4):
+    lows = d4["l"][-20:]; highs = d4["h"][-20:]
+    hl=sum(1 for i in range(1,len(lows)) if lows[i]>lows[i-1])
+    lh=sum(1 for i in range(1,len(highs)) if highs[i]<highs[i-1])
+    if hl>=12: return "BULLISH"
+    if lh>=12: return "BEARISH"
+    return "NEUTRAL"
+
 def find_fvgs_4h(d4):
     bull, bear = [], []
     h=d4["h"]; l=d4["l"]
@@ -115,36 +123,46 @@ def detect_true_liquidity_pool(d15, d5):
     return eq_high, eq_low, h5_max > eq_high, l5_min < eq_low, (h5_max-eq_high)/tick if h5_max>eq_high else 0, (eq_low-l5_min)/tick if l5_min<eq_low else 0
 
 def guard_V99(d15, d5, d4, d1):
-    station=detect_station_and_parking(d15)
-    if not station: return None, None, "no station", None, None, 0,0,None, "NEUTRAL"
-    daily_bias = get_daily_bias_TW(d1)
+    daily_raw = get_daily_bias_TW(d1)
+    daily_bias = daily_raw
     if daily_bias == "NEUTRAL":
-        return None, None, f"SKIP NEUTRAL daily", None, None, 0,0, station, daily_bias
+        daily_bias = detect_4h_trend_fallback(d4)
+    station=detect_station_and_parking(d15)
+    if not station:
+        return None, None, f"no station", None, None, 0,0,station, daily_bias
+
+    if daily_bias == "NEUTRAL":
+        return None, None, f"SKIP NEUTRAL daily({daily_raw})+4H NEUTRAL", None, None, 0,0, station, daily_bias
+
     bull_fvgs, bear_fvgs = find_fvgs_4h(d4)
     last_4h_close = d4["c"][-1]; curr = d15["c"][-1]
     effective_bias = daily_bias; flip_reason = ""
     if daily_bias=="BEARISH" and bear_fvgs and last_4h_close > bear_fvgs[-1]['top']:
-        effective_bias="BULLISH_FLIP"; flip_reason=f"Bear FVG {bear_fvgs[-1]['top']:.5f} DISRESPECTED->{last_4h_close:.5f} FLIP LONG"
+        effective_bias="BULLISH_FLIP"; flip_reason=f"BearFVG {bear_fvgs[-1]['top']:.5f} DISRESPECTED {last_4h_close:.5f} -> FLIP LONG"
     if daily_bias=="BULLISH" and bull_fvgs and last_4h_close < bull_fvgs[-1]['bottom']:
-        effective_bias="BEARISH_FLIP"; flip_reason=f"Bull FVG {bull_fvgs[-1]['bottom']:.5f} DISRESPECTED FLIP SHORT"
+        effective_bias="BEARISH_FLIP"; flip_reason=f"BullFVG {bull_fvgs[-1]['bottom']:.5f} DISRESPECTED -> FLIP SHORT"
+
     HH, LL = station["HH"], station["LL"]; tick=station["tick"]; range_abs=HH-LL
     fvg_bull_5, fvg_bear_5 = detect_FVG(d5)
     bos_bull, bos_bear, swing_h, swing_l = detect_MSS_BOS(d5)
     eq_high, eq_low, upper_sweep, lower_sweep, upper_dist, lower_dist = detect_true_liquidity_pool(d15, d5)
+
     if lower_sweep and curr <= eq_low: return None, None, f"INVALID BUY no reclaim {curr:.5f}<=EqL {eq_low:.5f}", HH, LL, 0,0, station, effective_bias
     if upper_sweep and curr >= eq_high: return None, None, f"INVALID SELL no reject {curr:.5f}>=EqH {eq_high:.5f}", HH, LL, 0,0, station, effective_bias
+
     direction=None; pool_15=None; reason_extra=""
     if effective_bias in ["BULLISH","BULLISH_FLIP"]:
         if not bull_fvgs: return None, None, f"no bull FVG for {effective_bias}", HH, LL, 0,0, station, effective_bias
-        last_bull=bull_fvgs[-1]
-        if lower_sweep and curr>eq_low and (bos_bull or True):
-            direction="BUY"; pool_15=eq_low-2*tick; reason_extra=f"{flip_reason} | BullFVG {last_bull['bottom']:.5f}-{last_bull['top']:.5f} SweepL {int(lower_dist)}t"
+        if lower_sweep and curr>eq_low:
+            direction="BUY"; pool_15=eq_low-2*tick; reason_extra=f"{flip_reason} | BullFVG {bull_fvgs[-1]['bottom']:.5f}-{bull_fvgs[-1]['top']:.5f} SweepL {int(lower_dist)}t"
+
     if effective_bias in ["BEARISH","BEARISH_FLIP"]:
         if not bear_fvgs: return None, None, f"no bear FVG for {effective_bias}", HH, LL, 0,0, station, effective_bias
-        last_bear=bear_fvgs[-1]
-        if upper_sweep and curr<eq_high and (bos_bear or True):
-            direction="SELL"; pool_15=eq_high+2*tick; reason_extra=f"{flip_reason} | BearFVG {last_bear['bottom']:.5f}-{last_bear['top']:.5f} SweepH {int(upper_dist)}t"
-    if not direction: return None, None, f"no V99 trigger {effective_bias}", HH, LL, 0,0, station, effective_bias
+        if upper_sweep and curr<eq_high:
+            direction="SELL"; pool_15=eq_high+2*tick; reason_extra=f"{flip_reason} | BearFVG {bear_fvgs[-1]['bottom']:.5f}-{bear_fvgs[-1]['top']:.5f} SweepH {int(upper_dist)}t"
+
+    if not direction: return None, None, f"no V99 trigger {effective_bias} L:{lower_sweep} H:{upper_sweep} BOS B:{bos_bull} S:{bos_bear}", HH, LL, 0,0, station, effective_bias
+
     min_dist=range_abs*0.4
     if direction=="BUY":
         if curr-pool_15<min_dist: pool_15=curr-min_dist
@@ -154,7 +172,7 @@ def guard_V99(d15, d5, d4, d1):
         if pool_15-curr<min_dist: pool_15=curr+min_dist
         for fvg_high,fvg_low,idx in fvg_bear_5:
             if pool_15<fvg_low and pool_15>fvg_high: pool_15=fvg_low+2*tick
-    reason=f"V99 {direction} {effective_bias} {station['face']} {reason_extra} touch{station['touches']} range{int(station['range_ticks'])}"
+    reason=f"V99 {direction} {effective_bias} D:{daily_raw} {station['face']} {reason_extra} touch{station['touches']}"
     return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station, effective_bias
 
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
@@ -173,18 +191,19 @@ def scan():
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V99 DAILY BIAS + FLIP {get_time()} ===")
+    print(f"=== V99.1 FIXED {get_time()} ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
             if not d5 or not d15 or not d4 or not d1: continue
             direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V99(d15, d5, d4, d1)
-            print(f"{s} DAILY_TW:{get_daily_bias_TW(d1)} EFF:{eff_bias} -> {direction} | {reason}")
+            daily_raw = get_daily_bias_TW(d1)
+            print(f"{s} DAILY_TW:{daily_raw} EFF:{eff_bias} -> {direction} | {reason}")
             if not direction: continue
             cdsec=COOLDOWN_MAP.get(s, DEFAULT_CD)
             if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
             last_wall=COOLDOWN["wall"].get(s)
-            if last_wall:
+            if last_wall and station:
                 tick=station["tick"]
                 if abs(HH-last_wall.get("HH",0))<3*tick and abs(LL-last_wall.get("LL",0))<3*tick:
                     print(f" SKIP same station {s}"); continue
@@ -197,7 +216,7 @@ def scan():
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             color="🟢🟢🟢 BUY" if is_buy else "🔴🔴🔴 SELL"
-            msg=f"{color} V99 {s}\n{eff_bias} {reason}\nENTRY {live:.6f}\nSL {sl:.6f}\nTP1 {tp1:.6f}\nTP2 {tp2:.6f}\n{get_time()}"
+            msg=f"{color} V99.1 {s}\n{eff_bias} {reason}\nENTRY {live:.6f}\nSL {sl:.6f}\nTP1 {tp1:.6f}\nTP2 {tp2:.6f}\n{get_time()}"
             tg(msg)
             break
         except Exception as e:
