@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v99-bias-flip
+  group: koma-bot-v99-flip
   cancel-in-progress: true
 
 jobs:
@@ -26,15 +26,45 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99
+          key: bot-cache-v99-fix
           restore-keys: |
             bot-cache-v99
-            bot-cache-v98-1
 
-      - name: Ensure files
+      - name: Ensure files (auto-fix corrupted)
         run: |
-          [ -f cooldown.json ] || echo '{"signals":{},"wall":{}}' > cooldown.json
-          [ -f active.json ] || echo '{}' > active.json
-          cat active.json
-          cat cooldown.json
-          python -c "import json,os; f='cooldown.json'; d=json.load(open(f)) if os.path.exists(f) else {}; d.setdefault
+          python3 - << 'PY'
+          import json, os
+          for fname, default in [
+            ("active.json", {}),
+            ("cooldown.json", {"signals":{}, "wall":{}})
+          ]:
+            try:
+              if not os.path.exists(fname):
+                raise FileNotFoundError()
+              d=json.load(open(fname))
+              if fname=="active.json" and ("signals" in d):
+                raise ValueError("active contains cooldown data - corrupted")
+              if fname=="cooldown.json" and "signals" not in d:
+                d={"signals":{}, "wall":{}}
+              print(f"OK {fname}")
+            except Exception as e:
+              print(f"FIXING {fname} corrupted: {e}")
+              json.dump(default, open(fname,"w"))
+          print("active:", open("active.json").read()[:300])
+          print("cooldown:", open("cooldown.json").read()[:300])
+          PY
+
+      - name: Run bot
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py --once
+
+      - name: Save cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            cooldown.json
+            active.json
+          key: bot-cache-v99-fix-${{ github.run_id }}
