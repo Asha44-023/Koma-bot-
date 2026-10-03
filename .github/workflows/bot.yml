@@ -11,6 +11,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,23 +26,27 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v100-final
-          restore-keys: bot-cache-v100-final-
+          key: bot-cache-v101-tight
+          restore-keys: |
+            bot-cache-v101-tight-
+            bot-cache-v100-
 
-      - name: Ensure files
+      - name: Ensure files V101
         run: |
           [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{}' > cooldown.json
+          if [ ! -f cooldown.json ] || ! grep -q daily_pnl cooldown.json; then
+            echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
+          fi
           cat active.json
           cat cooldown.json
 
-      - name: Run bot
+      - name: Run bot V101 --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py
+        run: python bot.py --once
 
       - uses: actions/cache/save@v4
         if: always()
@@ -49,4 +54,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v100-final-${{ github.run_id }}
+          key: bot-cache-v101-tight-${{ github.run_id }}
