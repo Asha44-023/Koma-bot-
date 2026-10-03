@@ -138,14 +138,14 @@ def guard_V99(d15, d5, d4, d1):
         if not bull_fvgs: return None, None, f"no bull FVG for {effective_bias}", HH, LL, 0,0, station, effective_bias
         if lower_sweep and curr>eq_low:
             direction="BUY"; pool_15=eq_low-2*tick; trigger_type="SWEEP_L"; reason_extra=f"{flip_reason} | BullFVG {bull_fvgs[-1]['bottom']:.5f}-{bull_fvgs[-1]['top']:.5f} SweepL {int(lower_dist)}t"
-        elif bos_bull and curr > HH:
-            direction="BUY"; pool_15=LL; trigger_type="BOS_UP"; reason_extra=f"{flip_reason} | BOS_UP over HH {HH:.5f} | BullFVG {bull_fvgs[-1]['bottom']:.5f}"
+        elif bos_bull:
+            direction="BUY"; pool_15=LL; trigger_type="BOS_UP"; reason_extra=f"{flip_reason} | BOS_UP HH {HH:.5f} | BullFVG {bull_fvgs[-1]['bottom']:.5f}"
     if effective_bias in ["BEARISH","BEARISH_FLIP"]:
         if not bear_fvgs: return None, None, f"no bear FVG for {effective_bias}", HH, LL, 0,0, station, effective_bias
         if upper_sweep and curr<eq_high:
             direction="SELL"; pool_15=eq_high+2*tick; trigger_type="SWEEP_H"; reason_extra=f"{flip_reason} | BearFVG {bear_fvgs[-1]['bottom']:.5f}-{bear_fvgs[-1]['top']:.5f} SweepH {int(upper_dist)}t"
-        elif bos_bear and curr < LL:
-            direction="SELL"; pool_15=HH; trigger_type="BOS_DOWN"; reason_extra=f"{flip_reason} | BOS_DOWN under LL {LL:.5f} | BearFVG {bear_fvgs[-1]['bottom']:.5f}"
+        elif bos_bear:
+            direction="SELL"; pool_15=HH; trigger_type="BOS_DOWN"; reason_extra=f"{flip_reason} | BOS_DOWN LL {LL:.5f} | BearFVG {bear_fvgs[-1]['bottom']:.5f}"
     if not direction: return None, None, f"no V99 trigger {effective_bias} L:{lower_sweep} H:{upper_sweep} BOS B:{bos_bull} S:{bos_bear}", HH, LL, 0,0, station, effective_bias
     min_dist=range_abs*0.4
     if direction=="BUY":
@@ -174,7 +174,7 @@ def scan():
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V99.2 PERFECT UNIVERSAL {get_time()} ===")
+    print(f"=== V99.3 PERFECT UNIVERSAL {get_time()} ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -199,7 +199,7 @@ def scan():
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             color="🟢🟢🟢 BUY" if is_buy else "🔴🔴🔴 SELL"
-            msg=f"{color} V99.2 {s}\n{eff_bias} {reason}\nENTRY {live:.6f}\nSL {sl:.6f}\nTP1 {tp1:.6f}\nTP2 {tp2:.6f}\n{get_time()}"
+            msg=f"{color} V99.3 {s}\n{eff_bias} {reason}\nENTRY {live:.6f}\nSL {sl:.6f}\nTP1 {tp1:.6f}\nTP2 {tp2:.6f}\n{get_time()}"
             tg(msg)
             break
         except Exception as e:
