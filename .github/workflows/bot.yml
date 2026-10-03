@@ -28,26 +28,19 @@ jobs:
             active.json
           key: bot-cache-v100-final
           restore-keys: |
-            bot-cache-v100
+            bot-cache-v100-final
             bot-cache-v99-3-universal
 
-      - name: Ensure files (auto-fix corrupted)
+      - name: Ensure files
         run: |
           python3 - << 'PY'
           import json, os
-          for fname, default in [
-            ("active.json", {}),
-            ("cooldown.json", {"signals":{}, "wall":{}})
-          ]:
+          for fname, default in [("active.json", {}), ("cooldown.json", {"signals":{}, "wall":{}})]:
             try:
-              if not os.path.exists(fname):
-                raise FileNotFoundError()
+              if not os.path.exists(fname): raise FileNotFoundError()
               d=json.load(open(fname))
-              if fname=="active.json" and ("signals" in d):
-                raise ValueError("corrupted")
-              if fname=="cooldown.json" and "signals" not in d:
-                d={"signals":{}, "wall":{}}
-              print(f"OK {fname}")
+              if fname=="active.json" and "signals" in d: raise ValueError("corrupted")
+              if fname=="cooldown.json" and "signals" not in d: d={"signals":{}, "wall":{}}
             except Exception as e:
               print(f"FIXING {fname}: {e}")
               json.dump(default, open(fname,"w"))
@@ -66,4 +59,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v100-final-${{ github.run_id }}
+          key: bot-cache-v100-final
