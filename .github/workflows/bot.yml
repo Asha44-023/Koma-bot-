@@ -1,4 +1,4 @@
-name: Run Crypto Bot V99.2 UNIVERSAL
+name: Run Crypto Bot V99.3 UNIVERSAL
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v99-2-universal
+  group: koma-bot-v99-3-universal
   cancel-in-progress: true
 
 jobs:
@@ -26,15 +26,14 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99-2-universal
+          key: bot-cache-v99-3-universal
           restore-keys: |
-            bot-cache-v99-2
+            bot-cache-v99-3
 
       - name: Ensure files (auto-fix corrupted)
         run: |
           python3 - << 'PY'
           import json, os
-          # FORCE RESET for V99.2 - delete old wall
           for fname, default in [
             ("active.json", {}),
             ("cooldown.json", {"signals":{}, "wall":{}})
@@ -51,12 +50,12 @@ jobs:
             except Exception as e:
               print(f"FIXING {fname}: {e}")
               json.dump(default, open(fname,"w"))
-          # Clear wall to force new detection
+          # Clear wall for V99.3 BOS fix
           try:
             c=json.load(open("cooldown.json"))
             c["wall"]={}
             json.dump(c, open("cooldown.json","w"))
-            print("wall cleared for V99.2")
+            print("wall cleared for V99.3")
           except: pass
           PY
 
@@ -73,4 +72,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99-2-universal-${{ github.run_id }}
+          key: bot-cache-v99-3-universal-${{ github.run_id }}
