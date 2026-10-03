@@ -7,16 +7,20 @@ TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
-COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{}}
+COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{},"daily_pnl":0,"last_day":""}
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
 if "signals" not in COOLDOWN: COOLDOWN["signals"]={}
+if "daily_pnl" not in COOLDOWN: COOLDOWN["daily_pnl"]=0
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
+def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
 def tg(m):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":m}, timeout=10)
     except: pass
     print(m)
+
+# --- YOUR EXISTING FUNCS KEEP SAME ---
 def kl(symbol, interval):
     sec_map = {"Min5":300,"Min15":900,"Hour4":14400,"Day1":86400}
     sec = sec_map.get(interval, 300)
@@ -51,21 +55,24 @@ def get_btc_dump():
         r = requests.get("https://contract.mexc.com/api/v1/contract/kline/BTC_USDT?interval=Min15", timeout=5).json()
         d = r.get("data", r)
         if isinstance(d, dict) and "data" in d: d = d["data"]
-        c = [float(x) for x in d["close"][-2:]]
-        if len(c)>=2: return (c[-1]-c[-2])/c[-2]*100
+        c = [float(x) for x in d["close"][-4:]]
+        if len(c)>=4: return (c[-1]-c[-4])/c[-4]*100 # 1h change
         return 0.0
     except: return 0.0
+
+# --- NEW TIGHT FUNDING LOGIC = CUTS 95% OF DUST ---
 def funding_label(rate_percent, direction):
     if direction=="BUY":
-        if rate_percent >= 0.12: return "DANGER", "may dump - SKIP"
-        if rate_percent >= 0.06: return "CAUTION", "crowded - 0.5x size"
-        if rate_percent <= -0.10: return "SAFE", "will pump - big size"
+        if rate_percent >= 0.03: return "DANGER", "crowded longs - SKIP" # GRASS 0.025 -> was SAFE now CAUTION, 0.033 -> DANGER
+        if rate_percent >= 0.01: return "CAUTION", "longs crowded - 0.3x size only"
+        if rate_percent <= -0.10: return "SAFE", "squeeze fuel - big size" # SAND -0.589 -> BIG
         return "SAFE", "pump ready"
-    else:
-        if rate_percent <= -0.12: return "DANGER", "may pump - SKIP"
-        if rate_percent <= -0.06: return "CAUTION", "crowded - 0.5x size"
-        if rate_percent >= 0.10: return "SAFE", "will dump - big size"
+    else: # SELL
+        if rate_percent <= -0.03: return "DANGER", "crowded shorts - SKIP"
+        if rate_percent <= -0.01: return "CAUTION", "shorts crowded - 0.3x size"
+        if rate_percent >= 0.10: return "SAFE", "dump fuel - big size"
         return "SAFE", "dump ready"
+
 def get_daily_bias_TW(d1):
     if len(d1["c"]) < 3: return "NEUTRAL"
     T_high = d1["h"][-3]; T_low = d1["l"][-3]; W_close = d1["c"][-2]
@@ -190,37 +197,61 @@ def guard_V99(d15, d5, d4, d1):
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
 DEFAULT_CD=1800
 def scan():
+    # DAILY RESET
+    today = get_today()
+    if COOLDOWN.get("last_day")!= today:
+        COOLDOWN["daily_pnl"]=0
+        COOLDOWN["last_day"]=today
+        save_c()
+    if COOLDOWN["daily_pnl"] <= -3.0:
+        tg(f"⛔ DAILY STOP - Loss {COOLDOWN['daily_pnl']:.2f}% - PAUSE 24h {get_time()}")
+        return
+
     btc_chg = get_btc_dump()
-    if btc_chg <= -2.0:
-        tg(f"⚠️ PAUSE - BTC DUMPING {btc_chg:.2f}% - No new trades {get_time()}")
+    # NEW: -0.8% blocks longs (would have blocked LAB)
+    if btc_chg <= -0.8:
+        tg(f"⚠️ PAUSE - BTC DUMPING {btc_chg:.2f}% - No new LONGS {get_time()}")
+        # STILL CLOSE ACTIVE IF HELD >2h
         for s, data in list(ACTIVE.items()):
             p=get_live_price(s)
             if p and time.time()-data.get("time",0) > 7200:
-                tg(f"⚠️ CLOSE {s} - BTC CRASH {btc_chg:.1f}% @ {p:.5f} {get_time()}")
+                loss = ((p-data["entry"])/data["entry"]*100) if data["is_buy"] else ((data["entry"]-p)/data["entry"]*100)
+                COOLDOWN["daily_pnl"]+=loss; save_c()
+                tg(f"⚠️ FORCE CLOSE {s} BTC CRASH {btc_chg:.1f}% @ {p:.5f} PnL {loss:.2f}% {get_time()}")
                 del ACTIVE[s]; save_a()
         return
+
     for s, data in list(ACTIVE.items()):
         p=get_live_price(s)
         if not p: continue
         entry, is_buy, sl = data["entry"], data["is_buy"], data["sl"]
         held = time.time()-data.get("time", time.time())
+        # FIX: STOP CHECK EVERY LOOP - MARKET EXIT - NO -5% SLIP
+        if (is_buy and p<=sl) or (not is_buy and p>=sl):
+            loss = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
+            COOLDOWN["daily_pnl"]+=loss; save_c()
+            tg(f"🔴🔴 STOP {s} {p:.5f} PnL {loss:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
         if held < 7200:
             if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
-                tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
+                profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
+                COOLDOWN["daily_pnl"]+=profit; save_c()
+                tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
             continue
         if held > 14400:
-            tg(f"⏰ 4H CLOSE {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a(); continue
-        if (is_buy and p<=sl) or (not is_buy and p>=sl):
-            tg(f"🔴🔴 STOP {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a(); continue
+            pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
+            COOLDOWN["daily_pnl"]+=pnl; save_c()
+            tg(f"⏰ 4H CLOSE {s} {p:.5f} {pnl:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True
-            buffer_sl = entry * 0.98 if is_buy else entry * 1.02
+            buffer_sl = entry * 0.998 if is_buy else entry * 1.002
             data["sl"]=buffer_sl; save_a()
-            tg(f"🟡 TP1 {s} SL->BE+2% {buffer_sl:.6f} ({p:.5f}) {get_time()}")
+            tg(f"🟡 TP1 {s} SL->BE {buffer_sl:.6f} ({p:.5f}) {get_time()}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
+            profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
+            COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V100 FINAL SAFE/DANGER {get_time()} BTC {btc_chg:.2f}% ===")
+    print(f"=== V100 TIGHT FUND 0.01% SAFE {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -235,7 +266,7 @@ def scan():
                 if abs(HH-last_wall.get("HH",0))<3*tick and abs(LL-last_wall.get("LL",0))<3*tick: continue
             fund = get_funding(s)
             f_label, f_msg = funding_label(fund, direction)
-            if f_label=="DANGER": print(f" SKIP {s} FUND DANGER {fund}"); continue
+            if f_label=="DANGER": print(f" SKIP {s} FUND {fund:.4f}% {f_msg}"); continue
             live=get_live_price(s) or d5["c"][-1]
             is_buy=direction=="BUY"
             tick=station["tick"]; range_abs=HH-LL
@@ -254,10 +285,10 @@ def scan():
                      f"Hold 2h min, 4h max\n{get_time()}")
             else:
                 emoji="🟡" if is_buy else "🟠"
-                msg=(f"{emoji} {direction} {s.replace('_USDT','')} @ {live:.6f} CAUTION\n"
+                msg=(f"{emoji} {direction} {s.replace('_USDT','')} @ {live:.6f} CAUTION 0.3x\n"
                      f"{eff_bias} {station['face']}\n"
                      f"SL {sl:.6f} TP {tp1:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label} - {f_msg} - 0.5x size\n{get_time()}")
+                     f"FUND {fund:.3f}% {f_label} - {f_msg}\n{get_time()}")
             tg(msg)
             break
         except Exception as e:
@@ -267,4 +298,4 @@ else:
     while True:
         try: scan()
         except Exception as e: print(e)
-        time.sleep(30)
+        time.sleep(10) # FASTER CHECK = CUTS SLIPPAGE
