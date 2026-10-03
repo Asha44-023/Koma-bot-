@@ -1,12 +1,12 @@
-name: Run Crypto Bot V99.3 UNIVERSAL
+name: Run Crypto Bot V100 FINAL SAFE
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/2 * * * *'
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v99-3-universal
+  group: koma-bot-v100-final
   cancel-in-progress: true
 
 jobs:
@@ -26,9 +26,10 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99-3-universal
+          key: bot-cache-v100-final
           restore-keys: |
-            bot-cache-v99-3
+            bot-cache-v100
+            bot-cache-v99-3-universal
 
       - name: Ensure files (auto-fix corrupted)
         run: |
@@ -50,13 +51,6 @@ jobs:
             except Exception as e:
               print(f"FIXING {fname}: {e}")
               json.dump(default, open(fname,"w"))
-          # Clear wall for V99.3 BOS fix
-          try:
-            c=json.load(open("cooldown.json"))
-            c["wall"]={}
-            json.dump(c, open("cooldown.json","w"))
-            print("wall cleared for V99.3")
-          except: pass
           PY
 
       - name: Run bot
@@ -72,4 +66,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99-3-universal-${{ github.run_id }}
+          key: bot-cache-v100-final-${{ github.run_id }}
