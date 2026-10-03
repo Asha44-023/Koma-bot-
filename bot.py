@@ -70,7 +70,7 @@ def detect_station_and_parking(d15):
     zone_low=mid-18*tick; zone_high=mid+18*tick
     touches=sum(1 for cl in c[-12:] if zone_low <= cl <= zone_high)
     range_ticks=(HH-LL)/tick if tick!=0 else 9999
-    if touches<4 or range_ticks>400: return None
+    if touches<6 or range_ticks>400: return None
     third=(HH-LL)/3; lower_thr=LL+third; upper_thr=LL+third*2
     cnt_lower=sum(1 for cl in c[-12:] if cl <= lower_thr)
     cnt_upper=sum(1 for cl in c[-12:] if cl >= upper_thr)
@@ -170,7 +170,12 @@ def scan():
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             tg(f"🔴🔴 STOP {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
-            data["tp1_hit"]=True; data["sl"]=entry; save_a(); tg(f"🟡 TP1 {s} SL->BE {p:.5f} {get_time()}")
+            data["tp1_hit"]=True
+            # FIXED: buffer 2% to survive retest
+            buffer_sl = entry * 0.98 if is_buy else entry * 1.02
+            data["sl"]=buffer_sl
+            save_a()
+            tg(f"🟡 TP1 {s} SL->BE+2% {buffer_sl:.6f} ({p:.5f}) {get_time()}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
