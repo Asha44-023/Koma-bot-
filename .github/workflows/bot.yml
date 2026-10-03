@@ -1,4 +1,4 @@
-name: Run Crypto Bot V99 BIAS FLIP
+name: Run Crypto Bot V99.2 UNIVERSAL
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v99-flip
+  group: koma-bot-v99-2-universal
   cancel-in-progress: true
 
 jobs:
@@ -26,14 +26,15 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99-fix
+          key: bot-cache-v99-2-universal
           restore-keys: |
-            bot-cache-v99
+            bot-cache-v99-2
 
       - name: Ensure files (auto-fix corrupted)
         run: |
           python3 - << 'PY'
           import json, os
+          # FORCE RESET for V99.2 - delete old wall
           for fname, default in [
             ("active.json", {}),
             ("cooldown.json", {"signals":{}, "wall":{}})
@@ -43,15 +44,20 @@ jobs:
                 raise FileNotFoundError()
               d=json.load(open(fname))
               if fname=="active.json" and ("signals" in d):
-                raise ValueError("active contains cooldown data - corrupted")
+                raise ValueError("corrupted")
               if fname=="cooldown.json" and "signals" not in d:
                 d={"signals":{}, "wall":{}}
               print(f"OK {fname}")
             except Exception as e:
-              print(f"FIXING {fname} corrupted: {e}")
+              print(f"FIXING {fname}: {e}")
               json.dump(default, open(fname,"w"))
-          print("active:", open("active.json").read()[:300])
-          print("cooldown:", open("cooldown.json").read()[:300])
+          # Clear wall to force new detection
+          try:
+            c=json.load(open("cooldown.json"))
+            c["wall"]={}
+            json.dump(c, open("cooldown.json","w"))
+            print("wall cleared for V99.2")
+          except: pass
           PY
 
       - name: Run bot
@@ -67,4 +73,4 @@ jobs:
           path: |
             cooldown.json
             active.json
-          key: bot-cache-v99-fix-${{ github.run_id }}
+          key: bot-cache-v99-2-universal-${{ github.run_id }}
