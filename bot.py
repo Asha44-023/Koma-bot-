@@ -2,7 +2,7 @@ import time, requests, json, os, sys
 from datetime import datetime
 import pytz
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT"]
+SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","C_USDT","G_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
@@ -34,6 +34,38 @@ def get_live_price(s):
         r = requests.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={s}", timeout=5).json()
         return float((r.get("data", r))["lastPrice"])
     except: return None
+def get_funding(symbol):
+    try:
+        url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}"
+        r = requests.get(url, timeout=5).json()
+        rate = float(r.get("data", r).get("fundingRate", 0))
+        return rate * 100
+    except:
+        try:
+            r = requests.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={symbol}", timeout=5).json()
+            rate = float(r.get("data", {}).get("fundingRate", 0))
+            return rate * 100
+        except: return 0.0
+def get_btc_dump():
+    try:
+        r = requests.get("https://contract.mexc.com/api/v1/contract/kline/BTC_USDT?interval=Min15", timeout=5).json()
+        d = r.get("data", r)
+        if isinstance(d, dict) and "data" in d: d = d["data"]
+        c = [float(x) for x in d["close"][-2:]]
+        if len(c)>=2: return (c[-1]-c[-2])/c[-2]*100
+        return 0.0
+    except: return 0.0
+def funding_label(rate_percent, direction):
+    if direction=="BUY":
+        if rate_percent >= 0.12: return "DANGER", "may dump - SKIP"
+        if rate_percent >= 0.06: return "CAUTION", "crowded - 0.5x size"
+        if rate_percent <= -0.10: return "SAFE", "will pump - big size"
+        return "SAFE", "pump ready"
+    else:
+        if rate_percent <= -0.12: return "DANGER", "may pump - SKIP"
+        if rate_percent <= -0.06: return "CAUTION", "crowded - 0.5x size"
+        if rate_percent >= 0.10: return "SAFE", "will dump - big size"
+        return "SAFE", "dump ready"
 def get_daily_bias_TW(d1):
     if len(d1["c"]) < 3: return "NEUTRAL"
     T_high = d1["h"][-3]; T_low = d1["l"][-3]; W_close = d1["c"][-2]
@@ -113,40 +145,37 @@ def detect_true_liquidity_pool(d15, d5):
 def guard_V99(d15, d5, d4, d1):
     daily_raw = get_daily_bias_TW(d1)
     daily_bias = daily_raw
-    if daily_bias == "NEUTRAL":
-        daily_bias = detect_4h_trend_fallback(d4)
+    if daily_bias == "NEUTRAL": daily_bias = detect_4h_trend_fallback(d4)
     station=detect_station_and_parking(d15)
-    if not station:
-        return None, None, f"no station", None, None, 0,0,station, daily_bias
-    if daily_bias == "NEUTRAL":
-        return None, None, f"SKIP NEUTRAL daily({daily_raw})+4H NEUTRAL", None, None, 0,0, station, daily_bias
+    if not station: return None, None, f"no station", None, None, 0,0,station, daily_bias
+    if daily_bias == "NEUTRAL": return None, None, f"SKIP NEUTRAL", None, None, 0,0, station, daily_bias
     bull_fvgs, bear_fvgs = find_fvgs_4h(d4)
     last_4h_close = d4["c"][-1]; curr = d15["c"][-1]
     effective_bias = daily_bias; flip_reason = ""
     if daily_bias=="BEARISH" and bear_fvgs and last_4h_close > bear_fvgs[-1]['top']:
-        effective_bias="BULLISH_FLIP"; flip_reason=f"BearFVG {bear_fvgs[-1]['top']:.5f} DISRESPECTED {last_4h_close:.5f} -> FLIP LONG"
+        effective_bias="BULLISH_FLIP"; flip_reason=f"BearFVG {bear_fvgs[-1]['top']:.5f} DISRESPECTED"
     if daily_bias=="BULLISH" and bull_fvgs and last_4h_close < bull_fvgs[-1]['bottom']:
-        effective_bias="BEARISH_FLIP"; flip_reason=f"BullFVG {bull_fvgs[-1]['bottom']:.5f} DISRESPECTED -> FLIP SHORT"
+        effective_bias="BEARISH_FLIP"; flip_reason=f"BullFVG {bull_fvgs[-1]['bottom']:.5f} DISRESPECTED"
     HH, LL = station["HH"], station["LL"]; tick=station["tick"]; range_abs=HH-LL
     fvg_bull_5, fvg_bear_5 = detect_FVG(d5)
     bos_bull, bos_bear, swing_h, swing_l = detect_MSS_BOS(d5)
     eq_high, eq_low, upper_sweep, lower_sweep, upper_dist, lower_dist = detect_true_liquidity_pool(d15, d5)
-    if lower_sweep and curr <= eq_low: return None, None, f"INVALID BUY no reclaim {curr:.5f}<=EqL {eq_low:.5f}", HH, LL, 0,0, station, effective_bias
-    if upper_sweep and curr >= eq_high: return None, None, f"INVALID SELL no reject {curr:.5f}>=EqH {eq_high:.5f}", HH, LL, 0,0, station, effective_bias
+    if lower_sweep and curr <= eq_low: return None, None, f"no reclaim", HH, LL, 0,0, station, effective_bias
+    if upper_sweep and curr >= eq_high: return None, None, f"no reject", HH, LL, 0,0, station, effective_bias
     direction=None; pool_15=None; reason_extra=""; trigger_type=""
     if effective_bias in ["BULLISH","BULLISH_FLIP"]:
-        if not bull_fvgs: return None, None, f"no bull FVG for {effective_bias}", HH, LL, 0,0, station, effective_bias
+        if not bull_fvgs: return None, None, f"no bull FVG", HH, LL, 0,0, station, effective_bias
         if lower_sweep and curr>eq_low:
-            direction="BUY"; pool_15=eq_low-2*tick; trigger_type="SWEEP_L"; reason_extra=f"{flip_reason} | BullFVG {bull_fvgs[-1]['bottom']:.5f}-{bull_fvgs[-1]['top']:.5f} SweepL {int(lower_dist)}t"
+            direction="BUY"; pool_15=eq_low-2*tick; trigger_type="SWEEP_L"; reason_extra=f"{flip_reason} SweepL {int(lower_dist)}t"
         elif bos_bull:
-            direction="BUY"; pool_15=LL; trigger_type="BOS_UP"; reason_extra=f"{flip_reason} | BOS_UP HH {HH:.5f} | BullFVG {bull_fvgs[-1]['bottom']:.5f}"
+            direction="BUY"; pool_15=LL; trigger_type="BOS_UP"; reason_extra=f"{flip_reason} BOS_UP"
     if effective_bias in ["BEARISH","BEARISH_FLIP"]:
-        if not bear_fvgs: return None, None, f"no bear FVG for {effective_bias}", HH, LL, 0,0, station, effective_bias
+        if not bear_fvgs: return None, None, f"no bear FVG", HH, LL, 0,0, station, effective_bias
         if upper_sweep and curr<eq_high:
-            direction="SELL"; pool_15=eq_high+2*tick; trigger_type="SWEEP_H"; reason_extra=f"{flip_reason} | BearFVG {bear_fvgs[-1]['bottom']:.5f}-{bear_fvgs[-1]['top']:.5f} SweepH {int(upper_dist)}t"
+            direction="SELL"; pool_15=eq_high+2*tick; trigger_type="SWEEP_H"; reason_extra=f"{flip_reason} SweepH {int(upper_dist)}t"
         elif bos_bear:
-            direction="SELL"; pool_15=HH; trigger_type="BOS_DOWN"; reason_extra=f"{flip_reason} | BOS_DOWN LL {LL:.5f} | BearFVG {bear_fvgs[-1]['bottom']:.5f}"
-    if not direction: return None, None, f"no V99 trigger {effective_bias} L:{lower_sweep} H:{upper_sweep} BOS B:{bos_bull} S:{bos_bear}", HH, LL, 0,0, station, effective_bias
+            direction="SELL"; pool_15=HH; trigger_type="BOS_DOWN"; reason_extra=f"{flip_reason} BOS_DOWN"
+    if not direction: return None, None, f"no trigger", HH, LL, 0,0, station, effective_bias
     min_dist=range_abs*0.4
     if direction=="BUY":
         if curr-pool_15<min_dist: pool_15=curr-min_dist
@@ -156,55 +185,79 @@ def guard_V99(d15, d5, d4, d1):
         if pool_15-curr<min_dist: pool_15=curr+min_dist
         for fvg_high,fvg_low,idx in fvg_bear_5:
             if pool_15<fvg_low and pool_15>fvg_high: pool_15=fvg_low+2*tick
-    reason=f"V99 {direction} {effective_bias} {trigger_type} D:{daily_raw} {station['face']} {reason_extra} touch{station['touches']} {int(station['range_ticks'])}t"
+    reason=f"V100 {direction} {effective_bias} {trigger_type} {station['face']} {reason_extra}"
     return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station, effective_bias
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
 DEFAULT_CD=1800
 def scan():
+    btc_chg = get_btc_dump()
+    if btc_chg <= -2.0:
+        tg(f"⚠️ PAUSE - BTC DUMPING {btc_chg:.2f}% - No new trades {get_time()}")
+        for s, data in list(ACTIVE.items()):
+            p=get_live_price(s)
+            if p and time.time()-data.get("time",0) > 7200:
+                tg(f"⚠️ CLOSE {s} - BTC CRASH {btc_chg:.1f}% @ {p:.5f} {get_time()}")
+                del ACTIVE[s]; save_a()
+        return
     for s, data in list(ACTIVE.items()):
         p=get_live_price(s)
         if not p: continue
         entry, is_buy, sl = data["entry"], data["is_buy"], data["sl"]
-        if time.time()-data.get("time", time.time()) > 14400:
+        held = time.time()-data.get("time", time.time())
+        if held < 7200:
+            if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
+                tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
+            continue
+        if held > 14400:
             tg(f"⏰ 4H CLOSE {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a(); continue
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             tg(f"🔴🔴 STOP {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True
-            # FIXED: buffer 2% to survive retest
             buffer_sl = entry * 0.98 if is_buy else entry * 1.02
-            data["sl"]=buffer_sl
-            save_a()
+            data["sl"]=buffer_sl; save_a()
             tg(f"🟡 TP1 {s} SL->BE+2% {buffer_sl:.6f} ({p:.5f}) {get_time()}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V99.3 PERFECT UNIVERSAL {get_time()} ===")
+    print(f"=== V100 FINAL SAFE/DANGER {get_time()} BTC {btc_chg:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
             if not d5 or not d15 or not d4 or not d1: continue
             direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V99(d15, d5, d4, d1)
-            daily_raw = get_daily_bias_TW(d1)
-            print(f"{s} DAILY_TW:{daily_raw} EFF:{eff_bias} -> {direction} | {reason} | {station['range_ticks'] if station else 0:.0f}t touch{station['touches'] if station else 0}")
             if not direction: continue
             cdsec=COOLDOWN_MAP.get(s, DEFAULT_CD)
             if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
             last_wall=COOLDOWN["wall"].get(s)
             if last_wall and station:
                 tick=station["tick"]
-                if abs(HH-last_wall.get("HH",0))<3*tick and abs(LL-last_wall.get("LL",0))<3*tick:
-                    print(f" SKIP same station {s}"); continue
+                if abs(HH-last_wall.get("HH",0))<3*tick and abs(LL-last_wall.get("LL",0))<3*tick: continue
+            fund = get_funding(s)
+            f_label, f_msg = funding_label(fund, direction)
+            if f_label=="DANGER": print(f" SKIP {s} FUND DANGER {fund}"); continue
             live=get_live_price(s) or d5["c"][-1]
             is_buy=direction=="BUY"
             tick=station["tick"]; range_abs=HH-LL
             sl=pool_15
             tp1=live+range_abs*1.5 if is_buy else live-range_abs*1.5
             tp2=live+range_abs*3 if is_buy else live-range_abs*3
-            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time()}; save_a()
+            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time(),"fund":fund}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
-            color="🟢🟢🟢 BUY" if is_buy else "🔴🔴🔴 SELL"
-            msg=f"{color} V99.3 {s}\n{eff_bias} {reason}\nENTRY {live:.6f}\nSL {sl:.6f}\nTP1 {tp1:.6f}\nTP2 {tp2:.6f}\n{get_time()}"
+            if f_label=="SAFE":
+                emoji="🟢🟢🟢" if is_buy else "🔴🔴🔴"
+                size_text="BIG SIZE" if abs(fund)>0.08 else "NORMAL SIZE"
+                msg=(f"{emoji} STRONG {direction} {s.replace('_USDT','')} @ {live:.6f}\n"
+                     f"{eff_bias} {station['face']} {int(station['range_ticks'])}t\n"
+                     f"SL {sl:.6f} TP1 {tp1:.6f} TP2 {tp2:.6f}\n"
+                     f"FUND {fund:.3f}% {f_label} - {f_msg} -> {size_text}\n"
+                     f"Hold 2h min, 4h max\n{get_time()}")
+            else:
+                emoji="🟡" if is_buy else "🟠"
+                msg=(f"{emoji} {direction} {s.replace('_USDT','')} @ {live:.6f} CAUTION\n"
+                     f"{eff_bias} {station['face']}\n"
+                     f"SL {sl:.6f} TP {tp1:.6f}\n"
+                     f"FUND {fund:.3f}% {f_label} - {f_msg} - 0.5x size\n{get_time()}")
             tg(msg)
             break
         except Exception as e:
