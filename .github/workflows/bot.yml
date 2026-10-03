@@ -1,62 +1,42 @@
-name: Run Crypto Bot V100 FINAL SAFE
-
+name: run-bot
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v100-final
+  group: koma-bot-lock
   cancel-in-progress: true
 
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pytz numpy
-
-      - name: Restore cache
-        uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4
         with:
           path: |
-            cooldown.json
             active.json
+            cooldown.json
           key: bot-cache-v100-final
-          restore-keys: |
-            bot-cache-v100-final
-            bot-cache-v99-3-universal
-
+          restore-keys: bot-cache-v100-final-
       - name: Ensure files
         run: |
-          python3 - << 'PY'
-          import json, os
-          for fname, default in [("active.json", {}), ("cooldown.json", {"signals":{}, "wall":{}})]:
-            try:
-              if not os.path.exists(fname): raise FileNotFoundError()
-              d=json.load(open(fname))
-              if fname=="active.json" and "signals" in d: raise ValueError("corrupted")
-              if fname=="cooldown.json" and "signals" not in d: d={"signals":{}, "wall":{}}
-            except Exception as e:
-              print(f"FIXING {fname}: {e}")
-              json.dump(default, open(fname,"w"))
-          PY
-
+          [ -f active.json ] || echo '{}' > active.json
+          [ -f cooldown.json ] || echo '{}' > cooldown.json
+          cat active.json
       - name: Run bot
         env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
-
-      - name: Save cache
-        uses: actions/cache/save@v4
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py
+      - uses: actions/cache/save@v4
         if: always()
         with:
           path: |
-            cooldown.json
             active.json
-          key: bot-cache-v100-final
+            cooldown.json
+          key: bot-cache-v100-final-${{ github.run_id }}
