@@ -26,17 +26,40 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v101-tight
+          key: bot-cache-v102-clean
           restore-keys: |
-            bot-cache-v101-tight-
-            bot-cache-v100-
+            bot-cache-v102-clean-
+            bot-cache-v101-
 
-      - name: Ensure files V101
+      - name: Ensure files V102 + CLEAN GRASS SIREN
         run: |
           [ -f active.json ] || echo '{}' > active.json
-          if [ ! -f cooldown.json ] || ! grep -q daily_pnl cooldown.json; then
+          if [! -f cooldown.json ] ||! grep -q daily_pnl cooldown.json; then
             echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
           fi
+          # FORCE CLEAN: keep only SAFE funding <= -0.05% or >=0.10% - removes GRASS SIREN
+          python3 -c "
+          import json, os
+          f='active.json'
+          try:
+              data=json.load(open(f))
+              clean={}
+              for k,v in data.items():
+                  fund=v.get('fund',0)
+                  # keep only SAND type: fund < -0.08
+                  if k=='SAND_USDT' or fund <= -0.08 or fund >= 0.10:
+                      clean[k]=v
+                  else:
+                      print(f'DELETE BAD {k} fund {fund}')
+              # if empty after clean, keep SAND if was there
+              if not clean and 'SAND_USDT' in data:
+                  clean={'SAND_USDT': data['SAND_USDT']}
+              json.dump(clean, open(f,'w'))
+              print('CLEANED active.json ->', clean)
+          except Exception as e:
+              print(e)
+              print('{}')
+          "
           cat active.json
           cat cooldown.json
 
@@ -54,4 +77,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v101-tight-${{ github.run_id }}
+          key: bot-cache-v102-clean-${{ github.run_id }}
