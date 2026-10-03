@@ -2,7 +2,7 @@ name: Run Crypto Bot V100 FINAL SAFE
 
 on:
   schedule:
-    - cron: '*/2 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 concurrency:
