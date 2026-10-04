@@ -7,11 +7,14 @@ TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats.json"
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
-COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{},"daily_pnl":0,"last_day":""}
+COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{},"daily_pnl":6.53,"last_day":"2026-10-04"}
 STATS = json.load(open(STATS_FILE)) if os.path.exists(STATS_FILE) else {"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
 if "signals" not in COOLDOWN: COOLDOWN["signals"]={}
-if "daily_pnl" not in COOLDOWN: COOLDOWN["daily_pnl"]=0
+if "daily_pnl" not in COOLDOWN: COOLDOWN["daily_pnl"]=6.53
+if COOLDOWN.get("daily_pnl",0)==0: # restore your real pnl
+    COOLDOWN["daily_pnl"]=6.53
+    COOLDOWN["last_day"]="2026-10-04"
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def save_s(): json.dump(STATS, open(STATS_FILE,"w"))
@@ -61,13 +64,13 @@ def get_btc_dump():
     except: return 0.0
 def funding_label(rate_percent, direction):
     if direction=="BUY":
-        if rate_percent >= 0.03: return "DANGER", "crowded longs - SKIP"
-        if rate_percent >= 0.01: return "CAUTION", "longs crowded - 0.3x"
+        if rate_percent >= 0.08: return "DANGER", "crowded longs - SKIP"
+        if rate_percent >= 0.03: return "CAUTION", "longs crowded - 0.3x"
         if rate_percent <= -0.10: return "SAFE", "squeeze fuel - BIG"
         return "SAFE", "pump ready"
     else:
-        if rate_percent <= -0.03: return "DANGER", "crowded shorts - SKIP"
-        if rate_percent <= -0.01: return "CAUTION", "shorts crowded - 0.3x"
+        if rate_percent <= -0.08: return "DANGER", "crowded shorts - SKIP"
+        if rate_percent <= -0.03: return "CAUTION", "shorts crowded - 0.3x"
         if rate_percent >= 0.10: return "SAFE", "dump fuel - BIG"
         return "SAFE", "dump ready"
 def get_daily_bias_TW(d1):
@@ -227,7 +230,8 @@ def update_stats_on_close(symbol, data, pnl, close_type):
 def scan():
     today = get_today()
     if COOLDOWN.get("last_day")!= today:
-        COOLDOWN["daily_pnl"]=0
+        if COOLDOWN.get("last_day") and COOLDOWN["last_day"]!= "":
+            COOLDOWN["daily_pnl"]=0
         COOLDOWN["last_day"]=today
         save_c()
     if COOLDOWN["daily_pnl"] <= -3.0:
@@ -252,7 +256,6 @@ def scan():
         entry, is_buy, sl = data["entry"], data["is_buy"], data["sl"]
         held = time.time()-data.get("time", time.time())
         if held < 0: held = 0
-        # SL
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
@@ -263,7 +266,6 @@ def scan():
                 update_stats_on_close(s,data,pnl,"SL")
                 tg(f"🔴🔴 STOP {s} {p:.5f} PnL {pnl:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% {get_time()}")
             del ACTIVE[s]; save_a(); continue
-        # TP1
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True
             data["sl"]=entry
@@ -288,7 +290,6 @@ def scan():
             update_stats_on_close(s,data,profit,"TP2")
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    # STATS REPORT + SELF CORRECT
     if STATS.get("total",0)>=5:
         total=STATS["total"]; wins=STATS.get("tp2",0)+STATS.get("timeout_win",0)
         wr=wins/total*100 if total>0 else 0
@@ -302,7 +303,6 @@ def scan():
             if not d5 or not d15 or not d4 or not d1: continue
             direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V99(d15, d5, d4, d1)
             if not direction: continue
-            # AUTO SKIP BAD FACES
             face=station["face"]
             bf=STATS["by_face"].get(face)
             if bf and bf["w"]+bf["l"]>=5:
