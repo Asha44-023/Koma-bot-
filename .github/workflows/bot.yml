@@ -37,26 +37,10 @@ jobs:
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f stats.json ] || echo '{"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}' > stats.json
-          if [! -f cooldown.json ] ||! grep -q daily_pnl cooldown.json; then
+          [ -f cooldown.json ] || echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
+          if ! grep -q daily_pnl cooldown.json; then
             echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
           fi
-          python3 -c "
-          import json, time
-          f='active.json'
-          try:
-              data=json.load(open(f))
-              clean={}
-              for k,v in data.items():
-                  t=v.get('time',0)
-                  if t > time.time()+10000:
-                      print(f'FIX TIME {k} {t} -> now')
-                      v['time']=time.time()-100
-                  clean[k]=v
-              json.dump(clean, open(f,'w'))
-              print('active ->', clean)
-          except Exception as e:
-              print('clean error', e)
-          "
           cat active.json
           cat cooldown.json
           cat stats.json
@@ -76,4 +60,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v102-stats-${{ github.run_id }}
+          key: bot-cache-v102-stats
