@@ -66,14 +66,14 @@ def get_pure_tick(d):
     if tick < 0.00001: tick = 0.00001
     return float(tick)
 
-def detect_consolidation_shape_generic(d, max_rng_pct, label):
+# === V111: DAILY JUST SHAPE - NO % ===
+def detect_consolidation_shape_generic(d, label=""):
     if len(d["c"]) < 14: return None
     h = d["h"][-12:]; l = d["l"][-12:]
     box_high = max(h); box_low = min(l)
     if box_low == 0: return None
     box_range = box_high - box_low
-    rng_pct = box_range / box_low * 100
-    if rng_pct > max_rng_pct: return None
+    if box_range == 0: box_range = 0.00001
     h0, h1 = h[0], h[-1]
     l0, l1 = l[0], l[-1]
     flat = box_range * 0.35
@@ -95,9 +95,10 @@ def detect_consolidation_shape_generic(d, max_rng_pct, label):
     lvl_38 = box_low + box_range * 0.38
     lvl_62 = box_low + box_range * 0.62
     tick = get_pure_tick(d)
+    rng_pct = box_range / box_low * 100 if box_low!=0 else 0
     return {"HH":box_high,"LL":box_low,"range":box_range,"rng_pct":rng_pct,"lvl_38":lvl_38,"lvl_62":lvl_62,"tick":tick,"face":shape,"parking":expected,"shape":shape,"expected":expected,"touches":12,"tf":label}
 
-def find_last_box_with_breakout(d, live_price, max_rng_pct, label):
+def find_last_box_with_breakout(d, live_price, label):
     if len(d["c"]) < 30: return None
     for offset in range(1, 20):
         end = len(d["h"]) - offset
@@ -107,33 +108,28 @@ def find_last_box_with_breakout(d, live_price, max_rng_pct, label):
         HH = max(h); LL = min(l)
         if LL==0: continue
         rng = HH-LL
-        pct = rng/LL*100
-        if pct>max_rng_pct or pct<0.05: continue
-        if live_price > HH*1.002:
-            return {"HH":HH,"LL":LL,"range":rng,"rng_pct":pct,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_pure_tick(d),"face":"RECTANGLE","parking":"UP","shape":"RECTANGLE","expected":"UP","touches":12,"tf":label+f" BROKE {offset}c ago"}
-        if live_price < LL*0.998:
-            return {"HH":HH,"LL":LL,"range":rng,"rng_pct":pct,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_pure_tick(d),"face":"RECTANGLE","parking":"DOWN","shape":"RECTANGLE","expected":"DOWN","touches":12,"tf":label+f" BROKE {offset}c ago"}
+        if rng==0: continue
+        if live_price > HH:
+            return {"HH":HH,"LL":LL,"range":rng,"rng_pct":0,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_pure_tick(d),"face":"RECTANGLE","parking":"UP","shape":"RECTANGLE","expected":"UP","touches":12,"tf":label+f" BROKE {offset}c ago"}
+        if live_price < LL:
+            return {"HH":HH,"LL":LL,"range":rng,"rng_pct":0,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_pure_tick(d),"face":"RECTANGLE","parking":"DOWN","shape":"RECTANGLE","expected":"DOWN","touches":12,"tf":label+f" BROKE {offset}c ago"}
     return None
 
+# === V111: IMAGE LOGIC - 38% BUY / 62% SELL RETEST ===
 def check_62_38_junction(box, live_price, curr_c):
     HH=box["HH"]; LL=box["LL"]; br=box["range"]; l38=box["lvl_38"]; l62=box["lvl_62"]
-    if live_price > HH or curr_c["c"] > HH:
-        if curr_c["l"] <= l62 and curr_c["l"] >= l38*0.98 and curr_c["c"] > l62:
-            return True, f"STRONG BULL 62/38 {box['shape']} {box['tf']}"
-        if curr_c["c"] < LL + br*0.75 and "15m" in box["tf"]:
-            return False, f"WEAK BULL SKIP {box['shape']} {box['tf']}"
-        if live_price > l62:
-            return True, f"STRONG BULL BREAK {box['shape']} {box['tf']}"
-        return None, f"BREAKOUT WAIT RETEST 38% {box['tf']}"
-    if live_price < LL or curr_c["c"] < LL:
-        if curr_c["h"] >= l38 and curr_c["h"] <= l62*1.02 and curr_c["c"] < l38:
-            return True, f"STRONG BEAR 62/38 {box['shape']} {box['tf']}"
-        if curr_c["c"] > LL + br*0.25 and "15m" in box["tf"]:
-            return False, f"WEAK BEAR SKIP {box['shape']} {box['tf']}"
-        if live_price < l38:
-            return True, f"STRONG BEAR BREAK {box['shape']} {box['tf']}"
-        return None, f"BREAKDOWN WAIT RETEST 62% {box['tf']}"
-    return None, f"CONSOL {box['shape']} {box['tf']} {box['rng_pct']:.2f}% -> {box['expected']} WAIT 62/38"
+    c = curr_c["c"]
+    # BUY: broke HH, must retest 38% low zone
+    if live_price > HH or c > HH:
+        if abs(c - l38) < br*0.20:
+            return True, f"STRONG BULL 38% RETEST {box['shape']} {box['tf']}"
+        return None, f"BULL BREAK WAIT 38% {l38:.5f} now {c:.5f} {box['tf']}"
+    # SELL: broke LL, must retest 62% high zone (38% from top)
+    if live_price < LL or c < LL:
+        if abs(c - l62) < br*0.20:
+            return True, f"STRONG BEAR 62% RETEST {box['shape']} {box['tf']}"
+        return None, f"BEAR BREAK WAIT 62% {l62:.5f} now {c:.5f} {box['tf']}"
+    return None, f"CONSOL {box['shape']} {box['tf']} WAIT BREAK"
 
 def reversal_or_continuation(station, direction):
     face = station.get("face","Rectangle")
@@ -173,22 +169,22 @@ def detect_4h_trend_fallback(d4):
     if lh>=12: return "BEARISH"
     return "NEUTRAL"
 
-# ========= V110 - DAILY FACE + 4H BREAK + 15m 62/38 - BOTH SIDES =========
-def guard_V110(d15, d5, d4, d1, symbol=""):
+# ========= V111 - DAILY FACE + 4H BREAK + 15m 38/62 =========
+def guard_V111(d15, d5, d4, d1, symbol=""):
     daily_bias = get_daily_bias_TW(d1)
     if daily_bias == "NEUTRAL": daily_bias = detect_4h_trend_fallback(d4)
     live_price = get_live_price(symbol) or d5["c"][-1]
     curr_15 = {"c": d15["c"][-1], "h": d15["h"][-1], "l": d15["l"][-1]}
 
-    # 1. DAILY = FACE
-    d_box = detect_consolidation_shape_generic(d1, 12.0, "DAILY")
+    # 1. DAILY = FACE ONLY - NO %
+    d_box = detect_consolidation_shape_generic(d1, "DAILY")
     if not d_box:
         return None,None,"no DAILY face",None,None,0,0,None,daily_bias
 
-    # 2. 4H = BREAKOUT
-    h_box = detect_consolidation_shape_generic(d4, 8.0, "4H")
+    # 2. 4H = BREAKOUT - NO %
+    h_box = detect_consolidation_shape_generic(d4, "4H")
     if not h_box:
-        h_box = find_last_box_with_breakout(d4, live_price, 8.0, "4H")
+        h_box = find_last_box_with_breakout(d4, live_price, "4H")
     if not h_box:
         return None,None,f"{d_box['shape']} DAILY WAIT 4H box",None,None,0,0,d_box,daily_bias
 
@@ -196,25 +192,18 @@ def guard_V110(d15, d5, d4, d1, symbol=""):
     broke_up = live_price > HH or d15["c"][-1] > HH
     broke_down = live_price < LL or d15["c"][-1] < LL
     if not (broke_up or broke_down):
-        return None,None,f"{d_box['shape']} DAILY + 4H {h_box['rng_pct']:.2f}% CONSOL",HH,LL,0,0,d_box,daily_bias
+        return None,None,f"{d_box['shape']} DAILY + 4H CONSOL WAIT BREAK",HH,LL,0,0,d_box,daily_bias
 
-    # 3. 15m = 62/38 FILTER using 4H levels
+    # 3. 15m = 38% BUY / 62% SELL RETEST - IMAGE
     strong, j_reason = check_62_38_junction(h_box, live_price, curr_15)
-    if strong is False:
-        return None,None,j_reason,HH,LL,0,0,d_box,daily_bias
     if strong is None:
         return None,None,j_reason,HH,LL,0,0,d_box,daily_bias
 
-    # 4. BOTH BUY AND SELL ENABLED
-    if broke_up and broke_down:
-        direction = "BUY" if daily_bias == "BULLISH" else "SELL"
-    elif broke_up:
-        direction = "BUY"
-    else:
-        direction = "SELL"
+    # 4. BOTH SIDES
+    direction = "BUY" if broke_up else "SELL"
 
     pool_15 = LL - h_box["tick"]*10 if direction=="BUY" else HH + h_box["tick"]*10
-    reason = f"V110 {direction} DAILY {d_box['shape']} + 4H BREAK + 15m {j_reason}"
+    reason = f"V111 {direction} DAILY {d_box['shape']} + 4H BREAK + 15m {j_reason}"
     return direction, pool_15, reason, HH, LL, 0,0, d_box, daily_bias
 
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200,"ZEC_USDT":900,"1000PEPE_USDT":900,"VELVET_USDT":900}
@@ -278,12 +267,12 @@ def scan():
             COOLDOWN["daily_pnl"]+=profit; save_c(); update_stats_on_close(s,data,profit,"TP2")
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V110 DAILY FACE + 4H BREAK + 15m 62/38 BOTH {get_time()} Daily {COOLDOWN['daily_pnl']:.2f}% ===")
+    print(f"=== V111 DAILY FACE + 4H BREAK + 15m 38/62 BOTH {get_time()} Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
             if not d5 or not d15 or not d4 or not d1: continue
-            direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V110(d15, d5, d4, d1, s)
+            direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V111(d15, d5, d4, d1, s)
             if not direction:
                 print(f" {s} {reason}")
                 continue
@@ -291,8 +280,7 @@ def scan():
             if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
             last_wall=COOLDOWN["wall"].get(s)
             if last_wall and HH and LL and station:
-                tick=station.get("tick", 0.00001) if station.get("face")=="RECTANGLE" else 0.00001
-                # skip same wall check using 4H HH/LL
+                tick=station.get("tick", 0.00001)
                 if abs(HH-last_wall.get("HH",0))<3*tick and abs(LL-last_wall.get("LL",0))<3*tick: continue
             fund = get_funding(s)
             f_label, f_msg = funding_label(fund, direction)
@@ -318,7 +306,7 @@ def scan():
                      f"NEXT POOL: {tp1:.6f} ({ask_vol/1000:.1f}k asks)\n"
                      f"{next_move}\n"
                      f"SL {sl:.6f} | GRAB {tp1:.6f} | EXT {tp2:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV110 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV111 {get_time()}")
             else:
                 msg=(f"🔴🔴🔴 SELL {s.replace('_USDT','')} @ {live:.6f}\n"
                      f"{eff_bias} DAILY {station['face']} + 4H BREAK {LL:.6f}\n"
@@ -326,7 +314,7 @@ def scan():
                      f"NEXT POOL: {tp1:.6f} ({bid_vol/1000:.1f}k bids)\n"
                      f"{next_move}\n"
                      f"SL {sl:.6f} | GRAB {tp1:.6f} | EXT {tp2:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV110 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV111 {get_time()}")
             tg(msg)
             break
         except Exception as e:
