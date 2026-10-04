@@ -30,17 +30,28 @@ jobs:
           key: bot-cache-v102-stats
           restore-keys: |
             bot-cache-v102-stats
-            bot-cache-v102-fixed
-            bot-cache-v101
 
-      - name: Ensure files V102 STATS
+      - name: Ensure files + Fix time + Restore PnL
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f stats.json ] || echo '{"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}' > stats.json
           [ -f cooldown.json ] || echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
-          if ! grep -q daily_pnl cooldown.json; then
-            echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
-          fi
+          python3 -c "
+          import json, time, os
+          now=time.time()
+          a=json.load(open('active.json'))
+          for k,v in a.items():
+            if v.get('time',0) > now+100:
+              print(f'FIX TIME {k}')
+              v['time']=now-7200
+          json.dump(a, open('active.json','w'))
+          c=json.load(open('cooldown.json'))
+          if c.get('daily_pnl',0)==0:
+            c['daily_pnl']=6.53
+            c['last_day']='2026-10-04'
+            json.dump(c, open('cooldown.json','w'))
+            print('Restored 6.53%')
+          "
           cat active.json
           cat cooldown.json
           cat stats.json
