@@ -12,9 +12,6 @@ STATS = json.load(open(STATS_FILE)) if os.path.exists(STATS_FILE) else {"total":
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
 if "signals" not in COOLDOWN: COOLDOWN["signals"]={}
 if "daily_pnl" not in COOLDOWN: COOLDOWN["daily_pnl"]=6.53
-if COOLDOWN.get("daily_pnl",0)==0: # restore your real pnl
-    COOLDOWN["daily_pnl"]=6.53
-    COOLDOWN["last_day"]="2026-10-04"
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def save_s(): json.dump(STATS, open(STATS_FILE,"w"))
@@ -62,6 +59,20 @@ def get_btc_dump():
         if len(c)>=4: return (c[-1]-c[-4])/c[-4]*100
         return 0.0
     except: return 0.0
+
+# V103 CLEAN - OLD LOGIC ONLY + LIQUIDITY REASON (NO RSI)
+def get_liquidity_reason(s, HH, fund):
+    try:
+        r = requests.get(f"https://contract.mexc.com/api/v1/contract/depth/{s}?depth=20", timeout=5).json()
+        asks = r.get("data", {}).get("asks", [])[:10]
+        ask_vol = sum(float(a[1]) for a in asks) if asks else 0
+        ask_wall = float(asks[0][0]) if asks else HH
+        reason = f"Swept {HH:.5f}-{ask_wall:.5f} ({ask_vol/1000:.1f}k asks)"
+        if fund>=0.015: reason += f" + funding {fund:.3f}% crowded"
+        return reason, ask_wall
+    except:
+        return f"Swept pool {HH:.5f}", HH
+
 def funding_label(rate_percent, direction):
     if direction=="BUY":
         if rate_percent >= 0.08: return "DANGER", "crowded longs - SKIP"
@@ -192,7 +203,7 @@ def guard_V99(d15, d5, d4, d1):
         if pool_15-curr<min_dist: pool_15=curr+min_dist
         for fvg_high,fvg_low,idx in fvg_bear_5:
             if pool_15<fvg_low and pool_15>fvg_high: pool_15=fvg_low+2*tick
-    reason=f"V102 {direction} {effective_bias} {trigger_type} {station['face']} {reason_extra}"
+    reason=f"V103 {direction} {effective_bias} {trigger_type} {station['face']} {reason_extra}"
     return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station, effective_bias
 
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
@@ -269,8 +280,13 @@ def scan():
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True
             data["sl"]=entry
+            liq_reason, wall = get_liquidity_reason(s, data.get("HH",p), data.get("fund",0))
             save_a()
-            tg(f"🟡 TP1 {s} SL->BE {entry:.6f} ({p:.5f}) {get_time()}")
+            profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
+            tg(f"🟢 TP1 HIT {s} @ {p:.5f} (+{profit:.2f}%)\n"
+               f"BASE {data.get('base_tp1',data['tp1']):.5f} -> EXT {data['tp1']:.5f} (+0.6% wick catch)\n"
+               f"WHY: {liq_reason}\n"
+               f"ACTION: Close 50% @ {p:.5f}, SL->BE {entry:.6f}, hold to TP2 {data['tp2']:.5f}\n{get_time()}")
         if held < 7200:
             if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
                 profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
@@ -293,10 +309,8 @@ def scan():
     if STATS.get("total",0)>=5:
         total=STATS["total"]; wins=STATS.get("tp2",0)+STATS.get("timeout_win",0)
         wr=wins/total*100 if total>0 else 0
-        print(f"=== V102 STATS Total {total} WR {wr:.1f}% TP2 {STATS.get('tp2',0)} SL {STATS.get('sl',0)} BE {STATS.get('be_stop',0)} SL_after_TP1 {STATS.get('sl_after_tp1',0)} ===")
-        if STATS.get("sl_after_tp1",0)>=3:
-            tg(f"📊 LEARNING: {STATS['sl_after_tp1']} BE stops after TP1 -> TP2 too far? Try 2.5x range {get_time()}")
-    print(f"=== V102 FIX TP1 BE STATS {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
+        print(f"=== V103 OLD BEST Total {total} WR {wr:.1f}% ===")
+    print(f"=== V103 OLD BEST {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -307,9 +321,7 @@ def scan():
             bf=STATS["by_face"].get(face)
             if bf and bf["w"]+bf["l"]>=5:
                 wr_face=bf["w"]/(bf["w"]+bf["l"])*100 if (bf["w"]+bf["l"])>0 else 50
-                if wr_face < 35:
-                    print(f"SKIP BAD FACE {face} WR {wr_face:.0f}%")
-                    continue
+                if wr_face < 35: continue
             cdsec=COOLDOWN_MAP.get(s, DEFAULT_CD)
             if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
             last_wall=COOLDOWN["wall"].get(s)
@@ -323,24 +335,31 @@ def scan():
             is_buy=direction=="BUY"
             tick=station["tick"]; range_abs=HH-LL
             sl=pool_15
-            tp1=live+range_abs*1.5 if is_buy else live-range_abs*1.5
-            tp2=live+range_abs*3 if is_buy else live-range_abs*3
-            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time(),"fund":fund,"face":face}; save_a()
+            base_tp1=live+range_abs*1.5 if is_buy else live-range_abs*1.5
+            base_tp2=live+range_abs*3 if is_buy else live-range_abs*3
+            if is_buy:
+                tp1 = base_tp1 * 1.006
+                tp2 = base_tp2 * 1.012
+            else:
+                tp1 = base_tp1 * 0.994
+                tp2 = base_tp2 * 0.988
+            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"base_tp1":base_tp1,"HH":HH,"LL":LL,"time":time.time(),"fund":fund,"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             if f_label=="SAFE":
                 emoji="🟢🟢🟢" if is_buy else "🔴🔴🔴"
                 size_text="BIG SIZE" if abs(fund)>0.08 else "NORMAL SIZE"
                 msg=(f"{emoji} STRONG {direction} {s.replace('_USDT','')} @ {live:.6f}\n"
                      f"{eff_bias} {station['face']} {int(station['range_ticks'])}t\n"
-                     f"SL {sl:.6f} TP1 {tp1:.6f} TP2 {tp2:.6f}\n"
+                     f"SL {sl:.6f} | BASE {base_tp1:.6f} -> EXT TP1 {tp1:.6f} (+0.6%)\n"
+                     f"TP2 {tp2:.6f} | Liquidity {HH:.6f}\n"
                      f"FUND {fund:.3f}% {f_label} - {f_msg} -> {size_text}\n"
-                     f"Hold 2h min, 4h max\nV102 STATS {get_time()}")
+                     f"Hold 2h min, 4h max\nV103 OLD BEST {get_time()}")
             else:
                 emoji="🟡" if is_buy else "🟠"
                 msg=(f"{emoji} {direction} {s.replace('_USDT','')} @ {live:.6f} CAUTION 0.3x\n"
                      f"{eff_bias} {station['face']}\n"
-                     f"SL {sl:.6f} TP {tp1:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label} - {f_msg}\nV102 STATS {get_time()}")
+                     f"SL {sl:.6f} TP {tp1:.6f} (EXT from {base_tp1:.6f})\n"
+                     f"FUND {fund:.3f}% {f_label} - {f_msg}\nV103 {get_time()}")
             tg(msg)
             break
         except Exception as e:
