@@ -248,7 +248,8 @@ def scan():
             data["tp1_hit"]=True; data["sl"]=entry; save_a()
             profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             tg(f"🟢 TP1 BEST GRAB {s} @ {p:.5f} (+{profit:.2f}%)\nNEXT {data['tp2']:.5f} | {data.get('next_move','')}\n{get_time()}")
-        if held > 14400:
+        # FIXED 4H - only close if NO TP1 hit (let winners run)
+        if held > 14400 and not data.get("tp1_hit"):
             pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
             ct="TIME_WIN" if pnl>0 else "TIME_LOSS"; update_stats_on_close(s,data,pnl,ct)
@@ -279,8 +280,13 @@ def scan():
             liq_reason, ask_wall, bid_wall, ask_vol, bid_vol = get_liquidity_reason(s, HH, fund)
             next_move = reversal_or_continuation(station, direction)
             sl=pool_15
-            if is_buy: tp1 = ask_wall; tp2 = ask_wall * 1.008
-            else: tp1 = bid_wall; tp2 = bid_wall * 0.992
+            tick_sz = station["tick"]*2
+            if is_buy:
+                tp1 = ask_wall if ask_wall > live + tick_sz else live + tick_sz*5
+                tp2 = tp1 * 1.008
+            else:
+                tp1 = bid_wall if bid_wall < live - tick_sz else live - tick_sz*5
+                tp2 = tp1 * 0.992
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"fund":fund,"face":station["face"],"liq_reason":liq_reason,"next_move":next_move}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             if is_buy:
