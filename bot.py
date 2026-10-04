@@ -216,10 +216,17 @@ def scan():
         if not p: continue
         entry, is_buy, sl = data["entry"], data["is_buy"], data["sl"]
         held = time.time()-data.get("time", time.time())
+        if held < 0: held = 0
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             loss = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=loss; save_c()
             tg(f"🔴🔴 STOP {s} {p:.5f} PnL {loss:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
+        # FIXED: TP1 BEFORE 2h lock
+        if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
+            data["tp1_hit"]=True
+            data["sl"]=entry
+            save_a()
+            tg(f"🟡 TP1 {s} SL->BE {entry:.6f} ({p:.5f}) {get_time()}")
         if held < 7200:
             if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
                 profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
@@ -230,17 +237,12 @@ def scan():
             pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
             tg(f"⏰ 4H CLOSE {s} {p:.5f} {pnl:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
-        if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
-            data["tp1_hit"]=True
-            buffer_sl = entry * 0.998 if is_buy else entry * 1.002
-            data["sl"]=buffer_sl; save_a()
-            tg(f"🟡 TP1 {s} SL->BE {buffer_sl:.6f} ({p:.5f}) {get_time()}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V101 TIGHT 0.01% SAFE - GRASS BLOCK FIX {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
+    print(f"=== V101 FIX TP1 BE {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -271,13 +273,13 @@ def scan():
                      f"{eff_bias} {station['face']} {int(station['range_ticks'])}t\n"
                      f"SL {sl:.6f} TP1 {tp1:.6f} TP2 {tp2:.6f}\n"
                      f"FUND {fund:.3f}% {f_label} - {f_msg} -> {size_text}\n"
-                     f"Hold 2h min, 4h max\nV101 {get_time()}")
+                     f"Hold 2h min, 4h max\nV101 FIX {get_time()}")
             else:
                 emoji="🟡" if is_buy else "🟠"
                 msg=(f"{emoji} {direction} {s.replace('_USDT','')} @ {live:.6f} CAUTION 0.3x\n"
                      f"{eff_bias} {station['face']}\n"
                      f"SL {sl:.6f} TP {tp1:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label} - {f_msg}\nV101 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label} - {f_msg}\nV101 FIX {get_time()}")
             tg(msg)
             break
         except Exception as e:
