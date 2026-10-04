@@ -26,14 +26,17 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v102-fixed
+            stats.json
+          key: bot-cache-v102-stats
           restore-keys: |
+            bot-cache-v102-stats
             bot-cache-v102-fixed
             bot-cache-v101
 
-      - name: Ensure files V102
+      - name: Ensure files V102 STATS
         run: |
           [ -f active.json ] || echo '{}' > active.json
+          [ -f stats.json ] || echo '{"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}' > stats.json
           if [! -f cooldown.json ] ||! grep -q daily_pnl cooldown.json; then
             echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
           fi
@@ -44,24 +47,21 @@ jobs:
               data=json.load(open(f))
               clean={}
               for k,v in data.items():
-                  # FIX future time bug
                   t=v.get('time',0)
-                  if t> time.time()+10000:
+                  if t > time.time()+10000:
                       print(f'FIX TIME {k} {t} -> now')
                       v['time']=time.time()-100
-                  # keep only if tp1_hit or BE set (you manually fixed SAND)
-                  # don't delete SAND/LAB - keep all active with valid SL
                   clean[k]=v
               json.dump(clean, open(f,'w'))
-              print('active.json ->', clean)
+              print('active ->', clean)
           except Exception as e:
               print('clean error', e)
-              open(f,'w').write('{}')
           "
           cat active.json
           cat cooldown.json
+          cat stats.json
 
-      - name: Run bot V101 FIX --once
+      - name: Run bot V102 STATS --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -75,4 +75,5 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v102-fixed-${{ github.run_id }}
+            stats.json
+          key: bot-cache-v102-stats-${{ github.run_id }}
