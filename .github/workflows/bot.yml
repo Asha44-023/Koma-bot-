@@ -3,11 +3,9 @@ on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
-
 concurrency:
   group: koma-bot-lock
   cancel-in-progress: false
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -17,10 +15,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install deps
         run: pip install requests pytz numpy
-
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -28,41 +24,16 @@ jobs:
             cooldown.json
             stats.json
           key: bot-cache-v103-old-best
-
       - name: Ensure files
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{"signals":{},"wall":{},"daily_pnl":6.53,"last_day":"2026-10-04"}' > cooldown.json
           [ -f stats.json ] || echo '{"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}' > stats.json
-          python3 -c "
-          import json, time
-          now=time.time()
-          a=json.load(open('active.json'))
-          for k,v in list(a.items()):
-            if v.get('time',0) > now+100:
-              v['time']=now-7500
-            # migrate old TP to extended TP for all 11 coins
-            if 'base_tp1' not in v and 'tp1' in v:
-              base=v['tp1']
-              is_buy=v.get('is_buy',True)
-              v['base_tp1']=base
-              if is_buy:
-                v['tp1']=base*1.006
-                v['tp2']=v.get('tp2',base*2)*1.012
-              else:
-                v['tp1']=base*0.994
-                v['tp2']=v.get('tp2',base*2)*0.988
-          json.dump(a, open('active.json','w'))
-          "
-
       - name: Run bot V103 OLD BEST --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-
       - uses: actions/cache/save@v4
         if: always()
         with:
