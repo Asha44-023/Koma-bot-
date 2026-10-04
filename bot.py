@@ -176,31 +176,47 @@ def guard_V111(d15, d5, d4, d1, symbol=""):
     live_price = get_live_price(symbol) or d5["c"][-1]
     curr_15 = {"c": d15["c"][-1], "h": d15["h"][-1], "l": d15["l"][-1]}
 
-    # 1. DAILY = FACE ONLY - NO %
+    # 1. DAILY = FACE ONLY
     d_box = detect_consolidation_shape_generic(d1, "DAILY")
     if not d_box:
         return None,None,"no DAILY face",None,None,0,0,None,daily_bias
 
-    # 2. 4H = BREAKOUT - NO %
-    h_box = detect_consolidation_shape_generic(d4, "4H")
+    # 2. 4H = BREAKOUT FIRST, then CONSOL
+    h_box = find_last_box_with_breakout(d4, live_price, "4H")
     if not h_box:
-        h_box = find_last_box_with_breakout(d4, live_price, "4H")
+        h_box = detect_consolidation_shape_generic(d4, "4H")
     if not h_box:
         return None,None,f"{d_box['shape']} DAILY WAIT 4H box",None,None,0,0,d_box,daily_bias
 
     HH, LL = h_box["HH"], h_box["LL"]
     broke_up = live_price > HH or d15["c"][-1] > HH
     broke_down = live_price < LL or d15["c"][-1] < LL
-    if not (broke_up or broke_down):
+    
+    # If box is from old breakout, consider it broke
+    is_old_break = "BROKE" in h_box.get("tf","")
+    if is_old_break:
+        broke_up = "UP" in h_box.get("parking","") or h_box.get("expected")=="UP"
+        broke_down = "DOWN" in h_box.get("parking","") or h_box.get("expected")=="DOWN"
+        if not (broke_up or broke_down):
+            broke_up = True  # old box broke, try both
+
+    if not (broke_up or broke_down) and not is_old_break:
         return None,None,f"{d_box['shape']} DAILY + 4H CONSOL WAIT BREAK",HH,LL,0,0,d_box,daily_bias
 
-    # 3. 15m = 38% BUY / 62% SELL RETEST - IMAGE
+    # 3. 15m = 38% BUY / 62% SELL RETEST
     strong, j_reason = check_62_38_junction(h_box, live_price, curr_15)
     if strong is None:
         return None,None,j_reason,HH,LL,0,0,d_box,daily_bias
 
-    # 4. BOTH SIDES
-    direction = "BUY" if broke_up else "SELL"
+    direction = "BUY" if (broke_up and not broke_down) else "SELL"
+    if broke_up and broke_down:
+        direction = "BUY" if daily_bias=="BULLISH" else "SELL"
+    if is_old_break:
+        # decide by where price is vs levels
+        if curr_15["c"] < h_box["lvl_38"]*1.01: 
+            direction = "SELL"
+        else:
+            direction = "BUY"
 
     pool_15 = LL - h_box["tick"]*10 if direction=="BUY" else HH + h_box["tick"]*10
     reason = f"V111 {direction} DAILY {d_box['shape']} + 4H BREAK + 15m {j_reason}"
