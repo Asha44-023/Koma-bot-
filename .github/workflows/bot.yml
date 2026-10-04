@@ -27,7 +27,7 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v102-stats
+          key: bot-cache-v103-old-best
 
       - name: Ensure files
         run: |
@@ -41,10 +41,21 @@ jobs:
           for k,v in list(a.items()):
             if v.get('time',0) > now+100:
               v['time']=now-7500
+            # migrate old TP to extended TP for all 11 coins
+            if 'base_tp1' not in v and 'tp1' in v:
+              base=v['tp1']
+              is_buy=v.get('is_buy',True)
+              v['base_tp1']=base
+              if is_buy:
+                v['tp1']=base*1.006
+                v['tp2']=v.get('tp2',base*2)*1.012
+              else:
+                v['tp1']=base*0.994
+                v['tp2']=v.get('tp2',base*2)*0.988
           json.dump(a, open('active.json','w'))
           "
 
-      - name: Run bot V102 STATS --once
+      - name: Run bot V103 OLD BEST --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -59,4 +70,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v102-stats
+          key: bot-cache-v103-old-best
