@@ -60,24 +60,24 @@ def get_liquidity_reason(s, HH, fund):
         return reason, ask_wall, bid_wall, ask_vol, bid_vol
     except:
         return f"Swept pool {HH:.5f}", HH, HH, 0, 0
-def get_pure_tick(d15):
-    h=d15["h"][-20:]; l=d15["l"][-20:]; avg_range = sum(h[i]-l[i] for i in range(20)) / 20
+def get_pure_tick(d):
+    h=d["h"][-20:]; l=d["l"][-20:]; avg_range = sum(h[i]-l[i] for i in range(20)) / 20
     tick = avg_range / 10
     if tick < 0.00001: tick = 0.00001
     return float(tick)
 
-# ========= V108 SIMPLE: CONSOLIDATION SHAPES + 62/38 JUNCTION =========
-def detect_consolidation_shape(d15):
-    if len(d15["c"]) < 14: return None
-    h = d15["h"][-12:]; l = d15["l"][-12:]
+# ========= V109 DUAL TF: 15m + 4H + DAILY =========
+def detect_consolidation_shape_generic(d, max_rng_pct, label):
+    if len(d["c"]) < 14: return None
+    h = d["h"][-12:]; l = d["l"][-12:]
     box_high = max(h); box_low = min(l)
     if box_low == 0: return None
     box_range = box_high - box_low
     rng_pct = box_range / box_low * 100
-    if rng_pct > 2.5: return None # not consolidating
+    if rng_pct > max_rng_pct: return None
     h0, h1 = h[0], h[-1]
     l0, l1 = l[0], l[-1]
-    flat = box_range * 0.25
+    flat = box_range * 0.35
     top_flat = abs(h1 - h0) < flat
     bot_flat = abs(l1 - l0) < flat
     top_falling = h1 < h0 - flat
@@ -91,48 +91,62 @@ def detect_consolidation_shape(d15):
     elif top_falling and bot_falling: shape = "FLAG_DOWN"; expected = "UP"
     elif top_rising and bot_rising: shape = "FLAG_UP"; expected = "DOWN"
     elif top_falling and bot_rising: shape = "SYM_TRI"; expected = "TREND"
-    # wedge refinement
     if shape=="FLAG_DOWN" and abs(h1-h0) > abs(l1-l0): shape="FALL_WEDGE"
     if shape=="FLAG_UP" and abs(l1-l0) > abs(h1-h0): shape="RISE_WEDGE"
     lvl_38 = box_low + box_range * 0.38
     lvl_62 = box_low + box_range * 0.62
-    tick = get_pure_tick(d15)
-    return {"HH":box_high,"LL":box_low,"range":box_range,"rng_pct":rng_pct,"lvl_38":lvl_38,"lvl_62":lvl_62,"tick":tick,"face":shape,"parking":expected,"shape":shape,"expected":expected,"touches":12}
+    tick = get_pure_tick(d)
+    return {"HH":box_high,"LL":box_low,"range":box_range,"rng_pct":rng_pct,"lvl_38":lvl_38,"lvl_62":lvl_62,"tick":tick,"face":shape,"parking":expected,"shape":shape,"expected":expected,"touches":12,"tf":label}
+
+def find_last_box_with_breakout(d, live_price, max_rng_pct, label):
+    if len(d["c"]) < 30: return None
+    for offset in range(1, 20):
+        end = len(d["h"]) - offset
+        start = end - 12
+        if start < 0: break
+        h = d["h"][start:end]; l = d["l"][start:end]
+        HH = max(h); LL = min(l)
+        if LL==0: continue
+        rng = HH-LL
+        pct = rng/LL*100
+        if pct>max_rng_pct or pct<0.05: continue
+        if live_price > HH*1.002:
+            return {"HH":HH,"LL":LL,"range":rng,"rng_pct":pct,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_pure_tick(d),"face":"RECTANGLE","parking":"UP","shape":"RECTANGLE","expected":"UP","touches":12,"tf":label+f" BROKE {offset}c ago"}
+        if live_price < LL*0.998:
+            return {"HH":HH,"LL":LL,"range":rng,"rng_pct":pct,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_pure_tick(d),"face":"RECTANGLE","parking":"DOWN","shape":"RECTANGLE","expected":"DOWN","touches":12,"tf":label+f" BROKE {offset}c ago"}
+    return None
 
 def check_62_38_junction(box, live_price, curr_c):
-    # your image rule: STRONG = retest 38/62 zone and close beyond
     HH=box["HH"]; LL=box["LL"]; br=box["range"]; l38=box["lvl_38"]; l62=box["lvl_62"]
-    # BULL
     if live_price > HH or curr_c["c"] > HH:
-        # strong if retested 38-62 zone and closed >62%
         if curr_c["l"] <= l62 and curr_c["l"] >= l38*0.98 and curr_c["c"] > l62:
-            return True, f"STRONG BULL 62/38 {box['shape']}"
-        if curr_c["c"] < LL + br*0.75:
-            return False, f"WEAK BULL SKIP {box['shape']}"
+            return True, f"STRONG BULL 62/38 {box['shape']} {box['tf']}"
+        if curr_c["c"] < LL + br*0.75 and "15m" in box["tf"]:
+            return False, f"WEAK BULL SKIP {box['shape']} {box['tf']}"
         if live_price > l62:
-            return True, f"STRONG BULL BREAK {box['shape']}"
-        return None, "BREAKOUT WAIT RETEST 38%"
-    # BEAR
+            return True, f"STRONG BULL BREAK {box['shape']} {box['tf']}"
+        return None, f"BREAKOUT WAIT RETEST 38% {box['tf']}"
     if live_price < LL or curr_c["c"] < LL:
         if curr_c["h"] >= l38 and curr_c["h"] <= l62*1.02 and curr_c["c"] < l38:
-            return True, f"STRONG BEAR 62/38 {box['shape']}"
-        if curr_c["c"] > LL + br*0.25:
-            return False, f"WEAK BEAR SKIP {box['shape']}"
+            return True, f"STRONG BEAR 62/38 {box['shape']} {box['tf']}"
+        if curr_c["c"] > LL + br*0.25 and "15m" in box["tf"]:
+            return False, f"WEAK BEAR SKIP {box['shape']} {box['tf']}"
         if live_price < l38:
-            return True, f"STRONG BEAR BREAK {box['shape']}"
-        return None, "BREAKDOWN WAIT RETEST 62%"
-    return None, f"CONSOL {box['shape']} {box['rng_pct']:.2f}% -> {box['expected']} WAIT 62/38"
+            return True, f"STRONG BEAR BREAK {box['shape']} {box['tf']}"
+        return None, f"BREAKDOWN WAIT RETEST 62% {box['tf']}"
+    return None, f"CONSOL {box['shape']} {box['tf']} {box['rng_pct']:.2f}% -> {box['expected']} WAIT 62/38"
 
 def reversal_or_continuation(station, direction):
     face = station.get("face","Rectangle")
+    tf = station.get("tf","")
     if direction=="BUY":
-        if face in ["ASC_TRI","FLAG_DOWN","FALL_WEDGE"]: return f"CONTINUATION - {face} -> UP"
-        if face=="RECTANGLE": return "BREAKOUT - rectangle -> UP"
-        return f"BREAKOUT {face} -> UP"
+        if face in ["ASC_TRI","FLAG_DOWN","FALL_WEDGE"]: return f"CONTINUATION - {face} {tf} -> UP"
+        if face=="RECTANGLE": return f"BREAKOUT - rectangle {tf} -> UP"
+        return f"BREAKOUT {face} {tf} -> UP"
     else:
-        if face in ["DESC_TRI","FLAG_UP","RISE_WEDGE"]: return f"CONTINUATION - {face} -> DOWN"
-        if face=="RECTANGLE": return "BREAKDOWN - rectangle -> DOWN"
-        return f"BREAKDOWN {face} -> DOWN"
+        if face in ["DESC_TRI","FLAG_UP","RISE_WEDGE"]: return f"CONTINUATION - {face} {tf} -> DOWN"
+        if face=="RECTANGLE": return f"BREAKDOWN - rectangle {tf} -> DOWN"
+        return f"BREAKDOWN {face} {tf} -> DOWN"
 
 def funding_label(rate_percent, direction):
     if direction=="BUY":
@@ -158,60 +172,44 @@ def detect_4h_trend_fallback(d4):
     if hl>=12: return "BULLISH"
     if lh>=12: return "BEARISH"
     return "NEUTRAL"
-def find_fvgs_4h(d4):
-    bull, bear = [], []; h=d4["h"]; l=d4["l"]
-    for i in range(2, len(h)):
-        if l[i] > h[i-2]: bull.append({'top': l[i], 'bottom': h[i-2]})
-        if h[i] < l[i-2]: bear.append({'top': l[i-2], 'bottom': h[i]})
-    return bull[-3:], bear[-3:]
-def detect_FVG(d):
-    h=d["h"]; l=d["l"]; fvg_bull=[]; fvg_bear=[]
-    for i in range(2, len(h)):
-        if l[i] > h[i-2]: fvg_bull.append((h[i-2], l[i], i))
-        if h[i] < l[i-2]: fvg_bear.append((h[i], l[i-2], i))
-    return fvg_bull[-3:], fvg_bear[-3:]
-def detect_MSS_BOS(d):
-    h=d["h"][-20:]; l=d["l"][-20:]; c=d["c"][-1]
-    last_swing_high=max(h[:-3]); last_swing_low=min(l[:-3])
-    return c > last_swing_high, c < last_swing_low, last_swing_high, last_swing_low
-def detect_true_liquidity_pool(d15, d5):
-    h15=d15["h"][-12:]; l15=d15["l"][-12:]; tick=get_pure_tick(d15)
-    eq_high = max(h15); eq_low = min(l15)
-    h5_max=max(d5["h"][-5:]); l5_min=min(d5["l"][-5:])
-    return eq_high, eq_low, h5_max > eq_high, l5_min < eq_low, (h5_max-eq_high)/tick if h5_max>eq_high else 0, (eq_low-l5_min)/tick if l5_min<eq_low else 0
 
 def guard_V108(d15, d5, d4, d1, symbol=""):
     daily_raw = get_daily_bias_TW(d1); daily_bias = daily_raw
     if daily_bias == "NEUTRAL": daily_bias = detect_4h_trend_fallback(d4)
-    station=detect_consolidation_shape(d15)
-    if not station: return None, None, f"no consolidation box", None, None, 0,0, None, daily_bias
     live_price = get_live_price(symbol) or d5["c"][-1]
     curr_c = {"c": d15["c"][-1], "h": d15["h"][-1], "l": d15["l"][-1]}
-    strong, j_reason = check_62_38_junction(station, live_price, curr_c)
-    if strong is None:
-        # still consolidating -> show shape but no entry until breakout
-        return None, None, j_reason, station["HH"], station["LL"], 0,0, station, daily_bias
-    if strong is False:
-        return None, None, j_reason, station["HH"], station["LL"], 0,0, station, daily_bias
-
-    # STRONG BREAKOUT PASSED 62/38
-    HH, LL = station["HH"], station["LL"]; tick=station["tick"]
-    curr = d15["c"][-1]
-    # direction from shape + breakout
-    if curr_c["c"] > HH or live_price > HH: direction="BUY"
-    elif curr_c["c"] < LL or live_price < LL: direction="SELL"
-    else: direction="BUY" if station["expected"]=="UP" else "SELL"
-
-    # follow rectangle with trend
-    if station["shape"]=="RECTANGLE" or station["shape"]=="SYM_TRI":
-        if daily_bias=="BULLISH": direction="BUY"
-        elif daily_bias=="BEARISH": direction="SELL"
-
-    if direction=="BUY": pool_15 = LL - tick*10
-    else: pool_15 = HH + tick*10
-
-    reason=f"V108 {direction} {station['shape']} {station['rng_pct']:.2f}% {j_reason}"
-    return direction, pool_15, reason, HH, LL, 0,0, station, daily_bias
+    boxes=[]
+    b15 = detect_consolidation_shape_generic(d15, 2.5, "15m")
+    if b15: boxes.append(b15)
+    b4 = detect_consolidation_shape_generic(d4, 8.0, "4H")
+    if b4: boxes.append(b4)
+    b1 = detect_consolidation_shape_generic(d1, 12.0, "DAILY")
+    if b1: boxes.append(b1)
+    if not boxes:
+        for tf_data, maxp, lbl in [(d15,2.5,"15m"),(d4,8.0,"4H"),(d1,12.0,"DAILY")]:
+            rb=find_last_box_with_breakout(tf_data, live_price, maxp, lbl)
+            if rb:
+                boxes.append(rb)
+                break
+    if not boxes:
+        return None, None, f"no consolidation box (15m/4H/DAILY)", None, None, 0,0, None, daily_bias
+    for station in boxes:
+        strong, j_reason = check_62_38_junction(station, live_price, curr_c)
+        if strong is True:
+            HH, LL = station["HH"], station["LL"]; tick=station["tick"]
+            if live_price > station["HH"] or curr_c["c"] > station["HH"]: direction="BUY"
+            elif live_price < station["LL"] or curr_c["c"] < station["LL"]: direction="SELL"
+            else: direction="BUY" if station["expected"]=="UP" else "SELL"
+            if station["shape"]=="RECTANGLE" or station["shape"]=="SYM_TRI":
+                if daily_bias=="BULLISH": direction="BUY"
+                elif daily_bias=="BEARISH": direction="SELL"
+            pool_15 = LL - tick*10 if direction=="BUY" else HH + tick*10
+            reason=f"V109 {direction} {station['tf']} {station['shape']} {station['rng_pct']:.2f}% {j_reason}"
+            return direction, pool_15, reason, HH, LL, 0,0, station, daily_bias
+        if strong is False:
+            return None, None, j_reason, station["HH"], station["LL"], 0,0, station, daily_bias
+    station=boxes[0]
+    return None, None, f"CONSOL {station['shape']} {station['tf']} {station['rng_pct']:.2f}% -> {station['expected']} WAIT 62/38", station["HH"], station["LL"], 0,0, station, daily_bias
 
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200,"ZEC_USDT":900,"1000PEPE_USDT":900,"VELVET_USDT":900}
 DEFAULT_CD=1800
@@ -273,7 +271,7 @@ def scan():
             COOLDOWN["daily_pnl"]+=profit; save_c(); update_stats_on_close(s,data,profit,"TP2")
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V108 SHAPE + 62/38 {get_time()} Daily {COOLDOWN['daily_pnl']:.2f}% ===")
+    print(f"=== V109 DUAL TF 15m/4H/DAILY {get_time()} Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -307,20 +305,20 @@ def scan():
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             if is_buy:
                 msg=(f"🟢🟢🟢 BUY {s.replace('_USDT','')} @ {live:.6f}\n"
-                     f"{eff_bias} {station['face']} {station['rng_pct']:.2f}% -> {station['expected']}\n"
+                     f"{eff_bias} {station['face']} {station['tf']} {station['rng_pct']:.2f}% -> {station['expected']}\n"
                      f"{reason}\n"
                      f"NEXT POOL: {tp1:.6f} ({ask_vol/1000:.1f}k asks)\n"
                      f"{next_move}\n"
                      f"SL {sl:.6f} | GRAB {tp1:.6f} | EXT {tp2:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV108 SHAPE+62/38 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV109 DUAL TF {get_time()}")
             else:
                 msg=(f"🔴🔴🔴 SELL {s.replace('_USDT','')} @ {live:.6f}\n"
-                     f"{eff_bias} {station['face']} {station['rng_pct']:.2f}% -> {station['expected']}\n"
+                     f"{eff_bias} {station['face']} {station['tf']} {station['rng_pct']:.2f}% -> {station['expected']}\n"
                      f"{reason}\n"
                      f"NEXT POOL: {tp1:.6f} ({bid_vol/1000:.1f}k bids)\n"
                      f"{next_move}\n"
                      f"SL {sl:.6f} | GRAB {tp1:.6f} | EXT {tp2:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV108 SHAPE+62/38 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV109 DUAL TF {get_time()}")
             tg(msg)
             break
         except Exception as e:
