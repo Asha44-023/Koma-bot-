@@ -5,14 +5,16 @@ EAT = pytz.timezone("Africa/Nairobi")
 SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","C_USDT","G_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
-ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
+ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats.json"
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
 COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{},"daily_pnl":0,"last_day":""}
+STATS = json.load(open(STATS_FILE)) if os.path.exists(STATS_FILE) else {"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}
 if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
 if "signals" not in COOLDOWN: COOLDOWN["signals"]={}
 if "daily_pnl" not in COOLDOWN: COOLDOWN["daily_pnl"]=0
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
+def save_s(): json.dump(STATS, open(STATS_FILE,"w"))
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
 def tg(m):
@@ -187,10 +189,41 @@ def guard_V99(d15, d5, d4, d1):
         if pool_15-curr<min_dist: pool_15=curr+min_dist
         for fvg_high,fvg_low,idx in fvg_bear_5:
             if pool_15<fvg_low and pool_15>fvg_high: pool_15=fvg_low+2*tick
-    reason=f"V101 {direction} {effective_bias} {trigger_type} {station['face']} {reason_extra}"
+    reason=f"V102 {direction} {effective_bias} {trigger_type} {station['face']} {reason_extra}"
     return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station, effective_bias
+
 COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
 DEFAULT_CD=1800
+
+def update_stats_on_close(symbol, data, pnl, close_type):
+    STATS["total"] = STATS.get("total",0)+1
+    face = data.get("face","Unknown")
+    sym = symbol.replace("_USDT","")
+    if face not in STATS["by_face"]: STATS["by_face"][face]={"w":0,"l":0,"be":0}
+    if sym not in STATS["by_symbol"]: STATS["by_symbol"][sym]={"w":0,"l":0}
+    if close_type=="TP2":
+        STATS["tp2"]+=1
+        STATS["by_face"][face]["w"]+=1
+        STATS["by_symbol"][sym]["w"]+=1
+    elif close_type=="SL":
+        STATS["sl"]+=1
+        if data.get("tp1_hit"):
+            STATS["sl_after_tp1"]+=1
+            STATS["by_face"][face]["be"]+=1
+        else:
+            STATS["by_face"][face]["l"]+=1
+            STATS["by_symbol"][sym]["l"]+=1
+    elif close_type=="TIME_WIN":
+        STATS["timeout_win"]+=1
+        STATS["by_face"][face]["w"]+=1
+    elif close_type=="TIME_LOSS":
+        STATS["timeout_loss"]+=1
+        STATS["by_face"][face]["l"]+=1
+    elif close_type=="BE":
+        STATS["be_stop"]+=1
+        STATS["by_face"][face]["be"]+=1
+    save_s()
+
 def scan():
     today = get_today()
     if COOLDOWN.get("last_day")!= today:
@@ -208,6 +241,8 @@ def scan():
             if p and time.time()-data.get("time",0) > 7200:
                 loss = ((p-data["entry"])/data["entry"]*100) if data["is_buy"] else ((data["entry"]-p)/data["entry"]*100)
                 COOLDOWN["daily_pnl"]+=loss; save_c()
+                ct="TIME_WIN" if loss>0 else "TIME_LOSS"
+                update_stats_on_close(s,data,loss,ct)
                 tg(f"⚠️ FORCE CLOSE {s} BTC CRASH {btc_chg:.1f}% @ {p:.5f} PnL {loss:.2f}% {get_time()}")
                 del ACTIVE[s]; save_a()
         return
@@ -217,11 +252,18 @@ def scan():
         entry, is_buy, sl = data["entry"], data["is_buy"], data["sl"]
         held = time.time()-data.get("time", time.time())
         if held < 0: held = 0
+        # SL
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
-            loss = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
-            COOLDOWN["daily_pnl"]+=loss; save_c()
-            tg(f"🔴🔴 STOP {s} {p:.5f} PnL {loss:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
-        # FIXED: TP1 BEFORE 2h lock
+            pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
+            COOLDOWN["daily_pnl"]+=pnl; save_c()
+            if data.get("tp1_hit") and abs(p-entry)/entry*100 <0.3:
+                update_stats_on_close(s,data,pnl,"BE")
+                tg(f"🟡 BE STOP {s} {p:.5f} PnL {pnl:.2f}% after TP1 {get_time()}")
+            else:
+                update_stats_on_close(s,data,pnl,"SL")
+                tg(f"🔴🔴 STOP {s} {p:.5f} PnL {pnl:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% {get_time()}")
+            del ACTIVE[s]; save_a(); continue
+        # TP1
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True
             data["sl"]=entry
@@ -231,24 +273,43 @@ def scan():
             if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
                 profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
                 COOLDOWN["daily_pnl"]+=profit; save_c()
+                update_stats_on_close(s,data,profit,"TP2")
                 tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
             continue
         if held > 14400:
             pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
+            ct="TIME_WIN" if pnl>0 else "TIME_LOSS"
+            update_stats_on_close(s,data,pnl,ct)
             tg(f"⏰ 4H CLOSE {s} {p:.5f} {pnl:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
-            tg(f"🟢🟢 TP2 HIT {s} {p:.5f} {get_time()}"); del ACTIVE[s]; save_a()
+            update_stats_on_close(s,data,profit,"TP2")
+            tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V101 FIX TP1 BE {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
+    # STATS REPORT + SELF CORRECT
+    if STATS.get("total",0)>=5:
+        total=STATS["total"]; wins=STATS.get("tp2",0)+STATS.get("timeout_win",0)
+        wr=wins/total*100 if total>0 else 0
+        print(f"=== V102 STATS Total {total} WR {wr:.1f}% TP2 {STATS.get('tp2',0)} SL {STATS.get('sl',0)} BE {STATS.get('be_stop',0)} SL_after_TP1 {STATS.get('sl_after_tp1',0)} ===")
+        if STATS.get("sl_after_tp1",0)>=3:
+            tg(f"📊 LEARNING: {STATS['sl_after_tp1']} BE stops after TP1 -> TP2 too far? Try 2.5x range {get_time()}")
+    print(f"=== V102 FIX TP1 BE STATS {get_time()} BTC {btc_chg:.2f}% Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
             if not d5 or not d15 or not d4 or not d1: continue
             direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V99(d15, d5, d4, d1)
             if not direction: continue
+            # AUTO SKIP BAD FACES
+            face=station["face"]
+            bf=STATS["by_face"].get(face)
+            if bf and bf["w"]+bf["l"]>=5:
+                wr_face=bf["w"]/(bf["w"]+bf["l"])*100 if (bf["w"]+bf["l"])>0 else 50
+                if wr_face < 35:
+                    print(f"SKIP BAD FACE {face} WR {wr_face:.0f}%")
+                    continue
             cdsec=COOLDOWN_MAP.get(s, DEFAULT_CD)
             if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
             last_wall=COOLDOWN["wall"].get(s)
@@ -264,7 +325,7 @@ def scan():
             sl=pool_15
             tp1=live+range_abs*1.5 if is_buy else live-range_abs*1.5
             tp2=live+range_abs*3 if is_buy else live-range_abs*3
-            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time(),"fund":fund}; save_a()
+            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"time":time.time(),"fund":fund,"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             if f_label=="SAFE":
                 emoji="🟢🟢🟢" if is_buy else "🔴🔴🔴"
@@ -273,13 +334,13 @@ def scan():
                      f"{eff_bias} {station['face']} {int(station['range_ticks'])}t\n"
                      f"SL {sl:.6f} TP1 {tp1:.6f} TP2 {tp2:.6f}\n"
                      f"FUND {fund:.3f}% {f_label} - {f_msg} -> {size_text}\n"
-                     f"Hold 2h min, 4h max\nV101 FIX {get_time()}")
+                     f"Hold 2h min, 4h max\nV102 STATS {get_time()}")
             else:
                 emoji="🟡" if is_buy else "🟠"
                 msg=(f"{emoji} {direction} {s.replace('_USDT','')} @ {live:.6f} CAUTION 0.3x\n"
                      f"{eff_bias} {station['face']}\n"
                      f"SL {sl:.6f} TP {tp1:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label} - {f_msg}\nV101 FIX {get_time()}")
+                     f"FUND {fund:.3f}% {f_label} - {f_msg}\nV102 STATS {get_time()}")
             tg(msg)
             break
         except Exception as e:
