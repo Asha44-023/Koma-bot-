@@ -1,12 +1,12 @@
 name: run-bot
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 concurrency:
   group: koma-bot-lock
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -28,33 +28,21 @@ jobs:
             cooldown.json
             stats.json
           key: bot-cache-v102-stats
-          restore-keys: |
-            bot-cache-v102-stats
 
-      - name: Ensure files + Fix time + Restore PnL
+      - name: Ensure files
         run: |
           [ -f active.json ] || echo '{}' > active.json
+          [ -f cooldown.json ] || echo '{"signals":{},"wall":{},"daily_pnl":6.53,"last_day":"2026-10-04"}' > cooldown.json
           [ -f stats.json ] || echo '{"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}' > stats.json
-          [ -f cooldown.json ] || echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
           python3 -c "
-          import json, time, os
+          import json, time
           now=time.time()
           a=json.load(open('active.json'))
-          for k,v in a.items():
+          for k,v in list(a.items()):
             if v.get('time',0) > now+100:
-              print(f'FIX TIME {k}')
-              v['time']=now-7200
+              v['time']=now-7500
           json.dump(a, open('active.json','w'))
-          c=json.load(open('cooldown.json'))
-          if c.get('daily_pnl',0)==0:
-            c['daily_pnl']=6.53
-            c['last_day']='2026-10-04'
-            json.dump(c, open('cooldown.json','w'))
-            print('Restored 6.53%')
           "
-          cat active.json
-          cat cooldown.json
-          cat stats.json
 
       - name: Run bot V102 STATS --once
         env:
