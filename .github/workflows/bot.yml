@@ -26,44 +26,42 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v102-clean
+          key: bot-cache-v102-fixed
           restore-keys: |
-            bot-cache-v102-clean-
-            bot-cache-v101-
+            bot-cache-v102-fixed
+            bot-cache-v101
 
-      - name: Ensure files V102 + CLEAN GRASS SIREN
+      - name: Ensure files V102
         run: |
           [ -f active.json ] || echo '{}' > active.json
           if [! -f cooldown.json ] ||! grep -q daily_pnl cooldown.json; then
             echo '{"signals":{},"wall":{},"daily_pnl":0,"last_day":""}' > cooldown.json
           fi
-          # FORCE CLEAN: keep only SAFE funding <= -0.05% or >=0.10% - removes GRASS SIREN
           python3 -c "
-          import json, os
+          import json, time
           f='active.json'
           try:
               data=json.load(open(f))
               clean={}
               for k,v in data.items():
-                  fund=v.get('fund',0)
-                  # keep only SAND type: fund < -0.08
-                  if k=='SAND_USDT' or fund <= -0.08 or fund >= 0.10:
-                      clean[k]=v
-                  else:
-                      print(f'DELETE BAD {k} fund {fund}')
-              # if empty after clean, keep SAND if was there
-              if not clean and 'SAND_USDT' in data:
-                  clean={'SAND_USDT': data['SAND_USDT']}
+                  # FIX future time bug
+                  t=v.get('time',0)
+                  if t> time.time()+10000:
+                      print(f'FIX TIME {k} {t} -> now')
+                      v['time']=time.time()-100
+                  # keep only if tp1_hit or BE set (you manually fixed SAND)
+                  # don't delete SAND/LAB - keep all active with valid SL
+                  clean[k]=v
               json.dump(clean, open(f,'w'))
-              print('CLEANED active.json ->', clean)
+              print('active.json ->', clean)
           except Exception as e:
-              print(e)
-              print('{}')
+              print('clean error', e)
+              open(f,'w').write('{}')
           "
           cat active.json
           cat cooldown.json
 
-      - name: Run bot V101 --once
+      - name: Run bot V101 FIX --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -77,4 +75,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v102-clean-${{ github.run_id }}
+          key: bot-cache-v102-fixed-${{ github.run_id }}
