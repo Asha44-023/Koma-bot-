@@ -19,10 +19,10 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v110-
+          key: bot-cache-v111-
           restore-keys: |
-            bot-cache-v110-
-      - name: Run bot V110 DAILY FACE + 4H BREAK + 15m 62/38 --once
+            bot-cache-v111-
+      - name: Run bot V111 DAILY FACE + 4H BREAK + 15m 38/62 --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,4 +34,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v110-${{ github.run_id }}
+          key: bot-cache-v111-${{ github.run_id }}
