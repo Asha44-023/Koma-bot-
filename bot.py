@@ -2,7 +2,7 @@ import time, requests, json, os, sys
 from datetime import datetime
 import pytz
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","C_USDT","G_USDT"]
+SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","C_USDT","G_USDT","ZEC_USDT","1000PEPE_USDT","VELVET_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats.json"
@@ -60,18 +60,80 @@ def get_liquidity_reason(s, HH, fund):
         return reason, ask_wall, bid_wall, ask_vol, bid_vol
     except:
         return f"Swept pool {HH:.5f}", HH, HH, 0, 0
+def get_pure_tick(d15):
+    h=d15["h"][-20:]; l=d15["l"][-20:]; avg_range = sum(h[i]-l[i] for i in range(20)) / 20
+    tick = avg_range / 10
+    if tick < 0.00001: tick = 0.00001
+    return float(tick)
+
+# ========= V108 SIMPLE: CONSOLIDATION SHAPES + 62/38 JUNCTION =========
+def detect_consolidation_shape(d15):
+    if len(d15["c"]) < 14: return None
+    h = d15["h"][-12:]; l = d15["l"][-12:]
+    box_high = max(h); box_low = min(l)
+    if box_low == 0: return None
+    box_range = box_high - box_low
+    rng_pct = box_range / box_low * 100
+    if rng_pct > 2.5: return None # not consolidating
+    h0, h1 = h[0], h[-1]
+    l0, l1 = l[0], l[-1]
+    flat = box_range * 0.25
+    top_flat = abs(h1 - h0) < flat
+    bot_flat = abs(l1 - l0) < flat
+    top_falling = h1 < h0 - flat
+    top_rising = h1 > h0 + flat
+    bot_falling = l1 < l0 - flat
+    bot_rising = l1 > l0 + flat
+    shape = "RECTANGLE"; expected = "TREND"
+    if top_flat and bot_flat: shape = "RECTANGLE"; expected = "TREND"
+    elif top_flat and bot_rising: shape = "ASC_TRI"; expected = "UP"
+    elif bot_flat and top_falling: shape = "DESC_TRI"; expected = "DOWN"
+    elif top_falling and bot_falling: shape = "FLAG_DOWN"; expected = "UP"
+    elif top_rising and bot_rising: shape = "FLAG_UP"; expected = "DOWN"
+    elif top_falling and bot_rising: shape = "SYM_TRI"; expected = "TREND"
+    # wedge refinement
+    if shape=="FLAG_DOWN" and abs(h1-h0) > abs(l1-l0): shape="FALL_WEDGE"
+    if shape=="FLAG_UP" and abs(l1-l0) > abs(h1-h0): shape="RISE_WEDGE"
+    lvl_38 = box_low + box_range * 0.38
+    lvl_62 = box_low + box_range * 0.62
+    tick = get_pure_tick(d15)
+    return {"HH":box_high,"LL":box_low,"range":box_range,"rng_pct":rng_pct,"lvl_38":lvl_38,"lvl_62":lvl_62,"tick":tick,"face":shape,"parking":expected,"shape":shape,"expected":expected,"touches":12}
+
+def check_62_38_junction(box, live_price, curr_c):
+    # your image rule: STRONG = retest 38/62 zone and close beyond
+    HH=box["HH"]; LL=box["LL"]; br=box["range"]; l38=box["lvl_38"]; l62=box["lvl_62"]
+    # BULL
+    if live_price > HH or curr_c["c"] > HH:
+        # strong if retested 38-62 zone and closed >62%
+        if curr_c["l"] <= l62 and curr_c["l"] >= l38*0.98 and curr_c["c"] > l62:
+            return True, f"STRONG BULL 62/38 {box['shape']}"
+        if curr_c["c"] < LL + br*0.75:
+            return False, f"WEAK BULL SKIP {box['shape']}"
+        if live_price > l62:
+            return True, f"STRONG BULL BREAK {box['shape']}"
+        return None, "BREAKOUT WAIT RETEST 38%"
+    # BEAR
+    if live_price < LL or curr_c["c"] < LL:
+        if curr_c["h"] >= l38 and curr_c["h"] <= l62*1.02 and curr_c["c"] < l38:
+            return True, f"STRONG BEAR 62/38 {box['shape']}"
+        if curr_c["c"] > LL + br*0.25:
+            return False, f"WEAK BEAR SKIP {box['shape']}"
+        if live_price < l38:
+            return True, f"STRONG BEAR BREAK {box['shape']}"
+        return None, "BREAKDOWN WAIT RETEST 62%"
+    return None, f"CONSOL {box['shape']} {box['rng_pct']:.2f}% -> {box['expected']} WAIT 62/38"
+
 def reversal_or_continuation(station, direction):
-    face = station.get("face","Rectangle"); parking = station.get("parking","NEUTRAL_MIDDLE")
+    face = station.get("face","Rectangle")
     if direction=="BUY":
-        if face=="Rounded Top" and parking=="DISTRIBUTION_UPPER": return "REVERSAL - top distribution, grab then dump"
-        if face=="Rounded Bottom": return "REVERSAL - bottom accumulation, pump starting"
-        if face=="Flag Down" and parking=="ACCUMULATION_LOWER": return "CONTINUATION - flag down, pump continues"
-        return "CONTINUATION - breakout"
+        if face in ["ASC_TRI","FLAG_DOWN","FALL_WEDGE"]: return f"CONTINUATION - {face} -> UP"
+        if face=="RECTANGLE": return "BREAKOUT - rectangle -> UP"
+        return f"BREAKOUT {face} -> UP"
     else:
-        if face=="Rounded Bottom" and parking=="ACCUMULATION_LOWER": return "REVERSAL - bottom, grab then pump"
-        if face=="Rounded Top": return "REVERSAL - top distribution starting"
-        if face=="Flag Up": return "CONTINUATION - flag up, dump continues"
-        return "CONTINUATION - breakdown"
+        if face in ["DESC_TRI","FLAG_UP","RISE_WEDGE"]: return f"CONTINUATION - {face} -> DOWN"
+        if face=="RECTANGLE": return "BREAKDOWN - rectangle -> DOWN"
+        return f"BREAKDOWN {face} -> DOWN"
+
 def funding_label(rate_percent, direction):
     if direction=="BUY":
         if rate_percent >= 0.08: return "DANGER", "crowded longs - SKIP"
@@ -83,6 +145,7 @@ def funding_label(rate_percent, direction):
         if rate_percent <= -0.03: return "CAUTION", "shorts crowded - 0.3x"
         if rate_percent >= 0.10: return "SAFE", "dump fuel - BIG"
         return "SAFE", "dump ready"
+
 def get_daily_bias_TW(d1):
     if len(d1["c"]) < 3: return "NEUTRAL"
     T_high = d1["h"][-3]; T_low = d1["l"][-3]; W_close = d1["c"][-2]
@@ -101,43 +164,6 @@ def find_fvgs_4h(d4):
         if l[i] > h[i-2]: bull.append({'top': l[i], 'bottom': h[i-2]})
         if h[i] < l[i-2]: bear.append({'top': l[i-2], 'bottom': h[i]})
     return bull[-3:], bear[-3:]
-def get_pure_tick(d15):
-    h=d15["h"][-20:]; l=d15["l"][-20:]; avg_range = sum(h[i]-l[i] for i in range(20)) / 20
-    tick = avg_range / 10
-    if tick < 0.00001: tick = 0.00001
-    return float(tick)
-def detect_station_and_parking(d15, symbol=""):
-    c=d15["c"][-40:]; h=d15["h"][-40:]; l=d15["l"][-40:]
-    if len(c)<12: return None
-    is_new = symbol in ["C_USDT","G_USDT"]
-    HH=max(h[-12:]); LL=min(l[-12:])
-    if HH==LL: return None
-    tick=get_pure_tick(d15); mid=(HH+LL)/2
-    zone_low=mid-18*tick; zone_high=mid+18*tick
-    touches=sum(1 for cl in c[-12:] if zone_low <= cl <= zone_high)
-    range_ticks=(HH-LL)/tick if tick!=0 else 9999
-    min_touch = 2 if is_new else 5
-    max_range = 2000 if is_new else 600
-    if touches<min_touch or range_ticks>max_range: return None
-    third=(HH-LL)/3; lower_thr=LL+third; upper_thr=LL+third*2
-    cnt_lower=sum(1 for cl in c[-12:] if cl <= lower_thr)
-    cnt_upper=sum(1 for cl in c[-12:] if cl >= upper_thr)
-    cnt_middle=12-cnt_lower-cnt_upper
-    h20=h[-20:]; l20=l[-20:]; h_first=sum(h20[:10])/10; h_last=sum(h20[-10:])/10; l_first=sum(l20[:10])/10; l_last=sum(l20[-10:])/10
-    is_coil=(h_last < h_first-5*tick) and (l_last > l_first+5*tick)
-    h_mid=max(h[13:27]); h_edges=max(max(h[:13]), max(h[27:])); l_mid=min(l[13:27]); l_edges=min(min(l[:13]), min(l[27:]))
-    is_rounded_top=(h_mid > h_edges+20*tick); is_rounded_bottom=(l_mid < l_edges-20*tick)
-    is_flag_down=(h_last < h_first-10*tick) and (l_last < l_first-10*tick); is_flag_up=(h_last > h_first+10*tick) and (l_last > l_first+10*tick)
-    face="Rectangle"
-    if is_rounded_top: face="Rounded Top"
-    elif is_rounded_bottom: face="Rounded Bottom"
-    elif is_coil: face="Coil"
-    elif is_flag_down: face="Flag Down"
-    elif is_flag_up: face="Flag Up"
-    if cnt_lower>cnt_upper and cnt_lower>cnt_middle: parking="ACCUMULATION_LOWER"
-    elif cnt_upper>cnt_lower and cnt_upper>cnt_middle: parking="DISTRIBUTION_UPPER"
-    else: parking="NEUTRAL_MIDDLE"
-    return {"HH":HH,"LL":LL,"mid":mid,"tick":tick,"touches":touches,"cnt_lower":cnt_lower,"cnt_middle":cnt_middle,"cnt_upper":cnt_upper,"parking":parking,"face":face,"range_ticks":range_ticks}
 def detect_FVG(d):
     h=d["h"]; l=d["l"]; fvg_bull=[]; fvg_bear=[]
     for i in range(2, len(h)):
@@ -153,52 +179,41 @@ def detect_true_liquidity_pool(d15, d5):
     eq_high = max(h15); eq_low = min(l15)
     h5_max=max(d5["h"][-5:]); l5_min=min(d5["l"][-5:])
     return eq_high, eq_low, h5_max > eq_high, l5_min < eq_low, (h5_max-eq_high)/tick if h5_max>eq_high else 0, (eq_low-l5_min)/tick if l5_min<eq_low else 0
-def guard_V99(d15, d5, d4, d1, symbol=""):
+
+def guard_V108(d15, d5, d4, d1, symbol=""):
     daily_raw = get_daily_bias_TW(d1); daily_bias = daily_raw
     if daily_bias == "NEUTRAL": daily_bias = detect_4h_trend_fallback(d4)
-    station=detect_station_and_parking(d15, symbol)
-    if not station and symbol in ["C_USDT","G_USDT","SAND_USDT","SENT_USDT","GRASS_USDT"]:
-        c=d15["c"][-12:]; h=d15["h"][-12:]; l=d15["l"][-12:]
-        if len(c)>=6:
-            HH=max(h); LL=min(l); tick=get_pure_tick(d15)
-            station={"HH":HH,"LL":LL,"mid":(HH+LL)/2,"tick":tick,"touches":6,"cnt_lower":2,"cnt_middle":8,"cnt_upper":2,"parking":"NEUTRAL_MIDDLE","face":"Rectangle","range_ticks":(HH-LL)/tick}
-    if not station: return None, None, f"no station", None, None, 0,0,station, daily_bias
-    bull_fvgs, bear_fvgs = find_fvgs_4h(d4)
-    curr = d15["c"][-1]; HH, LL = station["HH"], station["LL"]; tick=station["tick"]; range_abs=HH-LL
-    fvg_bull_5, fvg_bear_5 = detect_FVG(d5)
-    bos_bull, bos_bear, swing_h, swing_l = detect_MSS_BOS(d5)
-    eq_high, eq_low, upper_sweep, lower_sweep, upper_dist, lower_dist = detect_true_liquidity_pool(d15, d5)
-    buy_triggers=[]; sell_triggers=[]
-    if lower_sweep and curr>eq_low: buy_triggers.append(("SWEEP_L", eq_low-2*tick, f"SweepL {int(lower_dist)}t"))
-    if bos_bull: buy_triggers.append(("BOS_UP", LL, "BOS_UP"))
-    if upper_sweep and curr<eq_high: sell_triggers.append(("SWEEP_H", eq_high+2*tick, f"SweepH {int(upper_dist)}t"))
-    if bos_bear: sell_triggers.append(("BOS_DOWN", HH, "BOS_DOWN"))
-    if not buy_triggers and not sell_triggers: return None, None, f"no trigger", HH, LL, 0,0, station, daily_bias
-    direction=None
-    if buy_triggers and sell_triggers:
-        direction="BUY" if lower_dist>=upper_dist else "SELL"
-    elif buy_triggers: direction="BUY"
-    else: direction="SELL"
-    if direction=="BUY":
-        trigger_type, pool_15, reason_extra = buy_triggers[0]
-        if not bull_fvgs and symbol not in ["C_USDT","G_USDT"] and "SWEEP" not in trigger_type:
-            return None, None, f"no bull FVG", HH, LL, 0,0, station, daily_bias
-    else:
-        trigger_type, pool_15, reason_extra = sell_triggers[0]
-        if not bear_fvgs and symbol not in ["C_USDT","G_USDT"] and "SWEEP" not in trigger_type:
-            return None, None, f"no bear FVG", HH, LL, 0,0, station, daily_bias
-    min_dist=range_abs*0.4
-    if direction=="BUY":
-        if curr-pool_15<min_dist: pool_15=curr-min_dist
-        for fvg_low,fvg_high,idx in fvg_bull_5:
-            if pool_15>fvg_low and pool_15<fvg_high: pool_15=fvg_low-2*tick
-    else:
-        if pool_15-curr<min_dist: pool_15=curr+min_dist
-        for fvg_high,fvg_low,idx in fvg_bear_5:
-            if pool_15<fvg_low and pool_15>fvg_high: pool_15=fvg_low+2*tick
-    reason=f"V103.3 BOTH {direction} {daily_bias} {trigger_type} {station['face']} {reason_extra}"
-    return direction, pool_15, reason, HH, LL, station['cnt_lower'], station['cnt_upper'], station, daily_bias
-COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200}
+    station=detect_consolidation_shape(d15)
+    if not station: return None, None, f"no consolidation box", None, None, 0,0, None, daily_bias
+    live_price = get_live_price(symbol) or d5["c"][-1]
+    curr_c = {"c": d15["c"][-1], "h": d15["h"][-1], "l": d15["l"][-1]}
+    strong, j_reason = check_62_38_junction(station, live_price, curr_c)
+    if strong is None:
+        # still consolidating -> show shape but no entry until breakout
+        return None, None, j_reason, station["HH"], station["LL"], 0,0, station, daily_bias
+    if strong is False:
+        return None, None, j_reason, station["HH"], station["LL"], 0,0, station, daily_bias
+
+    # STRONG BREAKOUT PASSED 62/38
+    HH, LL = station["HH"], station["LL"]; tick=station["tick"]
+    curr = d15["c"][-1]
+    # direction from shape + breakout
+    if curr_c["c"] > HH or live_price > HH: direction="BUY"
+    elif curr_c["c"] < LL or live_price < LL: direction="SELL"
+    else: direction="BUY" if station["expected"]=="UP" else "SELL"
+
+    # follow rectangle with trend
+    if station["shape"]=="RECTANGLE" or station["shape"]=="SYM_TRI":
+        if daily_bias=="BULLISH": direction="BUY"
+        elif daily_bias=="BEARISH": direction="SELL"
+
+    if direction=="BUY": pool_15 = LL - tick*10
+    else: pool_15 = HH + tick*10
+
+    reason=f"V108 {direction} {station['shape']} {station['rng_pct']:.2f}% {j_reason}"
+    return direction, pool_15, reason, HH, LL, 0,0, station, daily_bias
+
+COOLDOWN_MAP={"SIREN_USDT":900,"FARTCOIN_USDT":900,"KOMA_USDT":900,"GRASS_USDT":1200,"ZEC_USDT":900,"1000PEPE_USDT":900,"VELVET_USDT":900}
 DEFAULT_CD=1800
 def update_stats_on_close(symbol, data, pnl, close_type):
     STATS["total"] = STATS.get("total",0)+1
@@ -248,7 +263,6 @@ def scan():
             data["tp1_hit"]=True; data["sl"]=entry; save_a()
             profit = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             tg(f"🟢 TP1 BEST GRAB {s} @ {p:.5f} (+{profit:.2f}%)\nNEXT {data['tp2']:.5f} | {data.get('next_move','')}\n{get_time()}")
-        # FIXED 4H - only close if NO TP1 hit (let winners run)
         if held > 14400 and not data.get("tp1_hit"):
             pnl = ((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
@@ -259,13 +273,15 @@ def scan():
             COOLDOWN["daily_pnl"]+=profit; save_c(); update_stats_on_close(s,data,profit,"TP2")
             tg(f"🟢🟢 TP2 HIT {s} {p:.5f} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"=== V103.3 BEST GRAB BOTH {get_time()} Daily {COOLDOWN['daily_pnl']:.2f}% ===")
+    print(f"=== V108 SHAPE + 62/38 {get_time()} Daily {COOLDOWN['daily_pnl']:.2f}% ===")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
             if not d5 or not d15 or not d4 or not d1: continue
-            direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V99(d15, d5, d4, d1, s)
-            if not direction: continue
+            direction, pool_15, reason, HH, LL, cnt_l, cnt_h, station, eff_bias = guard_V108(d15, d5, d4, d1, s)
+            if not direction:
+                print(f" {s} {reason}")
+                continue
             cdsec=COOLDOWN_MAP.get(s, DEFAULT_CD)
             if time.time()-COOLDOWN["signals"].get(s,0)<cdsec: continue
             last_wall=COOLDOWN["wall"].get(s)
@@ -291,18 +307,20 @@ def scan():
             COOLDOWN["signals"][s]=time.time(); COOLDOWN["wall"][s]={"HH":HH,"LL":LL,"time":time.time()}; save_c()
             if is_buy:
                 msg=(f"🟢🟢🟢 BUY {s.replace('_USDT','')} @ {live:.6f}\n"
-                     f"{eff_bias} {station['face']} {station['parking']} T{station['touches']}\n"
+                     f"{eff_bias} {station['face']} {station['rng_pct']:.2f}% -> {station['expected']}\n"
+                     f"{reason}\n"
                      f"NEXT POOL: {tp1:.6f} ({ask_vol/1000:.1f}k asks)\n"
                      f"{next_move}\n"
                      f"SL {sl:.6f} | GRAB {tp1:.6f} | EXT {tp2:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV103.3 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV108 SHAPE+62/38 {get_time()}")
             else:
                 msg=(f"🔴🔴🔴 SELL {s.replace('_USDT','')} @ {live:.6f}\n"
-                     f"{eff_bias} {station['face']} {station['parking']} T{station['touches']}\n"
+                     f"{eff_bias} {station['face']} {station['rng_pct']:.2f}% -> {station['expected']}\n"
+                     f"{reason}\n"
                      f"NEXT POOL: {tp1:.6f} ({bid_vol/1000:.1f}k bids)\n"
                      f"{next_move}\n"
                      f"SL {sl:.6f} | GRAB {tp1:.6f} | EXT {tp2:.6f}\n"
-                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV103.3 {get_time()}")
+                     f"FUND {fund:.3f}% {f_label}\n{liq_reason}\nV108 SHAPE+62/38 {get_time()}")
             tg(msg)
             break
         except Exception as e:
