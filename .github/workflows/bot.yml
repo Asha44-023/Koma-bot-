@@ -23,12 +23,14 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v103.3-best-grab-both
+            show_stats.txt
+          key: bot-cache-v103.3-best-grab-both-FINAL
       - name: Ensure files
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{"signals":{},"wall":{},"daily_pnl":6.53,"last_day":"2026-10-04"}' > cooldown.json
           [ -f stats.json ] || echo '{"total":0,"tp2":0,"sl":0,"sl_after_tp1":0,"timeout_win":0,"timeout_loss":0,"be_stop":0,"by_face":{},"by_symbol":{}}' > stats.json
+          [ -f show_stats.txt ] || echo '' > show_stats.txt
       - name: Run bot V103.3 BEST GRAB BOTH --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -41,4 +43,5 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v103.3-best-grab-both
+            show_stats.txt
+          key: bot-cache-v103.3-best-grab-both-FINAL
