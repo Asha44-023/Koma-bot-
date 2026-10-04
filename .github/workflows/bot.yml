@@ -19,10 +19,10 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v108-
+          key: bot-cache-v109-
           restore-keys: |
-            bot-cache-v108-
-      - name: Run bot V108 SHAPE + 62/38 BOTH --once
+            bot-cache-v109-
+      - name: Run bot V109 DUAL TF 15m/4H/DAILY --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,4 +34,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v108-${{ github.run_id }}
+          key: bot-cache-v109-${{ github.run_id }}
