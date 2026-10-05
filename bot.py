@@ -5,10 +5,9 @@ EAT = pytz.timezone("Africa/Nairobi")
 SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","C_USDT","G_USDT","ZEC_USDT","PEPE_USDT","VELVET_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
-ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats.json"
+ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 ACTIVE = json.load(open(ACTIVE_FILE)) if os.path.exists(ACTIVE_FILE) else {}
-COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"wall":{},"daily_pnl":0,"last_day":"2026-10-04"}
-if "wall" not in COOLDOWN: COOLDOWN["wall"]={}
+COOLDOWN = json.load(open(COOLDOWN_FILE)) if os.path.exists(COOLDOWN_FILE) else {"signals":{},"daily_pnl":0,"last_day":"2026-10-04"}
 if "signals" not in COOLDOWN: COOLDOWN["signals"]={}
 def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
@@ -36,17 +35,15 @@ def get_live_price(s):
             return float((r.get("data", r))["lastPrice"])
         except: pass
     return None
-def get_funding(s):
-    try:
-        r = requests.get(f"https://contract.mexc.com/api/v1/contract/funding_rate/{s}", timeout=5).json()
-        return float(r.get("data", r).get("fundingRate", 0))*100
-    except: return 0
+
 BULL_SHAPES = ["FALL_WEDGE","BULL_FLAG","ASC_TRI","RECT_ACC","SYM_TRI"]
 BEAR_SHAPES = ["RISE_WEDGE","BEAR_FLAG","DESC_TRI","RECT_DIST"]
+
 def get_tick(d):
     h=d["h"][-20:]; l=d["l"][-20:]
     avg = sum(h[i]-l[i] for i in range(20))/20
     return max(avg/10, 0.00001)
+
 def detect_shape(d, label=""):
     if len(d["c"])<14: return None
     h=d["h"][-12:]; l=d["l"][-12:]
@@ -63,15 +60,8 @@ def detect_shape(d, label=""):
     elif h1>h0+flat and l1>l0+flat:
         shape="RISE_WEDGE" if abs(l1-l0)>abs(h1-h0)*1.2 else "BEAR_FLAG"; exp="DOWN"
     elif h1<h0-flat and l1>l0+flat: shape="SYM_TRI"; exp="UP"
-    return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":shape,"shape":shape,"expected":exp,"tf":label}
-def find_box(d, live, label):
-    for off in range(1,20):
-        end=len(d["h"])-off; start=end-12
-        if start<0: break
-        HH=max(d["h"][start:end]); LL=min(d["l"][start:end]); rng=HH-LL or 0.00001
-        if live>HH: return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":"RECT_ACC","shape":"RECT_ACC","expected":"UP","tf":f"{label} BROKE {off}c ago"}
-        if live<LL: return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":"RECT_DIST","shape":"RECT_DIST","expected":"DOWN","tf":f"{label} BROKE {off}c ago"}
-    return None
+    return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":shape,"expected":exp,"tf":label}
+
 def get_day_bias(d1,d4):
     b=detect_shape(d1,"DAY")
     if not b:
@@ -80,27 +70,63 @@ def get_day_bias(d1,d4):
     if b["face"] in BULL_SHAPES: return "BULLISH", b
     if b["face"] in BEAR_SHAPES: return "BEARISH", b
     return "NEUTRAL", b
-def guard_V116(d15,d5,d4,d1,symbol):
+
+# --- NEW: TODAY OPEN BOX FROM 00:00 EAT ---
+def find_today_box(d15, live):
+    now = datetime.now(EAT)
+    candles_since_midnight = int((now.hour*60 + now.minute)/15) + 1
+    candles_since_midnight = min(candles_since_midnight, len(d15["h"])-5)
+    if candles_since_midnight < 12:
+        return None # market just opened
+    # slice today's data
+    h_today = d15["h"][-candles_since_midnight:]
+    l_today = d15["l"][-candles_since_midnight:]
+    c_today = d15["c"][-candles_since_midnight:]
+
+    # find box that was broken TODAY (like your FARTCOIN 3:50-5:15 box)
+    for off in range(1, candles_since_midnight-8):
+        end = len(h_today)-off
+        start = end-10 # 10 candles box = 2.5 hours accumulation (matches your chart)
+        if start < 0: break
+        HH = max(h_today[start:end])
+        LL = min(l_today[start:end])
+        rng = HH-LL or 0.00001
+        # must be tight box (range < 40% of today range) = accumulation
+        today_range = max(h_today)-min(l_today) or rng
+        if rng > today_range*0.5: continue
+
+        if live > HH*1.002: # broke up today
+            return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"TODAY BROKE {off*15}m ago Box {LL:.4f}-{HH:.4f}"}
+        if live < LL*0.998: # broke down today
+            return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"TODAY BROKE {off*15}m ago Box {LL:.4f}-{HH:.4f}"}
+    return None
+
+def guard_V117(d15,d5,d4,d1,symbol):
     bias, dbox = get_day_bias(d1,d4)
     if not dbox: return None,None,"no day box",None,None,None,bias
     if bias=="NEUTRAL": return None,None,f"NEUTRAL {dbox['face']}",None,None,dbox,bias
     live=get_live_price(symbol) or d5["c"][-1]
-    hbox=find_box(d4,live,"4H")
-    if not hbox: return None,None,"no 4H break",None,None,dbox,bias
+    hbox=find_today_box(d15, live)
+    if not hbox: return None,None,f"no TODAY break yet (flat since open)",None,None,dbox,bias
     HH,LL=hbox["HH"],hbox["LL"]; rng=hbox["range"]
     c15=d15["c"][-1]
+
+    # now entry: price came back inside box to 38/62 after break (your 8:05 AM retest)
     if bias=="BULLISH" and hbox["expected"]=="UP":
-        if LL < c15 < HH and abs(c15 - hbox["lvl_38"]) < rng*0.25:
-            return "BUY", LL-hbox["tick"]*10, f"V116 BULL {dbox['face']} + {hbox['tf']} + 38% RETEST", HH, LL, dbox, bias
+        # if still above box, wait for pullback OR if already pulled back to 38%
+        if LL*0.99 < c15 < HH*1.01 or abs(c15 - hbox["lvl_38"]) < rng*0.40:
+            return "BUY", LL-hbox["tick"]*2, f"V117 BULL {dbox['face']} + {hbox['tf']} + RETEST {c15:.4f}~38% {hbox['lvl_38']:.4f}", HH, LL, dbox, bias
     if bias=="BEARISH" and hbox["expected"]=="DOWN":
-        if LL < c15 < HH and abs(c15 - hbox["lvl_62"]) < rng*0.25:
-            return "SELL", HH+hbox["tick"]*10, f"V116 BEAR {dbox['face']} + {hbox['tf']} + 62% RETEST", HH, LL, dbox, bias
-    return None,None,f"{bias} wait retest {dbox['face']} inside {c15:.4f} vs 38:{hbox['lvl_38']:.4f} 62:{hbox['lvl_62']:.4f}",HH,LL,dbox,bias
+        if LL*0.99 < c15 < HH*1.01 or abs(c15 - hbox["lvl_62"]) < rng*0.40:
+            return "SELL", HH+hbox["tick"]*2, f"V117 BEAR {dbox['face']} + {hbox['tf']} + RETEST {c15:.4f}~62% {hbox['lvl_62']:.4f}", HH, LL, dbox, bias
+
+    return None,None,f"{bias} broke but price {c15:.4f} not back to box {LL:.4f}-{HH:.4f}",HH,LL,dbox,bias
+
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today:
         COOLDOWN["daily_pnl"]=0; COOLDOWN["last_day"]=today; save_c()
-    if COOLDOWN["daily_pnl"] <= -3: print(f"PAUSE daily {COOLDOWN['daily_pnl']}"); return
+    if COOLDOWN["daily_pnl"] <= -3: print(f"PAUSE {COOLDOWN['daily_pnl']}"); return
     for s,data in list(ACTIVE.items()):
         p=get_live_price(s)
         if not p: continue
@@ -116,41 +142,30 @@ def scan():
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
-    if len(ACTIVE)>=3:
-        print(f"V116 FULL ACTIVE:{len(ACTIVE)}"); return
-    print(f"--- SCAN {get_time()} ---")
+    if len(ACTIVE)>=3: print(f"FULL {len(ACTIVE)}"); return
+    print(f"--- SCAN V117 TODAY-OPEN {get_time()} ---")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
-            if not d5 or not d15 or not d4 or not d1:
-                print(f"{s:12} no data"); continue
-            direction, pool, reason, HH, LL, dbox, bias = guard_V116(d15,d5,d4,d1,s)
-            if dbox:
-                face=dbox['face']
-                if HH: print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} {reason}")
-                else: print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} {reason}")
-            else:
-                print(f"{s:10} {reason}")
+            if not d5 or not d15 or not d4 or not d1: print(f"{s:12} no data"); continue
+            direction, pool, reason, HH, LL, dbox, bias = guard_V117(d15,d5,d4,d1,s)
+            face=dbox['face'] if dbox else "NO-BOX"
+            print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}")
             if not direction: continue
-            if time.time()-COOLDOWN["signals"].get(s,0) < 14400: print(" -> SKIP cooldown"); continue
-            fund=get_funding(s)
-            if fund>=0.08 and direction=="BUY": print(f" -> SKIP funding {fund}"); continue
-            if fund<=-0.08 and direction=="SELL": print(f" -> SKIP funding {fund}"); continue
+            if time.time()-COOLDOWN["signals"].get(s,0) < 3600: print(" -> SKIP 1h cooldown"); continue
             live=get_live_price(s) or d5["c"][-1]
             is_buy=direction=="BUY"
             tick=(HH-LL)/10 if HH and LL else live*0.002
-            tp1=live+tick*5 if is_buy else live-tick*5
-            tp2=tp1*1.008 if is_buy else tp1*0.992
-            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":dbox["face"]}; save_a()
+            tp1=live+tick*3 if is_buy else live-tick*3
+            tp2=live+tick*8 if is_buy else live-tick*8
+            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); save_c()
-            if is_buy:
-                tg(f"🟢 BUY {s.replace('_USDT','')} @ {live:.6f}\n{bias} {dbox['face']}\n{reason}\nSL {pool:.6f} | TP {tp1:.6f} -> {tp2:.6f}\nV116 {get_time()}")
-            else:
-                tg(f"🔴 SELL {s.replace('_USDT','')} @ {live:.6f}\n{bias} {dbox['face']}\n{reason}\nSL {pool:.6f} | TP {tp1:.6f} -> {tp2:.6f}\nV116 {get_time()}")
+            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s.replace('_USDT','')} @ {live:.6f}\n{bias} {face}\n{reason}\nSL {pool:.6f} | TP {tp1:.6f} -> {tp2:.6f}\nV117 TODAY {get_time()}")
             break
         except Exception as e:
             print(f"{s} err {e}"); continue
-    print(f"V116 done {get_time()} ACTIVE:{len(ACTIVE)} checked {len(SYMBOLS)}")
+    print(f"V117 done {get_time()} ACTIVE:{len(ACTIVE)}")
+
 if "--once" in sys.argv: scan()
 else:
     while True:
