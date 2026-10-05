@@ -1,4 +1,4 @@
-name: run-bot-v117-today-open
+name: run-bot-v118-liquidity
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -19,10 +19,10 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v117-
+          key: bot-cache-v118-
           restore-keys: |
-            bot-cache-v117-
-      - name: Run bot V117 TODAY-OPEN BOX
+            bot-cache-v118-
+      - name: Run bot V118 LIQUIDITY LOOP
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,4 +34,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v117-${{ github.run_id }}
+          key: bot-cache-v118-${{ github.run_id }}
