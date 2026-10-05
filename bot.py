@@ -40,33 +40,51 @@ def get_live_price(s):
             return float((r.get("data", r))["lastPrice"])
         except: pass
     return None
-
-BULL_SHAPES = ["FALL_WEDGE","BULL_FLAG","ASC_TRI","RECT_ACC","SYM_TRI"]
-BEAR_SHAPES = ["RISE_WEDGE","BEAR_FLAG","DESC_TRI","RECT_DIST"]
-
+BULL_SHAPES = ["FALL_WEDGE","BULL_FLAG","ASC_TRI","RECT_ACC","SYM_TRI","DOUBLE_BOTTOM"]
+BEAR_SHAPES = ["RISE_WEDGE","BEAR_FLAG","DESC_TRI","RECT_DIST","DOUBLE_TOP"]
 def get_tick(d):
     h=d["h"][-20:]; l=d["l"][-20:]
     avg = sum(h[i]-l[i] for i in range(20))/20
     return max(avg/10, 0.00001)
-
 def detect_shape(d, label=""):
     if len(d["c"])<14: return None
-    h=d["h"][-12:]; l=d["l"][-12:]
-    HH=max(h); LL=min(l); rng=HH-LL or 0.00001
+    h=d["h"][-20:]; l=d["l"][-20:]; c=d["c"][-20:]; o=d["o"][-20:]
+    HH=max(h[-12:]); LL=min(l[-12:]); rng=HH-LL or 0.00001
     flat=rng*0.35
-    h0,h1=h[0],h[-1]; l0,l1=l[0],l[-1]
+    h0,h1=h[-12],h[-1]; l0,l1=l[-12],l[-1]
+    bullish = sum(1 for i in range(len(c)) if c[i] > o[i])
+    ratio = bullish / len(c) * 100
+    higher_lows = sum(1 for i in range(len(l)-5, len(l)-1) if l[i+1] > l[i])
+    lower_highs = sum(1 for i in range(len(h)-5, len(h)-1) if h[i+1] < h[i])
     shape="RECT_ACC"; exp="UP"
     if abs(h1-h0)<flat and abs(l1-l0)<flat:
-        shape="RECT_ACC" if l1>=l0 else "RECT_DIST"; exp="UP" if shape=="RECT_ACC" else "DOWN"
-    elif abs(h1-h0)<flat and l1>l0+flat: shape="ASC_TRI"; exp="UP"
-    elif abs(l1-l0)<flat and h1<h0-flat: shape="DESC_TRI"; exp="DOWN"
+        if ratio >= 60 or higher_lows >=3:
+            shape="RECT_ACC"; exp="UP"
+        elif ratio <= 40 or lower_highs >=3:
+            shape="RECT_DIST"; exp="DOWN"
+        else:
+            shape="RECT_ACC" if l1>=l0 else "RECT_DIST"; exp="UP" if l1>=l0 else "DOWN"
+    elif abs(h1-h0)<flat and l1>l0+flat:
+        shape="ASC_TRI"; exp="UP"
+    elif abs(l1-l0)<flat and h1<h0-flat:
+        shape="DESC_TRI"; exp="DOWN"
     elif h1<h0-flat and l1<l0-flat:
-        shape="FALL_WEDGE" if abs(h1-h0)>abs(l1-l0)*1.2 else "BULL_FLAG"; exp="UP"
+        if higher_lows >=2:
+            shape="DOUBLE_BOTTOM"; exp="UP"
+        else:
+            shape="FALL_WEDGE" if abs(h1-h0)>abs(l1-l0)*1.2 else "BULL_FLAG"; exp="UP"
     elif h1>h0+flat and l1>l0+flat:
-        shape="RISE_WEDGE" if abs(l1-l0)>abs(h1-h0)*1.2 else "BEAR_FLAG"; exp="DOWN"
-    elif h1<h0-flat and l1>l0+flat: shape="SYM_TRI"; exp="UP"
-    return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":shape,"expected":exp,"tf":label}
-
+        if lower_highs >=2 and ratio <= 45:
+            shape="DOUBLE_TOP"; exp="DOWN"
+        else:
+            shape="RISE_WEDGE" if abs(l1-l0)>abs(h1-h0)*1.2 else "BEAR_FLAG"; exp="DOWN"
+    elif h1<h0-flat and l1>l0+flat:
+        shape="SYM_TRI"; exp="UP" if ratio>=50 else "DOWN"
+    if higher_lows >=3 and LL == min(l[-8:]):
+        shape="DOUBLE_BOTTOM"; exp="UP"
+    if ratio >=60 and higher_lows>=2 and exp=="DOWN" and label=="DAY":
+        shape="RECT_ACC"; exp="UP"
+    return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":shape,"expected":exp,"tf":label,"ratio":ratio,"hl":higher_lows}
 def get_day_bias(d1,d4):
     b=detect_shape(d1,"DAY")
     if not b:
@@ -75,48 +93,49 @@ def get_day_bias(d1,d4):
     if b["face"] in BULL_SHAPES: return "BULLISH", b
     if b["face"] in BEAR_SHAPES: return "BEARISH", b
     return "NEUTRAL", b
-
-# SIMPLE 20-50 WIDE - NO HL - 00:00 EAT
-def find_today_box(d15, live):
-    now = datetime.now(EAT)
-    candles_since_midnight = int((now.hour*60 + now.minute)/15) + 1
-    candles_since_midnight = min(candles_since_midnight, len(d15["h"])-5)
-    if candles_since_midnight < 20: return None
-    h_today = d15["h"][-candles_since_midnight:]
-    l_today = d15["l"][-candles_since_midnight:]
-    for wid in range(20, 50):
-        for off in range(1, candles_since_midnight-wid-2):
-            end = len(h_today)-off
+def find_recent_box(d15, live):
+    h_all = d15["h"][-96:]
+    l_all = d15["l"][-96:]
+    c_all = d15["c"][-96:]
+    for wid in range(12, 48):
+        for off in range(1, 72):
+            end = len(h_all)-off
             start = end-wid
             if start < 0: continue
-            HH = max(h_today[start:end])
-            LL = min(l_today[start:end])
+            HH = max(h_all[start:end])
+            LL = min(l_all[start:end])
             rng = HH-LL or 0.00001
-            today_range = max(h_today)-min(l_today) or rng
-            if rng > today_range*0.6: continue
-            if live > HH*1.002:
-                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"TODAY BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide"}
-            if live < LL*0.998:
-                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"TODAY BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide"}
+            full_range = max(h_all)-min(l_all) or rng
+            if rng > full_range*0.65: continue
+            if rng < full_range*0.08: continue
+            last_close = c_all[-1]
+            broke_up = last_close > HH*1.001 or live > HH*1.001
+            broke_down = last_close < LL*0.999 or live < LL*0.999
+            if broke_up:
+                age = off*15
+                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"BROKE {age}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide","age":age}
+            if broke_down:
+                age = off*15
+                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"BROKE {age}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide","age":age}
     return None
-
-def guard_V117(d15,d5,d4,d1,symbol):
+def guard_V120(d15,d5,d4,d1,symbol):
     bias, dbox = get_day_bias(d1,d4)
     if not dbox: return None,None,"no day box",None,None,None,bias
-    if bias=="NEUTRAL": return None,None,f"NEUTRAL {dbox['face']}",None,None,dbox,bias
+    pattern_info = f"PATTERN {dbox['face']} {dbox['ratio']:.0f}% bull HL:{dbox['hl']} exp:{dbox['expected']}"
+    if bias=="NEUTRAL": return None,None,f"{pattern_info} -> NEUTRAL wait",None,None,dbox,bias
     live=get_live_price(symbol) or d5["c"][-1]
-    hbox=find_today_box(d15, live)
-    if not hbox: return None,None,f"no TODAY break yet (flat since 00:00 open)",None,None,dbox,bias
+    hbox=find_recent_box(d15, live)
+    if not hbox:
+        return None,None,f"{pattern_info} | no breakout yet (inside {fmt(dbox['LL'])}-{fmt(dbox['HH'])}) waiting",None,None,dbox,bias
     HH,LL=hbox["HH"],hbox["LL"]; rng=hbox["range"]
     c15=d15["c"][-1]
     if bias=="BULLISH" and hbox["expected"]=="UP":
-        if LL*0.99 < c15 < HH*1.01 or abs(c15 - hbox["lvl_38"]) < rng*0.50:
-            return "BUY", LL-hbox["tick"]*2, f"V119 BULL {dbox['face']} + {hbox['tf']} + RETEST {fmt(c15)}~38% {fmt(hbox['lvl_38'])}", HH, LL, dbox, bias
+        if LL*0.985 < c15 < HH*1.02 or abs(c15 - hbox["lvl_38"]) < rng*0.65:
+            return "BUY", LL-hbox["tick"]*2, f"{pattern_info} + V120 BULL {dbox['face']} + {hbox['tf']} + RETEST {fmt(c15)}~38% {fmt(hbox['lvl_38'])}", HH, LL, dbox, bias
     if bias=="BEARISH" and hbox["expected"]=="DOWN":
-        if LL*0.99 < c15 < HH*1.01 or abs(c15 - hbox["lvl_62"]) < rng*0.50:
-            return "SELL", HH+hbox["tick"]*2, f"V119 BEAR {dbox['face']} + {hbox['tf']} + RETEST {fmt(c15)}~62% {fmt(hbox['lvl_62'])}", HH, LL, dbox, bias
-    return None,None,f"{bias} broke but price {fmt(c15)} not back to box {fmt(LL)}-{fmt(HH)}",HH,LL,dbox,bias
-
+        if LL*0.98 < c15 < HH*1.015 or abs(c15 - hbox["lvl_62"]) < rng*0.65:
+            return "SELL", HH+hbox["tick"]*2, f"{pattern_info} + V120 BEAR {dbox['face']} + {hbox['tf']} + RETEST {fmt(c15)}~62% {fmt(hbox['lvl_62'])}", HH, LL, dbox, bias
+    return None,None,f"{pattern_info} | broke but price {fmt(c15)} not back to box {fmt(LL)}-{fmt(HH)} waiting retest",HH,LL,dbox,bias
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today:
@@ -129,23 +148,23 @@ def scan():
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
-            tg(f"🔴 STOP {s} {pnl:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
+            tg(f"STOP {s} {pnl:.2f}% {get_time()}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True; data["sl"]=entry; save_a()
-            tg(f"🟢 TP1 {s} @ {fmt(p)} {get_time()}")
+            tg(f"TP1 {s} @ {fmt(p)} {get_time()}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
-            tg(f"🟢🟢 TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
+            tg(f"TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: return
-    print(f"--- SCAN V119 CLEAN {get_time()} ---")
+    print(f"--- SCAN V120 FIX 60/40 + REVERSAL {get_time()} ---")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
             if not d5 or not d15 or not d4 or not d1: print(f"{s:12} no data"); continue
-            direction, pool, reason, HH, LL, dbox, bias = guard_V117(d15,d5,d4,d1,s)
+            direction, pool, reason, HH, LL, dbox, bias = guard_V120(d15,d5,d4,d1,s)
             face=dbox['face'] if dbox else "NO-BOX"
-            print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}")
+            print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:15} -> {reason}")
             if not direction: continue
             if time.time()-COOLDOWN["signals"].get(s,0) < 3600: print(" -> SKIP 1h cooldown"); continue
             live=get_live_price(s) or d5["c"][-1]
@@ -169,12 +188,11 @@ def scan():
                 tp2 = min(tp2, live*0.975)
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); save_c()
-            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s.replace('_USDT','')} @ {fmt(live)}\n{bias} {face}\n{reason}\nSL {fmt(pool)} | TP1 {fmt(tp1)} (TODAY {'HIGH' if is_buy else 'LOW'}) -> TP2 {fmt(tp2)} (YEST {'HIGH' if is_buy else 'LOW'})\nV119 CLEAN {get_time()}")
+            tg(f"{'BUY' if is_buy else 'SELL'} {s.replace('_USDT','')} @ {fmt(live)}\n{bias} {face}\n{reason}\nSL {fmt(pool)} | TP1 {fmt(tp1)} (TODAY {'HIGH' if is_buy else 'LOW'}) -> TP2 {fmt(tp2)} (YEST {'HIGH' if is_buy else 'LOW'})\nV120 FIX {get_time()}")
             break
         except Exception as e:
             print(f"{s} err {e}"); continue
-    print(f"V119 done {get_time()} ACTIVE:{len(ACTIVE)}")
-
+    print(f"V120 done {get_time()} ACTIVE:{len(ACTIVE)}")
 if "--once" in sys.argv: scan()
 else:
     while True:
