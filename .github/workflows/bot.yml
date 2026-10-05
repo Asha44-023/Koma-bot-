@@ -1,4 +1,4 @@
-name: run-bot-v119-CLEAN
+name: run-bot-v120-FIX
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -12,16 +12,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pytz numpy
+      - run: pip install requests pytz
       - uses: actions/cache/restore@v4
         with:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v119-clean-
+          key: bot-cache-v120-fix-
           restore-keys: |
+            bot-cache-v120-fix-
             bot-cache-v119-clean-
-            bot-cache-v118-
       - name: Show current ACTIVE trades
         run: |
           echo "=== active.json ==="
@@ -29,7 +29,7 @@ jobs:
           echo ""
           echo "=== cooldown.json ==="
           cat cooldown.json || echo "no cooldown"
-      - name: Run bot V119 CLEAN 00:00 WIDE 20-50
+      - name: Run bot V120 FIX 60/40 + REVERSAL
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -39,10 +39,13 @@ jobs:
         run: |
           echo "=== after active.json ==="
           cat active.json || echo "empty"
+          echo ""
+          echo "=== logs ==="
+          cat active.json
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v119-clean-${{ github.run_id }}
+          key: bot-cache-v120-fix-${{ github.run_id }}
