@@ -36,16 +36,11 @@ def get_live_price(s):
         except: pass
     return None
 
-# NEW: smart formatter for PEPE etc
 def fmt(p):
-    if p is None:
-        return "0"
-    if p < 0.01:
-        return f"{p:.8f}"
-    elif p < 1:
-        return f"{p:.6f}"
-    else:
-        return f"{p:.4f}"
+    if p is None: return "0"
+    if p < 0.01: return f"{p:.8f}"
+    elif p < 1: return f"{p:.6f}"
+    else: return f"{p:.4f}"
 
 BULL_SHAPES = ["FALL_WEDGE","BULL_FLAG","ASC_TRI","RECT_ACC","SYM_TRI"]
 BEAR_SHAPES = ["RISE_WEDGE","BEAR_FLAG","DESC_TRI","RECT_DIST"]
@@ -151,8 +146,12 @@ def scan():
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
-    if len(ACTIVE)>=3: print(f"FULL {len(ACTIVE)}"); return
-    print(f"--- SCAN V119 00:00 OPEN + HL {get_time()} ---")
+
+    print(f"--- SCAN V119 00:00 OPEN + HL {get_time()} ACTIVE:{len(ACTIVE)} ---")
+    is_full = len(ACTIVE)>=3
+    if is_full:
+        print(f"FULL {len(ACTIVE)} - showing report only, no new trades")
+
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -160,6 +159,7 @@ def scan():
             direction, pool, reason, HH, LL, dbox, bias = guard_V117(d15,d5,d4,d1,s)
             face=dbox['face'] if dbox else "NO-BOX"
             print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}")
+            if is_full: continue
             if not direction: continue
             if time.time()-COOLDOWN["signals"].get(s,0) < 3600: print(" -> SKIP 1h cooldown"); continue
             live=get_live_price(s) or d5["c"][-1]
