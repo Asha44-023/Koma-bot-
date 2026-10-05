@@ -39,7 +39,7 @@ jobs:
         if: always()
         run: |
           echo "=== after active.json ==="
-          cat active.json
+          cat active.json || echo "empty"
       - uses: actions/cache/save@v4
         if: always()
         with:
