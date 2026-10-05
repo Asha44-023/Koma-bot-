@@ -23,11 +23,23 @@ jobs:
           restore-keys: |
             bot-cache-v119-
             bot-cache-v118-
+      - name: Show current ACTIVE trades
+        run: |
+          echo "=== active.json ==="
+          cat active.json || echo "no active file"
+          echo ""
+          echo "=== cooldown.json ==="
+          cat cooldown.json || echo "no cooldown"
       - name: Run bot V119 00:00 + HL
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
+      - name: Show after run
+        if: always()
+        run: |
+          echo "=== after active.json ==="
+          cat active.json
       - uses: actions/cache/save@v4
         if: always()
         with:
