@@ -152,13 +152,21 @@ def scan():
     if is_full:
         print(f"FULL {len(ACTIVE)} - showing report only, no new trades")
 
+    full_report_lines = []
+
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
-            if not d5 or not d15 or not d4 or not d1: print(f"{s:12} no data"); continue
+            if not d5 or not d15 or not d4 or not d1:
+                line=f"{s.replace('_USDT',''):10} no data"
+                print(line)
+                full_report_lines.append(line)
+                continue
             direction, pool, reason, HH, LL, dbox, bias = guard_V117(d15,d5,d4,d1,s)
             face=dbox['face'] if dbox else "NO-BOX"
-            print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}")
+            log_line=f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}"
+            print(log_line)
+            full_report_lines.append(log_line)
             if is_full: continue
             if not direction: continue
             if time.time()-COOLDOWN["signals"].get(s,0) < 3600: print(" -> SKIP 1h cooldown"); continue
@@ -187,6 +195,16 @@ def scan():
             break
         except Exception as e:
             print(f"{s} err {e}"); continue
+
+    # Send full situational report to Telegram when FULL
+    if is_full and full_report_lines:
+        active_list = ", ".join(ACTIVE.keys())
+        msg = f"📊 REPORT FULL {len(ACTIVE)} {get_time()}\nACTIVE: {active_list}\n\n" + "\n".join(full_report_lines)
+        # Telegram limit 4096 chars, trim if needed
+        if len(msg) > 3900:
+            msg = msg[:3900] + "\n..."
+        tg(msg)
+
     print(f"V119 done {get_time()} ACTIVE:{len(ACTIVE)}")
 
 if "--once" in sys.argv: scan()
