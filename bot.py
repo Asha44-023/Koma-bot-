@@ -71,33 +71,25 @@ def get_day_bias(d1,d4):
     if b["face"] in BEAR_SHAPES: return "BEARISH", b
     return "NEUTRAL", b
 
-# --- NEW: TODAY OPEN BOX FROM 00:00 EAT ---
 def find_today_box(d15, live):
     now = datetime.now(EAT)
     candles_since_midnight = int((now.hour*60 + now.minute)/15) + 1
     candles_since_midnight = min(candles_since_midnight, len(d15["h"])-5)
-    if candles_since_midnight < 12:
-        return None # market just opened
-    # slice today's data
+    if candles_since_midnight < 12: return None
     h_today = d15["h"][-candles_since_midnight:]
     l_today = d15["l"][-candles_since_midnight:]
-    c_today = d15["c"][-candles_since_midnight:]
-
-    # find box that was broken TODAY (like your FARTCOIN 3:50-5:15 box)
     for off in range(1, candles_since_midnight-8):
         end = len(h_today)-off
-        start = end-10 # 10 candles box = 2.5 hours accumulation (matches your chart)
+        start = end-10
         if start < 0: break
         HH = max(h_today[start:end])
         LL = min(l_today[start:end])
         rng = HH-LL or 0.00001
-        # must be tight box (range < 40% of today range) = accumulation
         today_range = max(h_today)-min(l_today) or rng
         if rng > today_range*0.5: continue
-
-        if live > HH*1.002: # broke up today
+        if live > HH*1.002:
             return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"TODAY BROKE {off*15}m ago Box {LL:.4f}-{HH:.4f}"}
-        if live < LL*0.998: # broke down today
+        if live < LL*0.998:
             return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"TODAY BROKE {off*15}m ago Box {LL:.4f}-{HH:.4f}"}
     return None
 
@@ -110,16 +102,12 @@ def guard_V117(d15,d5,d4,d1,symbol):
     if not hbox: return None,None,f"no TODAY break yet (flat since open)",None,None,dbox,bias
     HH,LL=hbox["HH"],hbox["LL"]; rng=hbox["range"]
     c15=d15["c"][-1]
-
-    # now entry: price came back inside box to 38/62 after break (your 8:05 AM retest)
     if bias=="BULLISH" and hbox["expected"]=="UP":
-        # if still above box, wait for pullback OR if already pulled back to 38%
         if LL*0.99 < c15 < HH*1.01 or abs(c15 - hbox["lvl_38"]) < rng*0.40:
-            return "BUY", LL-hbox["tick"]*2, f"V117 BULL {dbox['face']} + {hbox['tf']} + RETEST {c15:.4f}~38% {hbox['lvl_38']:.4f}", HH, LL, dbox, bias
+            return "BUY", LL-hbox["tick"]*2, f"V118 BULL {dbox['face']} + {hbox['tf']} + RETEST {c15:.4f}~38% {hbox['lvl_38']:.4f}", HH, LL, dbox, bias
     if bias=="BEARISH" and hbox["expected"]=="DOWN":
         if LL*0.99 < c15 < HH*1.01 or abs(c15 - hbox["lvl_62"]) < rng*0.40:
-            return "SELL", HH+hbox["tick"]*2, f"V117 BEAR {dbox['face']} + {hbox['tf']} + RETEST {c15:.4f}~62% {hbox['lvl_62']:.4f}", HH, LL, dbox, bias
-
+            return "SELL", HH+hbox["tick"]*2, f"V118 BEAR {dbox['face']} + {hbox['tf']} + RETEST {c15:.4f}~62% {hbox['lvl_62']:.4f}", HH, LL, dbox, bias
     return None,None,f"{bias} broke but price {c15:.4f} not back to box {LL:.4f}-{HH:.4f}",HH,LL,dbox,bias
 
 def scan():
@@ -143,7 +131,7 @@ def scan():
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3: print(f"FULL {len(ACTIVE)}"); return
-    print(f"--- SCAN V117 TODAY-OPEN {get_time()} ---")
+    print(f"--- SCAN V118 LIQUIDITY {get_time()} ---")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -155,16 +143,35 @@ def scan():
             if time.time()-COOLDOWN["signals"].get(s,0) < 3600: print(" -> SKIP 1h cooldown"); continue
             live=get_live_price(s) or d5["c"][-1]
             is_buy=direction=="BUY"
-            tick=(HH-LL)/10 if HH and LL else live*0.002
-            tp1=live+tick*3 if is_buy else live-tick*3
-            tp2=live+tick*8 if is_buy else live-tick*8
+
+            # === V118 LIQUIDITY LOOP TP ===
+            now = datetime.now(EAT)
+            candles_since_midnight = int((now.hour*60 + now.minute)/15) + 1
+            candles_since_midnight = min(candles_since_midnight, len(d15["h"]))
+            today_high = max(d15["h"][-candles_since_midnight:])
+            today_low = min(d15["l"][-candles_since_midnight:])
+            yest_high = d1["h"][-2]
+            yest_low = d1["l"][-2]
+
+            if is_buy:
+                tp1 = today_high
+                tp2 = max(yest_high, today_high*1.005)
+                # ensure at least 1% / 2.5%
+                tp1 = max(tp1, live*1.01)
+                tp2 = max(tp2, live*1.025)
+            else:
+                tp1 = today_low
+                tp2 = min(yest_low, today_low*0.995)
+                tp1 = min(tp1, live*0.99)
+                tp2 = min(tp2, live*0.975)
+
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); save_c()
-            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s.replace('_USDT','')} @ {live:.6f}\n{bias} {face}\n{reason}\nSL {pool:.6f} | TP {tp1:.6f} -> {tp2:.6f}\nV117 TODAY {get_time()}")
+            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s.replace('_USDT','')} @ {live:.6f}\n{bias} {face}\n{reason}\nSL {pool:.6f} | TP1 {tp1:.6f} (TODAY {'HIGH' if is_buy else 'LOW'}) -> TP2 {tp2:.6f} (YEST {'HIGH' if is_buy else 'LOW'})\nV118 LIQ {get_time()}")
             break
         except Exception as e:
             print(f"{s} err {e}"); continue
-    print(f"V117 done {get_time()} ACTIVE:{len(ACTIVE)}")
+    print(f"V118 done {get_time()} ACTIVE:{len(ACTIVE)}")
 
 if "--once" in sys.argv: scan()
 else:
