@@ -1,4 +1,4 @@
-name: run-bot-v116
+name: run-bot-v117-today-open
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -19,10 +19,10 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v116-
+          key: bot-cache-v117-
           restore-keys: |
-            bot-cache-v116-
-      - name: Run bot V116 BULL/BEAR DAY + 4H BREAK + 15m 38/62
+            bot-cache-v117-
+      - name: Run bot V117 TODAY-OPEN BOX
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,4 +34,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v116-${{ github.run_id }}
+          key: bot-cache-v117-${{ github.run_id }}
