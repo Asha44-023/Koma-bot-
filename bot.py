@@ -41,15 +41,12 @@ def get_funding(s):
         r = requests.get(f"https://contract.mexc.com/api/v1/contract/funding_rate/{s}", timeout=5).json()
         return float(r.get("data", r).get("fundingRate", 0))*100
     except: return 0
-
 BULL_SHAPES = ["FALL_WEDGE","BULL_FLAG","ASC_TRI","RECT_ACC","SYM_TRI"]
 BEAR_SHAPES = ["RISE_WEDGE","BEAR_FLAG","DESC_TRI","RECT_DIST"]
-
 def get_tick(d):
     h=d["h"][-20:]; l=d["l"][-20:]
     avg = sum(h[i]-l[i] for i in range(20))/20
     return max(avg/10, 0.00001)
-
 def detect_shape(d, label=""):
     if len(d["c"])<14: return None
     h=d["h"][-12:]; l=d["l"][-12:]
@@ -67,7 +64,6 @@ def detect_shape(d, label=""):
         shape="RISE_WEDGE" if abs(l1-l0)>abs(h1-h0)*1.2 else "BEAR_FLAG"; exp="DOWN"
     elif h1<h0-flat and l1>l0+flat: shape="SYM_TRI"; exp="UP"
     return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":shape,"shape":shape,"expected":exp,"tf":label}
-
 def find_box(d, live, label):
     for off in range(1,20):
         end=len(d["h"])-off; start=end-12
@@ -76,7 +72,6 @@ def find_box(d, live, label):
         if live>HH: return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":"RECT_ACC","shape":"RECT_ACC","expected":"UP","tf":f"{label} BROKE {off}c ago"}
         if live<LL: return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":"RECT_DIST","shape":"RECT_DIST","expected":"DOWN","tf":f"{label} BROKE {off}c ago"}
     return None
-
 def get_day_bias(d1,d4):
     b=detect_shape(d1,"DAY")
     if not b:
@@ -85,7 +80,6 @@ def get_day_bias(d1,d4):
     if b["face"] in BULL_SHAPES: return "BULLISH", b
     if b["face"] in BEAR_SHAPES: return "BEARISH", b
     return "NEUTRAL", b
-
 def guard_V116(d15,d5,d4,d1,symbol):
     bias, dbox = get_day_bias(d1,d4)
     if not dbox: return None,None,"no day box",None,None,None,bias
@@ -101,8 +95,7 @@ def guard_V116(d15,d5,d4,d1,symbol):
     if bias=="BEARISH" and hbox["expected"]=="DOWN":
         if LL < c15 < HH and abs(c15 - hbox["lvl_62"]) < rng*0.25:
             return "SELL", HH+hbox["tick"]*10, f"V116 BEAR {dbox['face']} + {hbox['tf']} + 62% RETEST", HH, LL, dbox, bias
-    return None,None,f"{bias} wait retest {dbox['face']}",HH,LL,dbox,bias
-
+    return None,None,f"{bias} wait retest {dbox['face']} inside {c15:.4f} vs 38:{hbox['lvl_38']:.4f} 62:{hbox['lvl_62']:.4f}",HH,LL,dbox,bias
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today:
@@ -124,17 +117,25 @@ def scan():
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
     if len(ACTIVE)>=3:
-        print(f"V116 done {get_time()} FULL ACTIVE:{len(ACTIVE)}"); return
+        print(f"V116 FULL ACTIVE:{len(ACTIVE)}"); return
+    print(f"--- SCAN {get_time()} ---")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
-            if not d5 or not d15 or not d4 or not d1: continue
+            if not d5 or not d15 or not d4 or not d1:
+                print(f"{s:12} no data"); continue
             direction, pool, reason, HH, LL, dbox, bias = guard_V116(d15,d5,d4,d1,s)
+            if dbox:
+                face=dbox['face']
+                if HH: print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} {reason}")
+                else: print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} {reason}")
+            else:
+                print(f"{s:10} {reason}")
             if not direction: continue
-            if time.time()-COOLDOWN["signals"].get(s,0) < 14400: continue
+            if time.time()-COOLDOWN["signals"].get(s,0) < 14400: print(" -> SKIP cooldown"); continue
             fund=get_funding(s)
-            if fund>=0.08 and direction=="BUY": continue
-            if fund<=-0.08 and direction=="SELL": continue
+            if fund>=0.08 and direction=="BUY": print(f" -> SKIP funding {fund}"); continue
+            if fund<=-0.08 and direction=="SELL": print(f" -> SKIP funding {fund}"); continue
             live=get_live_price(s) or d5["c"][-1]
             is_buy=direction=="BUY"
             tick=(HH-LL)/10 if HH and LL else live*0.002
@@ -148,10 +149,8 @@ def scan():
                 tg(f"🔴 SELL {s.replace('_USDT','')} @ {live:.6f}\n{bias} {dbox['face']}\n{reason}\nSL {pool:.6f} | TP {tp1:.6f} -> {tp2:.6f}\nV116 {get_time()}")
             break
         except Exception as e:
-            print(f"{s} err {e}")
-            continue
+            print(f"{s} err {e}"); continue
     print(f"V116 done {get_time()} ACTIVE:{len(ACTIVE)} checked {len(SYMBOLS)}")
-
 if "--once" in sys.argv: scan()
 else:
     while True:
