@@ -13,6 +13,11 @@ def save_a(): json.dump(ACTIVE, open(ACTIVE_FILE,"w"))
 def save_c(): json.dump(COOLDOWN, open(COOLDOWN_FILE,"w"))
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
+def fmt(p):
+    if p is None: return "0"
+    if p < 0.01: return f"{p:.8f}"
+    elif p < 1: return f"{p:.6f}"
+    else: return f"{p:.4f}"
 def tg(m):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":m}, timeout=10)
     except: pass
@@ -35,12 +40,6 @@ def get_live_price(s):
             return float((r.get("data", r))["lastPrice"])
         except: pass
     return None
-
-def fmt(p):
-    if p is None: return "0"
-    if p < 0.01: return f"{p:.8f}"
-    elif p < 1: return f"{p:.6f}"
-    else: return f"{p:.4f}"
 
 BULL_SHAPES = ["FALL_WEDGE","BULL_FLAG","ASC_TRI","RECT_ACC","SYM_TRI"]
 BEAR_SHAPES = ["RISE_WEDGE","BEAR_FLAG","DESC_TRI","RECT_DIST"]
@@ -77,6 +76,7 @@ def get_day_bias(d1,d4):
     if b["face"] in BEAR_SHAPES: return "BEARISH", b
     return "NEUTRAL", b
 
+# SIMPLE 20-50 WIDE - NO HL - 00:00 EAT
 def find_today_box(d15, live):
     now = datetime.now(EAT)
     candles_since_midnight = int((now.hour*60 + now.minute)/15) + 1
@@ -84,7 +84,6 @@ def find_today_box(d15, live):
     if candles_since_midnight < 20: return None
     h_today = d15["h"][-candles_since_midnight:]
     l_today = d15["l"][-candles_since_midnight:]
-    best = None; best_score = 999
     for wid in range(20, 50):
         for off in range(1, candles_since_midnight-wid-2):
             end = len(h_today)-off
@@ -95,19 +94,11 @@ def find_today_box(d15, live):
             rng = HH-LL or 0.00001
             today_range = max(h_today)-min(l_today) or rng
             if rng > today_range*0.6: continue
-            if rng/LL*100 > 3.0: continue
-            lows = l_today[start:end]
-            hl = sum(1 for i in range(1,len(lows)) if lows[i] >= lows[i-1]*0.998)
-            score = rng
-            if hl >= wid*0.6: score *= 0.8
-            if score < best_score:
-                if live > HH*1.002:
-                    best = {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"TODAY BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} HL:{hl}/{wid}"}
-                    best_score = score
-                elif live < LL*0.998:
-                    best = {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"TODAY BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} HL:{hl}/{wid}"}
-                    best_score = score
-    return best
+            if live > HH*1.002:
+                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"TODAY BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide"}
+            if live < LL*0.998:
+                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"TODAY BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide"}
+    return None
 
 def guard_V117(d15,d5,d4,d1,symbol):
     bias, dbox = get_day_bias(d1,d4)
@@ -146,28 +137,15 @@ def scan():
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"🟢🟢 TP2 {s} +{profit:.2f}% {get_time()}"); del ACTIVE[s]; save_a()
-
-    print(f"--- SCAN V119 00:00 OPEN + HL {get_time()} ACTIVE:{len(ACTIVE)} ---")
-    is_full = len(ACTIVE)>=3
-    if is_full:
-        print(f"FULL {len(ACTIVE)} - showing report only, no new trades")
-
-    full_report_lines = []
-
+    if len(ACTIVE)>=3: return
+    print(f"--- SCAN V119 CLEAN {get_time()} ---")
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
-            if not d5 or not d15 or not d4 or not d1:
-                line=f"{s.replace('_USDT',''):10} no data"
-                print(line)
-                full_report_lines.append(line)
-                continue
+            if not d5 or not d15 or not d4 or not d1: print(f"{s:12} no data"); continue
             direction, pool, reason, HH, LL, dbox, bias = guard_V117(d15,d5,d4,d1,s)
             face=dbox['face'] if dbox else "NO-BOX"
-            log_line=f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}"
-            print(log_line)
-            full_report_lines.append(log_line)
-            if is_full: continue
+            print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:12} -> {reason}")
             if not direction: continue
             if time.time()-COOLDOWN["signals"].get(s,0) < 3600: print(" -> SKIP 1h cooldown"); continue
             live=get_live_price(s) or d5["c"][-1]
@@ -191,20 +169,10 @@ def scan():
                 tp2 = min(tp2, live*0.975)
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); save_c()
-            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s.replace('_USDT','')} @ {fmt(live)}\n{bias} {face}\n{reason}\nSL {fmt(pool)} | TP1 {fmt(tp1)} (TODAY {'HIGH' if is_buy else 'LOW'}) -> TP2 {fmt(tp2)} (YEST {'HIGH' if is_buy else 'LOW'})\nV119 LIQ {get_time()}")
+            tg(f"{'🟢 BUY' if is_buy else '🔴 SELL'} {s.replace('_USDT','')} @ {fmt(live)}\n{bias} {face}\n{reason}\nSL {fmt(pool)} | TP1 {fmt(tp1)} (TODAY {'HIGH' if is_buy else 'LOW'}) -> TP2 {fmt(tp2)} (YEST {'HIGH' if is_buy else 'LOW'})\nV119 CLEAN {get_time()}")
             break
         except Exception as e:
             print(f"{s} err {e}"); continue
-
-    # Send full situational report to Telegram when FULL
-    if is_full and full_report_lines:
-        active_list = ", ".join(ACTIVE.keys())
-        msg = f"📊 REPORT FULL {len(ACTIVE)} {get_time()}\nACTIVE: {active_list}\n\n" + "\n".join(full_report_lines)
-        # Telegram limit 4096 chars, trim if needed
-        if len(msg) > 3900:
-            msg = msg[:3900] + "\n..."
-        tg(msg)
-
     print(f"V119 done {get_time()} ACTIVE:{len(ACTIVE)}")
 
 if "--once" in sys.argv: scan()
