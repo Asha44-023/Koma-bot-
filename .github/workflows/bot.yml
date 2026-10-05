@@ -35,4 +35,4 @@ jobs:
             active.json
             cooldown.json
             stats.json
-          key: bot-cache-v119-${{ github.run_id }}
+          key: bot-cache-v119-
