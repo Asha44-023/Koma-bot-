@@ -18,19 +18,11 @@ def fmt(p):
     if p < 0.01: return f"{p:.8f}"
     elif p < 1: return f"{p:.6f}"
     else: return f"{p:.4f}"
-def bold(t):
-    m = str.maketrans(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_",
-        "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗.-_"
-    )
-    return str(t).translate(m)
 def tg(m):
-    try:
-        r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":m}, timeout=10)
-        print(f"TG resp {r.status_code} {r.text[:150]}")
-    except Exception as e:
-        print(f"TG err {e}")
+    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":m}, timeout=10)
+    except: pass
     print(m)
+
 def kl(symbol, interval):
     sec_map = {"Min5":300,"Min15":900,"Hour4":14400,"Day1":86400}
     sec = sec_map.get(interval, 300)
@@ -42,6 +34,7 @@ def kl(symbol, interval):
         if isinstance(d, dict) and "data" in d: d = d["data"]
         return {"o":[float(x) for x in d["open"][-200:]],"h":[float(x) for x in d["high"][-200:]],"l":[float(x) for x in d["low"][-200:]],"c":[float(x) for x in d["close"][-200:]]}
     except: return None
+
 def get_live_price(s):
     for try_sym in [s, s.replace("_","")]:
         try:
@@ -49,174 +42,145 @@ def get_live_price(s):
             return float((r.get("data", r))["lastPrice"])
         except: pass
     return None
-def get_tick(d):
-    h=d["h"][-20:]; l=d["l"][-20:]
-    avg = sum(h[i]-l[i] for i in range(20))/20
-    return max(avg/10, 0.00001)
-def detect_shape(d, label=""):
-    if len(d["c"])<14: return None
-    h=d["h"][-20:]; l=d["l"][-20:]; c=d["c"][-20:]; o=d["o"][-20:]
-    HH=max(h[-12:]); LL=min(l[-12:]); rng=HH-LL or 0.00001
+
+def daily_ship(d1):
+    h=d1["h"][-20:]; l=d1["l"][-20:]; c=d1["c"][-20:]
+    HH=max(h); LL=min(l); rng=HH-LL or 0.00001
+    h0,h1=h[0],h[-1]; l0,l1=l[0],l[-1]
     flat=rng*0.35
-    h0,h1=h[-12],h[-1]; l0,l1=l[-12],l[-1]
-    bullish = sum(1 for i in range(len(c)) if c[i] > o[i])
-    ratio = bullish / len(c) * 100
-    higher_lows = sum(1 for i in range(len(l)-5, len(l)-1) if l[i+1] > l[i])
-    lower_highs = sum(1 for i in range(len(h)-5, len(h)-1) if h[i+1] < h[i])
-    wicks_down = sum(1 for i in range(-8,0) if l[i] < LL*0.998 and c[i] > LL)
-    wicks_up = sum(1 for i in range(-8,0) if h[i] > HH*1.002 and c[i] < HH)
-    fake_up = h[-1] > HH*1.005 and c[-1] < HH
-    fake_down = l[-1] < LL*0.995 and c[-1] > LL
-    manip=""
-    if wicks_down>=2 and fake_down: manip="LIQ_GRAB_LONG + FAKE_DOWN"
-    elif wicks_down>=2: manip="LIQ_GRAB_LONG"
-    elif wicks_up>=2 and fake_up: manip="LIQ_GRAB_SHORT + FAKE_UP"
-    elif wicks_up>=2: manip="LIQ_GRAB_SHORT"
-    elif fake_up: manip="FAKE BREAKOUT UP"
-    elif fake_down: manip="FAKE BREAKDOWN"
-    shape="RECT_ACC"; exp="UP"
-    if abs(h1-h0)<flat and abs(l1-l0)<flat:
-        if ratio >= 60 or higher_lows >=3: shape="RECT_ACC"; exp="UP"
-        elif ratio <= 40 or lower_highs >=3: shape="RECT_DIST"; exp="DOWN"
-        else: shape="RECT_ACC" if l1>=l0 else "RECT_DIST"; exp="UP" if l1>=l0 else "DOWN"
-    elif abs(h1-h0)<flat and l1>l0+flat: shape="ASC_TRI"; exp="UP"
-    elif abs(l1-l0)<flat and h1<h0-flat: shape="DESC_TRI"; exp="DOWN"
-    elif h1<h0-flat and l1<l0-flat:
-        if higher_lows >=2: shape="DOUBLE_BOTTOM"; exp="UP"
-        else: shape="FALL_WEDGE" if abs(h1-h0)>abs(l1-l0)*1.2 else "BULL_FLAG"; exp="UP"
-    elif h1>h0+flat and l1>l0+flat:
-        if lower_highs >=2 and ratio <= 45: shape="DOUBLE_TOP"; exp="DOWN"
-        else: shape="RISE_WEDGE" if abs(l1-l0)>abs(h1-l0)*1.2 else "BEAR_FLAG"; exp="DOWN"
-    elif h1<h0-flat and l1>l0+flat: shape="SYM_TRI"; exp="UP" if ratio>=50 else "DOWN"
-    if higher_lows >=3 and LL == min(l[-8:]): shape="DOUBLE_BOTTOM"; exp="UP"
-    if ratio >=60 and higher_lows>=2 and exp=="DOWN" and label=="DAY":
-        shape="RECT_ACC"; exp="UP"
-        if manip=="": manip="OVR_BUY (60% bulls + HL)"
-    if "LONG" in manip and exp=="UP": exp="STRONG_UP"
-    if "SHORT" in manip and exp=="DOWN": exp="STRONG_DOWN"
-    return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":get_tick(d),"face":shape,"expected":exp,"tf":label,"ratio":ratio,"hl":higher_lows,"manip":manip}
+    if abs(h1-h0)<flat and l1>l0+flat: return "ASC_TRI","UP",HH,LL
+    if abs(l1-l0)<flat and h1<h0-flat: return "DESC_TRI","DOWN",HH,LL
+    if h1<h0-flat and l1>l0+flat: return "SYM_TRI","BOTH",HH,LL
+    if abs(h1-h0)<flat and abs(l1-l0)<flat and c[-1]>sum(c[-12:-6])/6: return "RECT_ACC","UP",HH,LL
+    if abs(h1-h0)<flat and abs(l1-l0)<flat: return "RECT_DIST","DOWN",HH,LL
+    if h1>h0+flat and l1>l0+flat: return "RISE_WEDGE","DOWN",HH,LL
+    if h1<h0-flat and l1<l0-flat: return "FALL_WEDGE","UP",HH,LL
+    return "RECT","BOTH",HH,LL
 
-def get_day_bias(d1,d4):
-    b=detect_shape(d1,"DAY")
-    if not b:
-        hl=sum(1 for i in range(1,20) if d4["l"][-i]>d4["l"][-i-1])
-        return ("BULLISH" if hl>=12 else "BEARISH"), None
-    if "UP" in b["expected"]: return "BULLISH", b
-    if "DOWN" in b["expected"]: return "BEARISH", b
-    return "NEUTRAL", b
+def get_4h_dir(d4):
+    c=d4["c"][-20:]; s10=sum(c[-10:])/10; s20=sum(c[-20:])/20
+    if s10 > s20*1.002: return "BULLISH"
+    if s10 < s20*0.998: return "BEARISH"
+    return "NEUTRAL"
 
-def find_recent_box(d15, live):
-    h_all = d15["h"][-96:]; l_all = d15["l"][-96:]; c_all = d15["c"][-96:]
-    for wid in range(12, 48):
-        for off in range(1, 72):
-            end = len(h_all)-off; start = end-wid
-            if start < 0: continue
-            HH = max(h_all[start:end]); LL = min(l_all[start:end])
-            rng = HH-LL or 0.00001
-            full_range = max(h_all)-min(l_all) or rng
-            if rng > full_range*0.85: continue
-            if rng < full_range*0.03: continue
-            last_close = c_all[-1]
-            broke_up = last_close > HH*1.001 or live > HH*1.001
-            broke_down = last_close < LL*0.999 or live < LL*0.999
-            if broke_up:
-                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"UP","tf":f"BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide","age":off*15}
-            if broke_down:
-                return {"HH":HH,"LL":LL,"range":rng,"lvl_38":LL+rng*0.38,"lvl_62":LL+rng*0.62,"tick":rng/10,"expected":"DOWN","tf":f"BROKE {off*15}m ago Box {fmt(LL)}-{fmt(HH)} {wid*15//60}h wide","age":off*15}
-    return None
+def get_15m_box(d15):
+    h=d15["h"][-80:]; l=d15["l"][-80:]; c=d15["c"][-80:]
+    best=None; best_score=0
+    for wid in range(10,35):
+        for off in range(1,40):
+            end=len(h)-off; start=end-wid
+            if start<0: continue
+            HH=max(h[start:end]); LL=min(l[start:end]); rng=HH-LL
+            full=max(h)-min(l) or rng
+            if rng>full*0.7 or rng<full*0.03: continue
+            touches=sum(1 for i in range(start,end) if abs(h[i]-HH)<rng*0.15 or abs(l[i]-LL)<rng*0.15)
+            if touches>best_score:
+                best_score=touches
+                best={"HH":HH,"LL":LL,"rng":rng,"touches":touches}
+    return best
 
-def guard_V126(d15,d5,d4,d1,symbol):
-    bias, dbox = get_day_bias(d1,d4)
-    if not dbox: return None,None,"no day box",None,None,None,bias
-    pattern_emoji = "🟢" if "BULLISH" in bias else "🔴" if "BEARISH" in bias else "⚪️"
-    pattern_info = f"{pattern_emoji} PATTERN {dbox['face']} {dbox['ratio']:.0f}% bull HL:{dbox['hl']} {dbox['manip']}"
-    if bias=="NEUTRAL": return None,None,f"{pattern_info} -> NEUTRAL wait",None,None,dbox,bias
-    live=get_live_price(symbol) or d5["c"][-1]
-    hbox=find_recent_box(d15, live)
-    if not hbox:
-        return None,None,f"{pattern_info} | no breakout yet waiting",None,None,dbox,bias
-    HH,LL=hbox["HH"],hbox["LL"]; rng=hbox["range"]
-    c15=d15["c"][-1]
-    if bias=="BULLISH" and hbox["expected"]=="UP":
-        if LL*0.97 < c15 < HH*1.08 or abs(c15 - hbox["lvl_38"]) < rng*0.85:
-            is_liq = "LONG" in dbox["manip"] or hbox.get("age",0) < 60
-            sl = LL * (0.985 if is_liq else 0.991)
-            return "BUY", sl, f"{pattern_info} + V126 BULL {dbox['face']} + {hbox['tf']} + RETEST", HH, LL, dbox, bias
-    if bias=="BEARISH" and hbox["expected"]=="DOWN":
-        if LL*0.92 < c15 < HH*1.03 or abs(c15 - hbox["lvl_62"]) < rng*0.85:
-            is_liq = "SHORT" in dbox["manip"] or hbox.get("age",0) < 60
-            sl = HH * (1.015 if is_liq else 1.009)
-            return "SELL", sl, f"{pattern_info} + V126 BEAR {dbox['face']} + {hbox['tf']} + RETEST", HH, LL, dbox, bias
-    return None,None,f"{pattern_info} | broke but price {fmt(c15)} not back to box waiting retest",HH,LL,dbox,bias
+def next_liquidity(d15, box_HH, box_LL, direction):
+    h=d15["h"][-80:]; l=d15["l"][-80:]
+    zones_up=[]; zones_down=[]
+    for i in range(10, len(h)-10):
+        hh=max(h[i-5:i+5]); ll=min(l[i-5:i+5])
+        if hh > box_HH*1.005 and (hh-ll) < (max(h)-min(l))*0.15:
+            zones_up.append(hh)
+        if ll < box_LL*0.995 and (hh-ll) < (max(h)-min(l))*0.15:
+            zones_down.append(ll)
+    liq_up=[h[i] for i in range(2,len(h)-2) if h[i]>h[i-1] and h[i]>h[i+1] and h[i]>box_HH]
+    liq_down=[l[i] for i in range(2,len(l)-2) if l[i]<l[i-1] and l[i]<l[i+1] and l[i]<box_LL]
+    if direction=="BUY":
+        next1 = min(zones_up+liq_up, default=box_HH*1.03)
+        next2 = min([x for x in zones_up+liq_up if x>next1], default=next1*1.02)
+        return next1, next2
+    else:
+        next1 = max(zones_down+liq_down, default=box_LL*0.97)
+        next2 = max([x for x in zones_down+liq_down if x<next1], default=next1*0.98)
+        return next1, next2
 
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today:
         COOLDOWN["daily_pnl"]=0; COOLDOWN["last_day"]=today; save_c()
-    if COOLDOWN["daily_pnl"] <= -3: print(f"PAUSE {COOLDOWN['daily_pnl']}"); return
     for s,data in list(ACTIVE.items()):
         p=get_live_price(s)
         if not p: continue
-        sym = s.replace("_USDT","")
         entry,is_buy,sl=data["entry"],data["is_buy"],data["sl"]
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
-            emoji="🟢" if pnl>0 else "🔴"
-            tg(f"{emoji} {bold(f'STOP {sym} {pnl:.2f}% @ {fmt(p)}')}"); del ACTIVE[s]; save_a(); continue
+            sym=s.replace("_USDT","")
+            tg(f"{'🟢' if pnl>0 else '🔴'} STOP {sym} {pnl:.2f}% @ {fmt(p)}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True; data["sl"]=entry; save_a()
-            tg(f"💚 {bold(f'TP1 {sym} @ {fmt(p)} -> SL BE')}")
+            sym=s.replace("_USDT","")
+            tg(f"💚 TP1 {sym} @ {fmt(p)} -> SL BE")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
-            tg(f"💚 {bold(f'TP2 {sym} +{profit:.2f}% CLOSED')}"); del ACTIVE[s]; save_a()
-    print(f"--- SCAN V126.3 COLOR BOLD {get_time()} ACTIVE:{len(ACTIVE)} {list(ACTIVE.keys())} PNL:{COOLDOWN['daily_pnl']:.2f}% ---")
-    if len(ACTIVE)>=5:
-        print(f"MAX ACTIVE {len(ACTIVE)} - managing only")
-        return
+            sym=s.replace("_USDT","")
+            tg(f"💚 TP2 {sym} +{profit:.2f}% CLOSED"); del ACTIVE[s]; save_a()
+
+    print(f"--- SCAN V131 GREEN/RED {get_time()} ---")
+    if len(ACTIVE)>=5: return
+    cands=[]
     for s in SYMBOLS:
         try:
-            d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
-            if not d5 or not d15 or not d4 or not d1: continue
-            direction, pool, reason, HH, LL, dbox, bias = guard_V126(d15,d5,d4,d1,s)
-            face=dbox['face'] if dbox else "NO-BOX"
-            manip=dbox['manip'] if dbox and 'manip' in dbox else ""
-            print(f"{s.replace('_USDT',''):10} DAY:{bias:8} {face:15} {manip:20} -> {reason}")
-            if not direction: continue
-            if time.time()-COOLDOWN["signals"].get(s,0) < 3600: continue
-            live=get_live_price(s) or d5["c"][-1]
-            is_buy=direction=="BUY"
-            now = datetime.now(EAT)
-            candles_since_midnight = int((now.hour*60 + now.minute)/15) + 1
-            candles_since_midnight = min(candles_since_midnight, len(d15["h"]))
-            today_high = max(d15["h"][-candles_since_midnight:])
-            today_low = min(d15["l"][-candles_since_midnight:])
-            yest_high = d1["h"][-2]
-            yest_low = d1["l"][-2]
-            box_h = HH-LL if HH and LL else live*0.02
-            sym = s.replace("_USDT","")
-            if is_buy:
-                tp1 = today_high; tp2 = max(yest_high, today_high*1.005, HH + box_h*1.0)
-                tp1 = max(tp1, live*1.01); tp2 = max(tp2, live*1.025)
-                sl = pool
-                rr = (tp2-live)/(live-sl) if live!=sl else 0
-                msg = f"💚 {bold(f'BUY {sym} @ {fmt(live)}')}\n🧩 {bold(face)} | 🟢 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
+            if s in ACTIVE: continue
+            d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
+            if not d15 or not d4 or not d1: continue
+            ship, ship_dir, _, _ = daily_ship(d1)
+            dir4h = get_4h_dir(d4)
+            box = get_15m_box(d15)
+            live=get_live_price(s) or d15["c"][-1]
+            if not box: continue
+            if time.time()-COOLDOWN["signals"].get(s,0) < 1800: continue
+            print(f"{s.replace('_USDT',''):10} DAY:{ship:12} {ship_dir:4} 4H:{dir4h:8} Box:{fmt(box['LL'])}-{fmt(box['HH'])}")
+            if ship_dir=="BOTH":
+                if dir4h=="NEUTRAL": continue
+                want = "UP" if dir4h=="BULLISH" else "DOWN"
             else:
-                tp1 = today_low; tp2 = min(yest_low, today_low*0.995, LL - box_h*1.0)
-                tp1 = min(tp1, live*0.99); tp2 = min(tp2, live*0.975)
-                sl = pool
-                rr = (live-tp2)/(sl-live) if sl!=live else 0
-                msg = f"❤️ {bold(f'SELL {sym} @ {fmt(live)}')}\n🧩 {bold(face)} | 🔴 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
-            ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
-            COOLDOWN["signals"][s]=time.time(); save_c()
-            tg(msg)
-        except Exception as e:
-            print(f"{s} err {e}"); continue
-    print(f"V126.3 done {get_time()} ACTIVE:{len(ACTIVE)}")
+                if ship_dir=="UP" and dir4h=="BEARISH": continue
+                if ship_dir=="DOWN" and dir4h=="BULLISH": continue
+                want = ship_dir
+                if dir4h!="NEUTRAL":
+                    want = "UP" if dir4h=="BULLISH" else "DOWN"
+            broke_up = live > box["HH"]*1.001
+            broke_down = live < box["LL"]*0.999
+            direction=None
+            if want=="UP" and broke_up: direction="BUY"
+            elif want=="DOWN" and broke_down: direction="SELL"
+            if not direction: continue
+            sym=s.replace("_USDT","")
+            is_buy=direction=="BUY"
+            HH,LL=box["HH"],box["LL"]
+            tp1_liq, tp2_liq = next_liquidity(d15, HH, LL, direction)
+            if is_buy:
+                sl=LL*0.992
+                tp1=max(tp1_liq, live*1.01); tp2=max(tp2_liq, live*1.025)
+                rr=(tp2-live)/(live-sl) if live!=sl else 0
+                if rr<1.2: continue
+                msg=f"💚 {ship}\n💚 BUY {sym} @ {fmt(live)}\n🛡️ SL {fmt(sl)}\n🎯 TP {fmt(tp1)} / {fmt(tp2)}"
+            else:
+                sl=HH*1.008
+                tp1=min(tp1_liq, live*0.99); tp2=min(tp2_liq, live*0.975)
+                rr=(live-tp2)/(sl-live) if sl!=live else 0
+                if rr<1.2: continue
+                msg=f"❤️ {ship}\n❤️ SELL {sym} @ {fmt(live)}\n🛡️ SL {fmt(sl)}\n🎯 TP {fmt(tp1)} / {fmt(tp2)}"
+            cands.append((rr,s,msg,live,is_buy,sl,tp1,tp2,HH,LL,ship))
+        except Exception as e: print(f"{s} err {e}"); continue
+    cands.sort(key=lambda x: x[0], reverse=True)
+    print(f"FOUND {len(cands)} -> TOP 3")
+    for rr,s,msg,live,is_buy,sl,tp1,tp2,HH,LL,ship in cands[:3]:
+        if len(ACTIVE)>=5: break
+        ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":ship}; save_a()
+        COOLDOWN["signals"][s]=time.time(); save_c()
+        tg(msg); time.sleep(1)
+
 if "--once" in sys.argv: scan()
 else:
     while True:
         try: scan()
         except Exception as e: print(e)
-        time.sleep(10)
+        time.sleep(15)
