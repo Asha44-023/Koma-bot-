@@ -1,4 +1,4 @@
-name: run-bot-v131-GREEN-RED
+name: run-bot-v134-COUNTER-TP
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -18,21 +18,20 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v131-green-red-
+          key: bot-cache-v134-counter-tp-
           restore-keys: |
+            bot-cache-v134-counter-tp-
             bot-cache-v131-green-red-
             bot-cache-v130-simple-
-            bot-cache-v129-smart-
-            bot-cache-v126-3-color-bold-
-      - name: Run bot V131 GREEN RED
+      - name: Run bot V134 COUNTER TP/SL
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
+        run: python main_bot.py --once
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v131-green-red-${{ github.run_id }}
+          key: bot-cache-v134-counter-tp-${{ github.run_id }}
