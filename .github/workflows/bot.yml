@@ -1,4 +1,4 @@
-name: run-bot-v126-3-COLOR-BOLD
+name: run-bot-v131-GREEN-RED
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -18,12 +18,13 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v126-3-color-bold-
+          key: bot-cache-v131-green-red-
           restore-keys: |
+            bot-cache-v131-green-red-
+            bot-cache-v130-simple-
+            bot-cache-v129-smart-
             bot-cache-v126-3-color-bold-
-            bot-cache-v126-1-telegram-fixed-
-            bot-cache-v126-big-net-
-      - name: Run bot V126.3 COLOR BOLD
+      - name: Run bot V131 GREEN RED
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,4 +35,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v126-3-color-bold-${{ github.run_id }}
+          key: bot-cache-v131-green-red-${{ github.run_id }}
