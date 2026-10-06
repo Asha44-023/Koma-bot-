@@ -1,4 +1,4 @@
-name: run-bot-v126-BIG-NET
+name: run-bot-v126-1-TELEGRAM-FIXED
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -18,16 +18,11 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v126-big-net-
+          key: bot-cache-v126-1-telegram-fixed-
           restore-keys: |
+            bot-cache-v126-1-telegram-fixed-
             bot-cache-v126-big-net-
-            bot-cache-v124-color-
-      - name: Reset PNL for new version
-        run: |
-          echo '{"signals":{},"daily_pnl":0,"last_day":"2026-10-06"}' > cooldown.json
-          echo '{}' > active.json
-          cat cooldown.json
-      - name: Run bot V126 BIG NET
+      - name: Run bot V126.1 TELEGRAM FIXED
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -38,4 +33,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v126-big-net-${{ github.run_id }}
+          key: bot-cache-v126-1-telegram-fixed-${{ github.run_id }}
