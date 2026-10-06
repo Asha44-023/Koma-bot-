@@ -18,6 +18,12 @@ def fmt(p):
     if p < 0.01: return f"{p:.8f}"
     elif p < 1: return f"{p:.6f}"
     else: return f"{p:.4f}"
+def bold(t):
+    m = str.maketrans(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_",
+        "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗.-_"
+    )
+    return str(t).translate(m)
 def tg(m):
     try:
         r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT,"text":m}, timeout=10)
@@ -156,16 +162,18 @@ def scan():
             pnl=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
             emoji="🟢" if pnl>0 else "🔴"
-            tg(f"{emoji} STOP {s.replace('_USDT','')} {pnl:.2f}% {get_time()} SL hit @ {fmt(p)}"); del ACTIVE[s]; save_a(); continue
+            tg(f"{emoji} {bold(f'STOP {s.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)}')}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True; data["sl"]=entry; save_a()
-            tg(f"TP1 HIT {s.replace('_USDT','')} @ {fmt(p)} — moving SL to BE {get_time()} Locked profit")
+            tg(f"💚 {bold(f'TP1 {s.replace('_USDT','')} @ {fmt(p)} → SL BE')}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
-            tg(f"TP2 HIT {s.replace('_USDT','')} +{profit:.2f}% {get_time()} Closed @ {fmt(p)}"); del ACTIVE[s]; save_a()
-    if len(ACTIVE)>=3: return
-    print(f"--- SCAN V126.1 BIG NET TELEGRAM FIXED {get_time()} ---")
+            tg(f"💚 {bold(f'TP2 {s.replace('_USDT','')} +{profit:.2f}% CLOSED')}"); del ACTIVE[s]; save_a()
+    print(f"--- SCAN V126.3 COLOR BOLD {get_time()} ACTIVE:{len(ACTIVE)} {list(ACTIVE.keys())} PNL:{COOLDOWN['daily_pnl']:.2f}% ---")
+    if len(ACTIVE)>=5:
+        print(f"MAX ACTIVE {len(ACTIVE)} - managing only")
+        return
     for s in SYMBOLS:
         try:
             d5=kl(s,"Min5"); d15=kl(s,"Min15"); d4=kl(s,"Hour4"); d1=kl(s,"Day1")
@@ -187,26 +195,23 @@ def scan():
             yest_low = d1["l"][-2]
             box_h = HH-LL if HH and LL else live*0.02
             if is_buy:
-                tp1 = today_high; tp2 = max(yest_high, today_high*1.005, HH + box_h*1.0); tp3 = HH + box_h*1.618
+                tp1 = today_high; tp2 = max(yest_high, today_high*1.005, HH + box_h*1.0)
                 tp1 = max(tp1, live*1.01); tp2 = max(tp2, live*1.025)
                 sl = pool
                 rr = (tp2-live)/(live-sl) if live!=sl else 0
-                color_header = "STRONG BUY" if "STRONG" in dbox['expected'] or "LONG" in manip else "BUY SIGNAL"
-                msg = f"{color_header} — {s.replace('_USDT','')} @ {fmt(live)}\n{bias} {face} {manip}\n{reason}\n\nEntry: {fmt(live)}\nSL: {fmt(sl)} ({((live-sl)/live*100):.2f}%) SAFE BELOW BOX\nTP1: {fmt(tp1)} (TODAY HIGH)\nTP2: {fmt(tp2)} (YEST HIGH + Box)\nTP3: {fmt(tp3)} (1.618 ext)\nR:R 1:{rr:.1f} | Box {fmt(LL)} - {fmt(HH)}\n\nBUY NOW {s.replace('_USDT','')}\nV126.1 {get_time()}"
+                msg = f"💚 {bold(f'BUY {s.replace('_USDT','')} @ {fmt(live)}')}\n🧩 {bold(face)} | 🟢 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
             else:
-                tp1 = today_low; tp2 = min(yest_low, today_low*0.995, LL - box_h*1.0); tp3 = LL - box_h*1.618
+                tp1 = today_low; tp2 = min(yest_low, today_low*0.995, LL - box_h*1.0)
                 tp1 = min(tp1, live*0.99); tp2 = min(tp2, live*0.975)
                 sl = pool
                 rr = (live-tp2)/(sl-live) if sl!=live else 0
-                color_header = "STRONG SELL" if "STRONG" in dbox['expected'] or "SHORT" in manip else "SELL SIGNAL"
-                msg = f"{color_header} — {s.replace('_USDT','')} @ {fmt(live)}\n{bias} {face} {manip}\n{reason}\n\nEntry: {fmt(live)}\nSL: {fmt(sl)} ({((sl-live)/live*100):.2f}%) SAFE ABOVE BOX\nTP1: {fmt(tp1)} (TODAY LOW)\nTP2: {fmt(tp2)} (YEST LOW + Box)\nTP3: {fmt(tp3)} (1.618 ext)\nR:R 1:{rr:.1f} | Box {fmt(LL)} - {fmt(HH)}\n\nSELL NOW {s.replace('_USDT','')}\nV126.1 {get_time()}"
+                msg = f"❤️ {bold(f'SELL {s.replace('_USDT','')} @ {fmt(live)}')}\n🧩 {bold(face)} | 🔴 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); save_c()
             tg(msg)
-            break
         except Exception as e:
             print(f"{s} err {e}"); continue
-    print(f"V126.1 done {get_time()} ACTIVE:{len(ACTIVE)}")
+    print(f"V126.3 done {get_time()} ACTIVE:{len(ACTIVE)}")
 if "--once" in sys.argv: scan()
 else:
     while True:
