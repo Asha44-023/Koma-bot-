@@ -23,11 +23,25 @@ jobs:
             bot-cache-v134-counter-tp-
             bot-cache-v131-green-red-
             bot-cache-v130-simple-
+            bot-cache-v129-smart-
       - name: Run bot V134 COUNTER TP/SL
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main_bot.py --once
+        run: |
+          ls -la
+          echo "Checking bot file..."
+          if [ -f main_bot.py ]; then
+            echo "Found main_bot.py"
+            python main_bot.py --once
+          elif [ -f bot.py ]; then
+            echo "Found bot.py"
+            python bot.py --once
+          else
+            echo "ERROR: No bot file found!"
+            ls -la *.py
+            exit 1
+          fi
       - uses: actions/cache/save@v4
         if: always()
         with:
