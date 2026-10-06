@@ -157,19 +157,20 @@ def scan():
     for s,data in list(ACTIVE.items()):
         p=get_live_price(s)
         if not p: continue
+        sym = s.replace("_USDT","")
         entry,is_buy,sl=data["entry"],data["is_buy"],data["sl"]
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=pnl; save_c()
             emoji="🟢" if pnl>0 else "🔴"
-            tg(f"{emoji} {bold(f'STOP {s.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)}')}"); del ACTIVE[s]; save_a(); continue
+            tg(f"{emoji} {bold(f'STOP {sym} {pnl:.2f}% @ {fmt(p)}')}"); del ACTIVE[s]; save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=data["tp1"]) or (not is_buy and p<=data["tp1"])):
             data["tp1_hit"]=True; data["sl"]=entry; save_a()
-            tg(f"💚 {bold(f'TP1 {s.replace('_USDT','')} @ {fmt(p)} → SL BE')}")
+            tg(f"💚 {bold(f'TP1 {sym} @ {fmt(p)} -> SL BE')}")
         if (is_buy and p>=data["tp2"]) or (not is_buy and p<=data["tp2"]):
             profit=((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100)
             COOLDOWN["daily_pnl"]+=profit; save_c()
-            tg(f"💚 {bold(f'TP2 {s.replace('_USDT','')} +{profit:.2f}% CLOSED')}"); del ACTIVE[s]; save_a()
+            tg(f"💚 {bold(f'TP2 {sym} +{profit:.2f}% CLOSED')}"); del ACTIVE[s]; save_a()
     print(f"--- SCAN V126.3 COLOR BOLD {get_time()} ACTIVE:{len(ACTIVE)} {list(ACTIVE.keys())} PNL:{COOLDOWN['daily_pnl']:.2f}% ---")
     if len(ACTIVE)>=5:
         print(f"MAX ACTIVE {len(ACTIVE)} - managing only")
@@ -194,18 +195,19 @@ def scan():
             yest_high = d1["h"][-2]
             yest_low = d1["l"][-2]
             box_h = HH-LL if HH and LL else live*0.02
+            sym = s.replace("_USDT","")
             if is_buy:
                 tp1 = today_high; tp2 = max(yest_high, today_high*1.005, HH + box_h*1.0)
                 tp1 = max(tp1, live*1.01); tp2 = max(tp2, live*1.025)
                 sl = pool
                 rr = (tp2-live)/(live-sl) if live!=sl else 0
-                msg = f"💚 {bold(f'BUY {s.replace('_USDT','')} @ {fmt(live)}')}\n🧩 {bold(face)} | 🟢 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
+                msg = f"💚 {bold(f'BUY {sym} @ {fmt(live)}')}\n🧩 {bold(face)} | 🟢 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
             else:
                 tp1 = today_low; tp2 = min(yest_low, today_low*0.995, LL - box_h*1.0)
                 tp1 = min(tp1, live*0.99); tp2 = min(tp2, live*0.975)
                 sl = pool
                 rr = (live-tp2)/(sl-live) if sl!=live else 0
-                msg = f"❤️ {bold(f'SELL {s.replace('_USDT','')} @ {fmt(live)}')}\n🧩 {bold(face)} | 🔴 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
+                msg = f"❤️ {bold(f'SELL {sym} @ {fmt(live)}')}\n🧩 {bold(face)} | 🔴 {bold(bias)}\n🛡️ {bold(f'SL {fmt(sl)}')} | 🎯 {bold(f'TP1 {fmt(tp1)} TP2 {fmt(tp2)}')}\n📈 {bold(f'RR 1:{rr:.1f}')} | 📦 {bold(f'Box {fmt(LL)}-{fmt(HH)}')}"
             ACTIVE[s]={"entry":live,"is_buy":is_buy,"sl":pool,"tp1":tp1,"tp2":tp2,"HH":HH,"LL":LL,"time":time.time(),"face":face}; save_a()
             COOLDOWN["signals"][s]=time.time(); save_c()
             tg(msg)
