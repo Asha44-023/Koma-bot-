@@ -1,4 +1,4 @@
-name: run-bot-v120-FIX
+name: run-bot-v124-COLOR
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -18,10 +18,10 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v120-fix-
+          key: bot-cache-v124-color-
           restore-keys: |
+            bot-cache-v124-color-
             bot-cache-v120-fix-
-            bot-cache-v119-clean-
       - name: Show current ACTIVE trades
         run: |
           echo "=== active.json ==="
@@ -29,7 +29,7 @@ jobs:
           echo ""
           echo "=== cooldown.json ==="
           cat cooldown.json || echo "no cooldown"
-      - name: Run bot V120 FIX 60/40 + REVERSAL
+      - name: Run bot V124 COLOR TP/SL + LiqGrab
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -40,12 +40,12 @@ jobs:
           echo "=== after active.json ==="
           cat active.json || echo "empty"
           echo ""
-          echo "=== logs ==="
-          cat active.json
+          echo "=== cooldown.json ==="
+          cat cooldown.json || echo "empty"
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v120-fix-${{ github.run_id }}
+          key: bot-cache-v124-color-${{ github.run_id }}
