@@ -1,51 +1,42 @@
-name: run-bot-v134-COUNTER-TP
+name: run-bot-v135
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'  # 5min better than 15 for your coins
   workflow_dispatch:
 jobs:
   run:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install requests pytz
-      - uses: actions/cache/restore@v4
+      - name: Restore state
+        uses: actions/cache/restore@v4
         with:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v134-counter-tp-
+          key: bot-state-v135-${{ github.run_number }}
           restore-keys: |
-            bot-cache-v134-counter-tp-
-            bot-cache-v131-green-red-
-            bot-cache-v130-simple-
-            bot-cache-v129-smart-
-      - name: Run bot V134 COUNTER TP/SL
+            bot-state-v135-
+      - name: Run V135
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          ls -la
-          echo "Checking bot file..."
-          if [ -f main_bot.py ]; then
-            echo "Found main_bot.py"
-            python main_bot.py --once
-          elif [ -f bot.py ]; then
-            echo "Found bot.py"
-            python bot.py --once
-          else
-            echo "ERROR: No bot file found!"
-            ls -la *.py
-            exit 1
-          fi
-      - uses: actions/cache/save@v4
+          if [ -f bot_v135.py ]; then python bot_v135.py --once
+          elif [ -f main_bot.py ]; then python main_bot.py --once
+          else python bot.py --once; fi
+          cat active.json || echo "{}" > active.json
+          cat cooldown.json || echo "{}" > cooldown.json
+      - name: Save state
         if: always()
+        uses: actions/cache/save@v4
         with:
           path: |
             active.json
             cooldown.json
-          key: bot-cache-v134-counter-tp-${{ github.run_id }}
+          key: bot-state-v135-${{ github.run_number }}
