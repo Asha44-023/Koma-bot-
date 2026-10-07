@@ -14,7 +14,6 @@ session = requests.Session()
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
-
 def load_json(p,d):
     try:
         with open(p,"r") as f: v=json.load(f)
@@ -52,7 +51,7 @@ def fmt(p):
 def tg(m):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT: print(m); return
     try: session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",data={"chat_id":TELEGRAM_CHAT,"text":m},timeout=10)
-    except Exception as e: print(f"tg fail {e}")
+    except: pass
     print(m)
 
 def kl(symbol,interval):
@@ -65,7 +64,6 @@ def kl(symbol,interval):
         d=r.get("data",r)
         if isinstance(d,dict) and "data" in d: d=d["data"]
         res={"o":[float(x) for x in d["open"]],"h":[float(x) for x in d["high"]],"l":[float(x) for x in d["low"]],"c":[float(x) for x in d["close"]]}
-        # cut forming candle
         for k in res: res[k]=res[k][:-1]
         if len(res["c"])<25: return None
         return res
@@ -80,7 +78,6 @@ def get_live_price(s):
     return None
 
 def atr_from_kl(d,period=14):
-    # simple ATR from kl dict
     h,l,c=d["h"],d["l"],d["c"]
     tr=[]
     for i in range(1,len(c)):
@@ -123,7 +120,7 @@ def get_15m_box(d15):
             lt=sum(1 for i in range(start,end) if abs(l[i]-LL)<rng*0.15)
             score=min(ht,lt)
             if score>=2 and score>best_score:
-                best_score=score; best={"HH":HH,"LL":LL,"rng":rng,"touches":score}
+                best_score=score; best={"HH":HH,"LL":LL,"rng":rng}
     return best
 
 def next_liquidity(d15,HH,LL,direction):
@@ -151,7 +148,6 @@ def valid_signal_data(d):
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
-    # manage open
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
@@ -160,17 +156,6 @@ def scan():
         tp1,tp2,tp3=float(data["tp1"]),float(data["tp2"]),float(data["tp3"])
         if is_buy and not (sl<entry<tp1<tp2<tp3): ACTIVE.pop(sym,None); save_a(); continue
         if not is_buy and not (tp3<tp2<tp1<entry<sl): ACTIVE.pop(sym,None); save_a(); continue
-        try:
-            d4=kl(sym,"Hour4"); d1=kl(sym,"Day1")
-            if d4 and d1:
-                dir4h=get_4h_dir(d4); ship,_,_,_=daily_ship(d1)
-                if is_buy and dir4h=="BEARISH" and ship in ("DESC_TRI","RISE_WEDGE","RECT_DIST"):
-                    pnl=(p-entry)/entry*100; COOLDOWN["daily_pnl"]+=pnl; save_c()
-                    tg(f"⚠️ REVERSAL SELL {sym.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)}"); ACTIVE.pop(sym,None); save_a(); continue
-                if not is_buy and dir4h=="BULLISH" and ship in ("ASC_TRI","FALL_WEDGE","RECT_ACC"):
-                    pnl=(entry-p)/entry*100; COOLDOWN["daily_pnl"]+=pnl; save_c()
-                    tg(f"⚠️ REVERSAL BUY {sym.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)}"); ACTIVE.pop(sym,None); save_a(); continue
-        except: pass
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
             COOLDOWN["daily_pnl"]+=pnl; save_c()
@@ -181,14 +166,14 @@ def scan():
             tg(f"💚 TP1 {sym.replace('_USDT','')} @ {fmt(p)} -> SL BE")
         if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)):
             data["tp1_hit"]=True; data["tp2_hit"]=True; data["sl"]=tp1; changed=True
-            tg(f"💚💚 TP2 {sym.replace('_USDT','')} +{((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100):.2f}% -> TRAIL SL {fmt(tp1)}")
+            tg(f"💚💚 TP2 {sym.replace('_USDT','')} +{((p-entry)/entry*100) if is_buy else ((entry-p)/entry*100):.2f}% -> TRAIL")
         if changed: save_a()
         if (is_buy and p>=tp3) or (not is_buy and p<=tp3):
             profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
             COOLDOWN["daily_pnl"]+=profit; save_c()
-            tg(f"💚💚💚 TP3 {sym.replace('_USDT','')} +{profit:.2f}% CLOSED @ {fmt(p)}"); ACTIVE.pop(sym,None); save_a()
-    print(f"--- SCAN V135 {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
-    if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: print(f"PAUSED new entries"); return
+            tg(f"💚💚💚 TP3 {sym.replace('_USDT','')} +{profit:.2f}% CLOSED"); ACTIVE.pop(sym,None); save_a()
+    print(f"--- SCAN V135.1 {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% ---")
+    if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
     if len(ACTIVE)>=MAX_ACTIVE: return
     cands=[]
     for sym in SYMBOLS:
@@ -201,8 +186,10 @@ def scan():
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: continue
             live=get_live_price(sym) or d15["c"][-1]
             atr=atr_from_kl(d15,14)
-            buf=0.12*atr
-            # V135: close confirmation + ATR buffer (no wick fake)
+            # FIX: reject if live too far from box (selling bottom)
+            if min(abs(live-box["HH"]), abs(live-box["LL"])) / live > 0.04:
+                continue
+            buf=0.15*atr
             close=d15["c"][-1]; open_=d15["o"][-1]
             broke_up = close > box["HH"] + buf and close > open_
             broke_down = close < box["LL"] - buf and close < open_
@@ -219,24 +206,27 @@ def scan():
             if not direction: continue
             is_buy=direction=="BUY"; HH,LL=box["HH"],box["LL"]
             liq1,liq2=next_liquidity(d15,HH,LL,direction)
+            # FIXED SL LOGIC
             if is_buy:
-                sl=max(LL*0.992, live*0.988, close - buf*1.5)
+                sl = min(LL*0.992, live*(0.992 if is_counter else 0.988), close - buf*1.5)
+                min_sl = live * (0.993 if is_counter else 0.99)
+                if sl > min_sl: sl = min_sl
                 tp1=max(liq1, live*1.01); tp2=max(liq2, live*1.025); tp3=max(tp2*1.015, live*1.04)
                 if not (sl<live<tp1<tp2<tp3): continue
                 rr=(tp2-live)/(live-sl) if live!=sl else 0
-                if rr<1.2: continue
-                tag="🔄 COUNTER BUY" if is_counter else "💚 BUY"
             else:
-                sl=min(HH*1.008, live*1.012, close + buf*1.5)
+                sl = max(HH*1.008, live*(1.008 if is_counter else 1.012), close + buf*1.5)
+                max_sl = live * (1.007 if is_counter else 1.01)
+                if sl < max_sl: sl = max_sl
                 tp1=min(liq1, live*0.99); tp2=min(liq2, live*0.975); tp3=min(tp2*0.985, live*0.96)
                 if not (tp3<tp2<tp1<live<sl): continue
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
-                if rr<1.2: continue
-                tag="🔄 COUNTER SELL" if is_counter else "❤️ SELL"
+            if rr<1.2: continue
+            tag="🔄 COUNTER BUY" if is_buy and is_counter else "🔄 COUNTER SELL" if not is_buy and is_counter else "💚 BUY" if is_buy else "❤️ SELL"
             stop_pct=(sl/live-1)*100
             msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\nShip:{ship} 4H:{dir4h} Box:{fmt(LL)}-{fmt(HH)} ATR:{fmt(atr)}\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)}"
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,HH,LL,ship))
-        except Exception as e: print(f"{sym} err {e}"); continue
+        except Exception as e: print(f"{sym} err {e}")
     cands.sort(key=lambda x: x[0], reverse=True)
     print(f"FOUND {len(cands)} -> TOP 3")
     for it in cands[:3]:
