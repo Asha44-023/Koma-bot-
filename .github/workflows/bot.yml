@@ -1,12 +1,15 @@
-name: run-bot-v135
+name: run-bot-v136
 on:
   schedule:
-    - cron: '*/5 * * * *'  # 5min better than 15 for your coins
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency: 
+      group: bot-state
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,19 +22,18 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v135-${{ github.run_number }}
+          key: bot-state-v136-fixed
           restore-keys: |
+            bot-state-v136-fixed
             bot-state-v135-
-      - name: Run V135
+      - name: Run V136
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          if [ -f bot_v135.py ]; then python bot_v135.py --once
-          elif [ -f main_bot.py ]; then python main_bot.py --once
-          else python bot.py --once; fi
-          cat active.json || echo "{}" > active.json
-          cat cooldown.json || echo "{}" > cooldown.json
+          python bot.py --once
+          echo "--- ACTIVE ---"; cat active.json || echo "{}" > active.json
+          echo "--- COOLDOWN ---"; cat cooldown.json || echo '{"signals":{},"daily_pnl":0.0}' > cooldown.json
       - name: Save state
         if: always()
         uses: actions/cache/save@v4
@@ -39,4 +41,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v135-${{ github.run_number }}
+          key: bot-state-v136-fixed
