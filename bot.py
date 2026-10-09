@@ -3,7 +3,7 @@ from datetime import datetime
 import pytz
 
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","SUI_USDT","PHA_USDT","ZEC_USDT","PEPE_USDT","VELVET_USDT"]
+SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","SUI_USDT","PHA_USDT","ZEC_USDT","PEPE_USDT","VELVET_USDT","MUBARAK_USDT"]
 
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
@@ -12,10 +12,10 @@ ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 900
 session = requests.Session()
 
-# OPTION B SETTINGS
-ALLOW_COUNTER_WEDGE_ONLY = True
-COUNTER_MIN_RR = 1.8
-TREND_MIN_RR = 1.2
+# V137 BALANCED D->H1 - from your circled image
+ALLOW_COUNTER_WEDGE_ONLY = False # allow all now for more signals
+COUNTER_MIN_RR = 1.1
+TREND_MIN_RR = 0.9
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -60,7 +60,7 @@ def tg(m):
     print(m)
 
 def kl(symbol,interval):
-    sec_map={"Min5":300,"Min15":900,"Hour4":14400,"Day1":86400}
+    sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400}
     sec=sec_map.get(interval,300)
     end=int(time.time()); start=end-sec*350
     url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
@@ -110,28 +110,21 @@ def get_4h_dir(d4):
     if s10<s20*0.998: return "BEARISH"
     return "NEUTRAL"
 
-def get_15m_box(d15):
-    h=d15["h"][-100:]; l=d15["l"][-100:]
-    if len(h)<40: return None
-    best=None; best_score=0; full=max(h)-min(l)
-    if full<=0: return None
-    for wid in range(10,40):
-        for off in range(1,50):
-            end=len(h)-off; start=end-wid
-            if start<0: continue
-            HH=max(h[start:end]); LL=min(l[start:end]); rng=HH-LL
-            if rng<=0 or rng>full*0.8 or rng<full*0.02: continue
-            ht=sum(1 for i in range(start,end) if abs(h[i]-HH)<rng*0.2)
-            lt=sum(1 for i in range(start,end) if abs(l[i]-LL)<rng*0.2)
-            score=min(ht,lt)
-            if score>=1 and score>best_score:
-                best_score=score; best={"HH":HH,"LL":LL,"rng":rng}
-    return best
+def get_daily_box(d1):
+    # D = key level as you circled
+    h=d1["h"][-5:]; l=d1["l"][-5:]
+    if len(h)<5: return None
+    HH=max(h); LL=min(l); rng=HH-LL
+    if rng<=0: return None
+    mid=(HH+LL)/2
+    if rng/mid > 0.25: return None # too big daily box skip
+    return {"HH":HH,"LL":LL,"rng":rng}
 
-def next_liquidity(d15,HH,LL,direction):
-    h=d15["h"][-80:]; l=d15["l"][-80:]
-    liq_up=[h[i] for i in range(2,len(h)-2) if h[i]>h[i-1] and h[i]>h[i+1] and h[i]>HH]
-    liq_down=[l[i] for i in range(2,len(l)-2) if l[i]<l[i-1] and l[i]<l[i+1] and l[i]<LL]
+def next_liquidity(d1,HH,LL,direction):
+    # use daily highs for TP target
+    h=d1["h"][-20:]; l=d1["l"][-20:]
+    liq_up=[x for x in h if x>HH]
+    liq_down=[x for x in l if x<LL]
     if direction=="BUY":
         lv=sorted(set(liq_up))
         if len(lv)>=2: return lv[0],lv[1]
@@ -177,7 +170,7 @@ def scan():
             profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"💚💚💚 TP3 {sym.replace('_USDT','')} +{profit:.2f}% CLOSED"); ACTIVE.pop(sym,None); save_a()
-    print(f"--- SCAN V136-OPT-B {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
+    print(f"--- SCAN V137-D->H1 {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: print("daily limit hit"); return
     if len(ACTIVE)>=MAX_ACTIVE: print("max active hit"); return
     cands=[]
@@ -185,19 +178,20 @@ def scan():
     for sym in SYMBOLS:
         try:
             if sym in ACTIVE: skipped[sym]="active"; continue
-            d15=kl(sym,"Min15"); time.sleep(0.25)
-            d4=kl(sym,"Hour4"); time.sleep(0.25)
             d1=kl(sym,"Day1"); time.sleep(0.25)
-            if not d15 or not d4 or not d1: skipped[sym]="kl_fail"; continue
-            ship,_,_,_=daily_ship(d1); dir4h=get_4h_dir(d4); box=get_15m_box(d15)
-            if not box: skipped[sym]=f"no_box ship={ship}"; continue
+            d4=kl(sym,"Hour4"); time.sleep(0.25)
+            h1=kl(sym,"Min60"); time.sleep(0.25) # LTF entry
+            if not d1 or not d4 or not h1: skipped[sym]="kl_fail"; continue
+            ship,_,_,_=daily_ship(d1); dir4h=get_4h_dir(d4); box=get_daily_box(d1)
+            if not box: skipped[sym]=f"no_daily_box ship={ship}"; continue
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
-            live=get_live_price(sym) or d15["c"][-1]
-            atr=atr_from_kl(d15,14)
-            if min(abs(live-box["HH"]), abs(live-box["LL"])) / live > 0.05:
-                skipped[sym]="far_from_box"; continue
-            buf=0.15*atr
-            close=d15["c"][-1]; open_=d15["o"][-1]
+            live=get_live_price(sym) or h1["c"][-1]
+            atr=atr_from_kl(h1,14)
+            # D->H1 distance check looser 12%
+            if min(abs(live-box["HH"]), abs(live-box["LL"])) / live > 0.12:
+                skipped[sym]="far_from_daily_box"; continue
+            buf=0.08*atr # balanced
+            close=h1["c"][-1]; open_=h1["o"][-1]
             broke_up = close > box["HH"] + buf and close > open_
             broke_down = close < box["LL"] - buf and close < open_
             direction=None; is_counter=False
@@ -210,25 +204,20 @@ def scan():
             elif ship in ("SYM_TRI","RECT"):
                 if broke_up: direction="BUY"
                 elif broke_down: direction="SELL"
-            if not direction: skipped[sym]=f"no_break ship={ship}"; continue
+            if not direction: skipped[sym]=f"no_break_H1 ship={ship}"; continue
             is_buy=direction=="BUY"; HH,LL=box["HH"],box["LL"]
-            liq1,liq2=next_liquidity(d15,HH,LL,direction)
+            liq1,liq2=next_liquidity(d1,HH,LL,direction)
             if is_buy:
-                sl = min(LL*0.992, live*(0.992 if is_counter else 0.988), close - buf*1.5)
-                min_sl = live * (0.993 if is_counter else 0.99)
-                if sl > min_sl: sl = min_sl
-                tp1=max(liq1, live*1.01); tp2=max(liq2, live*1.025); tp3=max(tp2*1.015, live*1.04)
+                sl = min(LL*0.992, live*0.992, close - buf*1.2)
+                tp1=max(liq1, live*1.015); tp2=max(liq2, live*1.035); tp3=max(tp2*1.015, live*1.06)
                 if not (sl<live<tp1<tp2<tp3): skipped[sym]="bad_levels"; continue
                 rr=(tp2-live)/(live-sl) if live!=sl else 0
             else:
-                sl = max(HH*1.008, live*(1.008 if is_counter else 1.012), close + buf*1.5)
-                max_sl = live * (1.007 if is_counter else 1.01)
-                if sl < max_sl: sl = max_sl
-                tp1=min(liq1, live*0.99); tp2=min(liq2, live*0.975); tp3=min(tp2*0.985, live*0.96)
+                sl = max(HH*1.008, live*1.008, close + buf*1.2)
+                tp1=min(liq1, live*0.985); tp2=min(liq2, live*0.965); tp3=min(tp2*0.985, live*0.94)
                 if not (tp3<tp2<tp1<live<sl): skipped[sym]="bad_levels"; continue
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
 
-            # OPTION B FILTER
             if is_counter:
                 if ALLOW_COUNTER_WEDGE_ONLY and ship not in ("FALL_WEDGE","RISE_WEDGE"):
                     skipped[sym]=f"counter_blocked ship={ship}"; continue
@@ -240,7 +229,7 @@ def scan():
 
             tag="🔄 COUNTER BUY" if is_buy and is_counter else "🔄 COUNTER SELL" if not is_buy and is_counter else "💚 BUY" if is_buy else "❤️ SELL"
             stop_pct=(sl/live-1)*100
-            msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\nShip:{ship} 4H:{dir4h} Box:{fmt(LL)}-{fmt(HH)} ATR:{fmt(atr)}\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)}"
+            msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\nShip:{ship} 4H:{dir4h} D-Box:{fmt(LL)}-{fmt(HH)} H1-ATR:{fmt(atr)}\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR:{rr:.2f} [D->H1]"
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,HH,LL,ship))
         except Exception as e:
             skipped[sym]=f"err {e}"
@@ -258,4 +247,4 @@ else:
     while True:
         try: scan()
         except Exception as e: print(e)
-        time.sleep(15)
+        time.sleep(300) # check every 5m but H1 break only once per hour
