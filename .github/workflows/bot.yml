@@ -1,7 +1,7 @@
-name: run-bot-v136
+name: run-bot-v137-D-H1
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '2 * * * *'  # run at 2min past every hour = after H1 close
   workflow_dispatch:
 jobs:
   run:
@@ -22,11 +22,11 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v136-fixed
+          key: bot-state-v137-D-H1
           restore-keys: |
+            bot-state-v137-D-H1
             bot-state-v136-fixed
-            bot-state-v135-
-      - name: Run V136
+      - name: Run V137 D->H1
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -41,4 +41,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v136-fixed
+          key: bot-state-v137-D-H1
