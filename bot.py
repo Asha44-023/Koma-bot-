@@ -108,8 +108,20 @@ def get_daily_box(d1):
     HH=max(h); LL=min(l); rng=HH-LL
     if rng<=0: return None
     mid=(HH+LL)/2
-    if rng/mid > 0.45: return None
+    if rng/mid > 0.45: return None # 30-40% allowed
     return {"HH":HH,"LL":LL,"rng":rng}
+
+# --- V138 MASTERY FILTER FROM YOUR IMAGE ---
+def daily_bias(d1):
+    o,c,h,l = d1["o"][-1], d1["c"][-1], d1["h"][-1], d1["l"][-1]
+    body = abs(c-o)
+    if body == 0: return None
+    upper = h - max(o,c)
+    lower = min(o,c) - l
+    total_wick = upper + lower
+    if total_wick > body * 0.7: # big wick = no expansion
+        return None
+    return "BUY" if c > o else "SELL"
 
 def next_liquidity(d1,HH,LL,direction):
     h=d1["h"][-20:]; l=d1["l"][-20:]
@@ -159,7 +171,7 @@ def scan():
             profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"💚💚💚 TP3 {sym.replace('_USDT','')} +{profit:.2f}% CLOSED"); ACTIVE.pop(sym,None); save_a()
-    print(f"--- SCAN V137-D->H1 45% {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
+    print(f"--- SCAN V138-MASTERY D->H1 {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: print("daily limit hit"); return
     if len(ACTIVE)>=MAX_ACTIVE: print("max active hit"); return
     cands=[]; skipped={}
@@ -170,6 +182,11 @@ def scan():
             if not d1 or not d4 or not h1: skipped[sym]="kl_fail"; continue
             ship,_,_,_=daily_ship(d1); dir4h=get_4h_dir(d4); box=get_daily_box(d1)
             if not box: skipped[sym]=f"no_daily_box ship={ship}"; continue
+            # Mastery filter
+            bias = daily_bias(d1)
+            if bias is None:
+                skipped[sym]=f"big_wick_daily ship={ship}"
+                continue
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
             live=get_live_price(sym) or h1["c"][-1]; atr=atr_from_kl(h1,14)
             if min(abs(live-box["HH"]), abs(live-box["LL"])) / live > 0.12: skipped[sym]="far_from_daily_box"; continue
@@ -187,6 +204,10 @@ def scan():
                 if broke_up: direction="BUY"
                 elif broke_down: direction="SELL"
             if not direction: skipped[sym]=f"no_break_H1 ship={ship}"; continue
+            # Align with daily candle - don't go against daily
+            if direction!= bias:
+                skipped[sym]=f"against_daily daily={bias} sig={direction} ship={ship}"
+                continue
             is_buy=direction=="BUY"; HH,LL=box["HH"],box["LL"]
             liq1,liq2=next_liquidity(d1,HH,LL,direction)
             if is_buy:
@@ -206,7 +227,7 @@ def scan():
                 if rr < TREND_MIN_RR: skipped[sym]=f"trend_rr_low {rr:.2f}"; continue
             tag="🔄 COUNTER BUY" if is_buy and is_counter else "🔄 COUNTER SELL" if not is_buy and is_counter else "💚 BUY" if is_buy else "❤️ SELL"
             stop_pct=(sl/live-1)*100
-            msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\nShip:{ship} 4H:{dir4h} D-Box:{fmt(LL)}-{fmt(HH)} H1-ATR:{fmt(atr)}\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR:{rr:.2f} [D->H1 45%]"
+            msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\nDaily:{bias} small-wick Ship:{ship} 4H:{dir4h} D-Box:{fmt(LL)}-{fmt(HH)}\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR:{rr:.2f} [V138]"
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,HH,LL,ship))
         except Exception as e:
             skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
@@ -223,4 +244,4 @@ else:
     while True:
         try: scan()
         except Exception as e: print(e)
-        time.sleep(300)
+        time.sleep(60)
