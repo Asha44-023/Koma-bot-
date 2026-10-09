@@ -1,14 +1,16 @@
-name: run-bot-v137-D-H1
+name: run-bot-v138-MASTERY
+
 on:
   schedule:
     - cron: '2 * * * *'  # run at 2min past every hour = after H1 close
   workflow_dispatch:
+
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency: 
-      group: bot-state
+      group: bot-state-v138
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -22,18 +24,19 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v137-D-H1
+          key: bot-state-v138-MASTERY
           restore-keys: |
+            bot-state-v138-MASTERY
             bot-state-v137-D-H1
             bot-state-v136-fixed
-      - name: Run V137 D->H1
+      - name: Run V138 MASTERY D->H1
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python bot.py --once
           echo "--- ACTIVE ---"; cat active.json || echo "{}" > active.json
-          echo "--- COOLDOWN ---"; cat cooldown.json || echo '{"signals":{},"daily_pnl":0.0}' > cooldown.json
+          echo "--- COOLDOWN ---"; cat cooldown.json || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-09"}' > cooldown.json
       - name: Save state
         if: always()
         uses: actions/cache/save@v4
@@ -41,4 +44,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v137-D-H1
+          key: bot-state-v138-MASTERY
