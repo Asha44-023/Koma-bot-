@@ -1,12 +1,12 @@
 name: run-bot-v140-4H-1H-15M-5M
 on:
   schedule:
-    - cron: '3 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     concurrency:
       group: bot-state-v140-CLEAN
       cancel-in-progress: false
@@ -22,15 +22,15 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-CLEAN
+          key: bot-state-v140-CLEAN-${{ github.run_id }}
+          restore-keys: |
+            bot-state-v140-CLEAN-
       - name: Ensure clean state
         run: |
-          echo '{}' > active.json.tmp
-          echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-10"}' > cooldown.json.tmp
-          [ -f active.json ] || mv active.json.tmp active.json
-          [ -f cooldown.json ] || mv cooldown.json.tmp cooldown.json
-          rm -f active.json.tmp cooldown.json.tmp
+          [ -f active.json ] || echo '{}' > active.json
+          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-10"}' > cooldown.json
           echo "active: $(cat active.json)"
+          echo "cooldown: $(cat cooldown.json)"
       - name: Run V140
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -43,4 +43,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-CLEAN
+          key: bot-state-v140-CLEAN-${{ github.run_id }}
