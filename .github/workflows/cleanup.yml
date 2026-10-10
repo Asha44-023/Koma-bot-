@@ -9,7 +9,9 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 });
-            for (const r of runs.slice(100)) {
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 });
+            console.log(`Found ${runs.length} runs`);
+            for (const r of runs.slice(150)) {
+              console.log(`Deleting ${r.id}`);
               await github.rest.actions.deleteWorkflowRun({ owner: context.repo.owner, repo: context.repo.repo, run_id: r.id });
             }
