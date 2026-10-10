@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
-      group: bot-state-v140
+      group: bot-state-v140-CLEAN
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +22,15 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-4H-1H-15M-5M
-          restore-keys: |
-            bot-state-v140-4H-1H-15M-5M
-            bot-state-v138-MASTERY
+          key: bot-state-v140-CLEAN
+      - name: Ensure clean state
+        run: |
+          echo '{}' > active.json.tmp
+          echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-10"}' > cooldown.json.tmp
+          [ -f active.json ] || mv active.json.tmp active.json
+          [ -f cooldown.json ] || mv cooldown.json.tmp cooldown.json
+          rm -f active.json.tmp cooldown.json.tmp
+          echo "active: $(cat active.json)"
       - name: Run V140
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -38,4 +43,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-4H-1H-15M-5M
+          key: bot-state-v140-CLEAN
