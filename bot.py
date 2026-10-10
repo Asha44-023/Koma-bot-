@@ -15,6 +15,7 @@ session = requests.Session()
 ALLOW_COUNTER_WEDGE_ONLY = False
 COUNTER_MIN_RR = 1.1
 TREND_MIN_RR = 0.9
+TAG = "BOT-ENTRY-V140-4H-1H-15M-5M"
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -57,7 +58,7 @@ def tg(m):
 
 def kl(symbol,interval):
     sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400}
-    sec=sec_map.get(interval,300); end=int(time.time()); start=end-sec*350
+    sec=sec_map.get(interval,300); end=int(time.time()); start=end-sec*400
     url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
     try:
         r=session.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=10).json()
@@ -96,32 +97,38 @@ def daily_ship(d1):
     if h1<h0-flat and l1<l0-flat: return "FALL_WEDGE","UP",HH,LL
     return "RECT","BOTH",HH,LL
 
-def get_4h_dir(d4):
-    c=d4["c"][-20:]; s10=sum(c[-10:])/10; s20=sum(c[-20:])/20
-    if s10>s20*1.002: return "BULLISH"
-    if s10<s20*0.998: return "BEARISH"
-    return "NEUTRAL"
-
-def get_daily_box(d1):
-    h=d1["h"][-5:]; l=d1["l"][-5:]
-    if len(h)<5: return None
+def get_4h_box(d4):
+    h=d4["h"][-6:]; l=d4["l"][-6:]
+    if len(h)<6: return None
     HH=max(h); LL=min(l); rng=HH-LL
     if rng<=0: return None
     mid=(HH+LL)/2
-    if rng/mid > 0.45: return None # 30-40% allowed
-    return {"HH":HH,"LL":LL,"rng":rng}
+    if rng/mid > 0.45: return None
+    return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
 
-# --- V138 MASTERY FILTER FROM YOUR IMAGE ---
-def daily_bias(d1):
-    o,c,h,l = d1["o"][-1], d1["c"][-1], d1["h"][-1], d1["l"][-1]
-    body = abs(c-o)
-    if body == 0: return None
-    upper = h - max(o,c)
-    lower = min(o,c) - l
-    total_wick = upper + lower
-    if total_wick > body * 0.7: # big wick = no expansion
-        return None
-    return "BUY" if c > o else "SELL"
+def get_4h_dir(d4):
+    o,c=d4["o"][-1], d4["c"][-1]
+    s10=sum(d4["c"][-10:])/10; s20=sum(d4["c"][-20:])/20
+    if c>o and s10>s20*1.001: return "BUY"
+    if c<o and s10<s20*0.999: return "SELL"
+    return "BUY" if c>o else "SELL"
+
+def check_pullback_15m(d15, box, direction):
+    if not d15: return False
+    live_c = d15["c"][-1]
+    mid_low = box["LL"] + box["rng"]*0.35
+    mid_high = box["LL"] + box["rng"]*0.65
+    in_mid = mid_low <= live_c <= mid_high
+    if direction=="BUY":
+        return in_mid and d15["c"][-1] > d15["o"][-1]
+    else:
+        return in_mid and d15["c"][-1] < d15["o"][-1]
+
+def check_entry_5m(d5, direction):
+    if not d5: return False
+    o,c = d5["o"][-1], d5["c"][-1]
+    if direction=="BUY": return c>o and (c-o)/o > 0.0002
+    else: return c<o and (o-c)/o > 0.0002
 
 def next_liquidity(d1,HH,LL,direction):
     h=d1["h"][-20:]; l=d1["l"][-20:]
@@ -171,63 +178,61 @@ def scan():
             profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
             COOLDOWN["daily_pnl"]+=profit; save_c()
             tg(f"💚💚💚 TP3 {sym.replace('_USDT','')} +{profit:.2f}% CLOSED"); ACTIVE.pop(sym,None); save_a()
-    print(f"--- SCAN V138-MASTERY D->H1 {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
+    print(f"--- SCAN {TAG} {get_time()} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: print("daily limit hit"); return
     if len(ACTIVE)>=MAX_ACTIVE: print("max active hit"); return
     cands=[]; skipped={}
     for sym in SYMBOLS:
         try:
             if sym in ACTIVE: skipped[sym]="active"; continue
-            d1=kl(sym,"Day1"); time.sleep(0.25); d4=kl(sym,"Hour4"); time.sleep(0.25); h1=kl(sym,"Min60"); time.sleep(0.25)
-            if not d1 or not d4 or not h1: skipped[sym]="kl_fail"; continue
-            ship,_,_,_=daily_ship(d1); dir4h=get_4h_dir(d4); box=get_daily_box(d1)
-            if not box: skipped[sym]=f"no_daily_box ship={ship}"; continue
-            # Mastery filter
-            bias = daily_bias(d1)
-            if bias is None:
-                skipped[sym]=f"big_wick_daily ship={ship}"
-                continue
-            if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
-            live=get_live_price(sym) or h1["c"][-1]; atr=atr_from_kl(h1,14)
-            if min(abs(live-box["HH"]), abs(live-box["LL"])) / live > 0.12: skipped[sym]="far_from_daily_box"; continue
-            buf=0.08*atr; close=h1["c"][-1]; open_=h1["o"][-1]
-            broke_up = close > box["HH"] + buf and close > open_
-            broke_down = close < box["LL"] - buf and close < open_
-            direction=None; is_counter=False
-            if ship=="RISE_WEDGE" and broke_down: direction,is_counter="SELL",True
-            elif ship=="FALL_WEDGE" and broke_up: direction,is_counter="BUY",True
-            elif ship=="RECT_DIST" and broke_down: direction="SELL"; is_counter=dir4h=="BULLISH"
-            elif ship=="RECT_ACC" and broke_up: direction="BUY"; is_counter=dir4h=="BEARISH"
-            elif ship=="ASC_TRI" and broke_up: direction="BUY"
-            elif ship=="DESC_TRI" and broke_down: direction="SELL"
-            elif ship in ("SYM_TRI","RECT"):
+            d1=kl(sym,"Day1"); time.sleep(0.15)
+            d4=kl(sym,"Hour4"); time.sleep(0.15)
+            h1=kl(sym,"Min60"); time.sleep(0.15)
+            m15=kl(sym,"Min15"); time.sleep(0.15)
+            m5=kl(sym,"Min5"); time.sleep(0.15)
+            if not d1 or not d4 or not h1 or not m15 or not m5: skipped[sym]="kl_fail"; continue
+            dir4h = get_4h_dir(d4)
+            box4h = get_4h_box(d4)
+            if not box4h: skipped[sym]=f"no_4h_box"; continue
+            live=get_live_price(sym) or h1["c"][-1]
+            atr=atr_from_kl(h1,14)
+            buf=0.5*atr
+            close1h=h1["c"][-1]; open1h=h1["o"][-1]
+            broke_up = close1h > box4h["HH"] + buf*0.5 and close1h > open1h
+            broke_down = close1h < box4h["LL"] - buf*0.5 and close1h < open1h
+            direction=None
+            if broke_up and dir4h=="BUY": direction="BUY"
+            elif broke_down and dir4h=="SELL": direction="SELL"
+            else:
                 if broke_up: direction="BUY"
                 elif broke_down: direction="SELL"
-            if not direction: skipped[sym]=f"no_break_H1 ship={ship}"; continue
-            # Align with daily candle - don't go against daily
-            if direction!= bias:
-                skipped[sym]=f"against_daily daily={bias} sig={direction} ship={ship}"
+            if not direction: skipped[sym]=f"no_break_1H 4H={dir4h}"; continue
+            if not check_pullback_15m(m15, box4h, direction):
+                skipped[sym]=f"no_pullback_15M dir={direction}"
                 continue
-            is_buy=direction=="BUY"; HH,LL=box["HH"],box["LL"]
+            if not check_entry_5m(m5, direction):
+                skipped[sym]=f"no_entry_5M dir={direction}"
+                continue
+            ship,_,_,_=daily_ship(d1)
+            is_buy=direction=="BUY"; HH,LL=box4h["HH"],box4h["LL"]
             liq1,liq2=next_liquidity(d1,HH,LL,direction)
             if is_buy:
-                sl = min(LL*0.992, live*0.992, close - buf*1.2)
-                tp1=max(liq1, live*1.015); tp2=max(liq2, live*1.035); tp3=max(tp2*1.015, live*1.06)
+                sl = min(LL*0.993, live*0.993, close1h - buf*1.1)
+                tp1=max(liq1, live*1.012); tp2=max(liq2, live*1.03); tp3=max(tp2*1.012, live*1.055)
                 if not (sl<live<tp1<tp2<tp3): skipped[sym]="bad_levels"; continue
                 rr=(tp2-live)/(live-sl) if live!=sl else 0
             else:
-                sl = max(HH*1.008, live*1.008, close + buf*1.2)
-                tp1=min(liq1, live*0.985); tp2=min(liq2, live*0.965); tp3=min(tp2*0.985, live*0.94)
+                sl = max(HH*1.007, live*1.007, close1h + buf*1.1)
+                tp1=min(liq1, live*0.988); tp2=min(liq2, live*0.97); tp3=min(tp2*0.988, live*0.945)
                 if not (tp3<tp2<tp1<live<sl): skipped[sym]="bad_levels"; continue
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
-            if is_counter:
-                if ALLOW_COUNTER_WEDGE_ONLY and ship not in ("FALL_WEDGE","RISE_WEDGE"): skipped[sym]=f"counter_blocked ship={ship}"; continue
-                if rr < COUNTER_MIN_RR: skipped[sym]=f"counter_rr_low {rr:.2f}"; continue
-            else:
-                if rr < TREND_MIN_RR: skipped[sym]=f"trend_rr_low {rr:.2f}"; continue
+            is_counter = (direction!=dir4h)
+            if is_counter and rr < COUNTER_MIN_RR: skipped[sym]=f"counter_rr_low {rr:.2f}"; continue
+            if not is_counter and rr < TREND_MIN_RR: skipped[sym]=f"trend_rr_low {rr:.2f}"; continue
+            if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
             tag="🔄 COUNTER BUY" if is_buy and is_counter else "🔄 COUNTER SELL" if not is_buy and is_counter else "💚 BUY" if is_buy else "❤️ SELL"
             stop_pct=(sl/live-1)*100
-            msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\nDaily:{bias} small-wick Ship:{ship} 4H:{dir4h} D-Box:{fmt(LL)}-{fmt(HH)}\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR:{rr:.2f} [V138]"
+            msg=f"{tag} {sym.replace('_USDT','')} @ {fmt(live)}\n4H:{dir4h} Ship:{ship} Box:{fmt(LL)}-{fmt(HH)} Mid:{fmt(box4h['mid'])}\n15M pullback OK + 5M entry OK\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR:{rr:.2f} [{TAG}]"
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,HH,LL,ship))
         except Exception as e:
             skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
