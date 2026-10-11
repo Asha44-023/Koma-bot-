@@ -1,46 +1,24 @@
-name: run-bot-v143-HYBRID-RUNNER
+name: Run Bot V144 Clean Eyes
+
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
-  repository_dispatch:
-    types: [cron-trigger]
+
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    concurrency:
-      group: bot-state-v143-HYBRID-RUNNER
-      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
-          ref: main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests pytz
-      - name: Restore state
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            active.json
-            cooldown.json
-          key: bot-state-v143-HYBRID-RUNNER
-      - name: Ensure clean state
-        run: |
-          [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-11"}' > cooldown.json
-      - name: Run V143
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          python-version: '3.10'
+      - name: Install deps
+        run: pip install requests pytz
+      - name: Run scan once
         run: python bot.py --once
-      - name: Save state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            active.json
-            cooldown.json
-          key: bot-state-v143-HYBRID-RUNNER
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
