@@ -1,15 +1,15 @@
 name: run-bot-v143-HYBRID-RUNNER
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     concurrency:
       group: bot-state-v143-HYBRID-RUNNER
-      cancel-in-progress: false
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,8 +27,6 @@ jobs:
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-11"}' > cooldown.json
-          echo "active: $(cat active.json)"
-          echo "cooldown: $(cat cooldown.json)"
       - name: Run V143
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
