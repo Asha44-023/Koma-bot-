@@ -1,13 +1,21 @@
 name: cleanup-old-runs
 on:
   workflow_dispatch:
+permissions:
+  actions: write
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: Asha44-023/Koma-bot
-          retain_days: 0
-          keep_minimum_runs: 0
+      - name: Delete all workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Deleting all runs for Asha44-023/Koma-bot..."
+          # Get all runs and delete them
+          gh api repos/Asha44-023/Koma-bot/actions/runs --paginate --jq '.workflow_runs[].id' | while read run_id; do
+            echo "Deleting run $run_id"
+            gh api repos/Asha44-023/Koma-bot/actions/runs/$run_id -X DELETE || true
+            sleep 0.2
+          done
+          echo "Done - all runs deleted"
