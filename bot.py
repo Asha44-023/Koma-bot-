@@ -136,10 +136,12 @@ def check_pullback_15m(d15, box, direction):
     else:
         return in_mid and d15["c"][-1] < d15["o"][-1]
 def check_entry_5m(d5, direction):
-    if not d5: return False
+    if not d5: return True
     o,c = d5["o"][-1], d5["c"][-1]
-    if direction=="BUY": return c>o and (c-o)/o > 0.0001
-    else: return c<o and (o-c)/o > 0.0001
+    if direction=="BUY":
+        return (c > o) or (c/o > 0.997)
+    else:
+        return (c < o) or (c/o < 1.003)
 def next_liquidity(d1,HH,LL,direction):
     h=d1["h"][-20:]; l=d1["l"][-20:]
     liq_up=[x for x in h if x>HH]; liq_down=[x for x in l if x<LL]
