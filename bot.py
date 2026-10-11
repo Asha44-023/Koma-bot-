@@ -8,8 +8,8 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 7200
 session = requests.Session()
-COUNTER_MIN_RR = 1.1
-TREND_MIN_RR = 0.9
+COUNTER_MIN_RR = 0.7
+TREND_MIN_RR = 0.5
 TAG = "BOT-ENTRY-V143-HYBRID-RUNNER"
 TP_CONFIG = {
     "PUMP": {"TP1": 1.0, "TP2": 2.8, "TP3": 6.0, "RUNNER_TARGET": 20.0, "CLOSE": [40,30,15,15]},
@@ -124,7 +124,6 @@ def get_4h_dir(d4):
 def check_pullback_15m(d15, box, direction):
     if not d15: return False
     live_c = d15["c"][-1]
-    # If already above box, allow entry without pullback to mid
     if direction=="BUY" and live_c > box["HH"]:
         return True
     if direction=="SELL" and live_c < box["LL"]:
@@ -216,7 +215,6 @@ def scan():
             atr=atr_from_kl(h1,14)
             buf=0.3*atr
             close1h=h1["c"][-1]
-            # FIXED BREAKOUT LOGIC - check LIVE price, not just close, and remove close>open filter
             broke_up = (live > box1h["HH"] + buf*0.1) or (close1h > box1h["HH"] + buf*0.1)
             broke_down = (live < box1h["LL"] - buf*0.1) or (close1h < box1h["LL"] - buf*0.1)
             direction=None
@@ -243,13 +241,19 @@ def scan():
                 tp2=max(tp2_raw, liq2 if liq2>live else tp2_raw)
                 tp3=max(tp3_raw, tp2*1.02)
                 runner=max(runner_raw, tp3*1.12)
-                sl = min(LL*0.993, live*0.993, close1h - buf*1.1)
+                if live > HH:
+                    sl = min(HH*0.992, live*0.985, box1h["mid"], close1h - buf*0.8)
+                else:
+                    sl = min(LL*0.993, live*0.993, close1h - buf*1.1)
             else:
                 tp1=min(tp1_raw, liq1 if liq1<live else tp1_raw)
                 tp2=min(tp2_raw, liq2 if liq2<live else tp2_raw)
                 tp3=min(tp3_raw, tp2*0.98)
                 runner=min(runner_raw, tp3*0.88)
-                sl = max(HH*1.007, live*1.007, close1h + buf*1.1)
+                if live < LL:
+                    sl = max(HH*1.008, live*1.015, box1h["mid"], close1h + buf*0.8)
+                else:
+                    sl = max(HH*1.007, live*1.007, close1h + buf*1.1)
             if is_buy:
                 if not (sl<live<tp1<tp2<tp3): skipped[sym]="bad_levels"; continue
                 rr=(tp2-live)/(live-sl) if live!=sl else 0
