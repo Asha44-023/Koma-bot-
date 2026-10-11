@@ -124,6 +124,11 @@ def get_4h_dir(d4):
 def check_pullback_15m(d15, box, direction):
     if not d15: return False
     live_c = d15["c"][-1]
+    # If already above box, allow entry without pullback to mid
+    if direction=="BUY" and live_c > box["HH"]:
+        return True
+    if direction=="SELL" and live_c < box["LL"]:
+        return True
     mid_low = box["LL"] + box["rng"]*0.35
     mid_high = box["LL"] + box["rng"]*0.65
     in_mid = mid_low <= live_c <= mid_high
@@ -134,8 +139,8 @@ def check_pullback_15m(d15, box, direction):
 def check_entry_5m(d5, direction):
     if not d5: return False
     o,c = d5["o"][-1], d5["c"][-1]
-    if direction=="BUY": return c>o and (c-o)/o > 0.0002
-    else: return c<o and (o-c)/o > 0.0002
+    if direction=="BUY": return c>o and (c-o)/o > 0.0001
+    else: return c<o and (o-c)/o > 0.0001
 def next_liquidity(d1,HH,LL,direction):
     h=d1["h"][-20:]; l=d1["l"][-20:]
     liq_up=[x for x in h if x>HH]; liq_down=[x for x in l if x<LL]
@@ -210,9 +215,10 @@ def scan():
             live=get_live_price(sym) or h1["c"][-1]
             atr=atr_from_kl(h1,14)
             buf=0.3*atr
-            close1h=h1["c"][-1]; open1h=h1["o"][-1]
-            broke_up = close1h > box1h["HH"] + buf*0.3 and close1h > open1h
-            broke_down = close1h < box1h["LL"] - buf*0.3 and close1h < open1h
+            close1h=h1["c"][-1]
+            # FIXED BREAKOUT LOGIC - check LIVE price, not just close, and remove close>open filter
+            broke_up = (live > box1h["HH"] + buf*0.1) or (close1h > box1h["HH"] + buf*0.1)
+            broke_down = (live < box1h["LL"] - buf*0.1) or (close1h < box1h["LL"] - buf*0.1)
             direction=None
             if broke_up and dir4h=="BUY": direction="BUY"
             elif broke_down and dir4h=="SELL": direction="SELL"
