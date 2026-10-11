@@ -12,10 +12,9 @@ ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 7200
 session = requests.Session()
 
-ALLOW_COUNTER_WEDGE_ONLY = False
 COUNTER_MIN_RR = 1.1
 TREND_MIN_RR = 0.9
-TAG = "BOT-ENTRY-V140-4H-1H-15M-5M"
+TAG = "BOT-ENTRY-V141-15M-FIXED"
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -185,11 +184,11 @@ def scan():
     for sym in SYMBOLS:
         try:
             if sym in ACTIVE: skipped[sym]="active"; continue
-            d1=kl(sym,"Day1"); time.sleep(0.15)
-            d4=kl(sym,"Hour4"); time.sleep(0.15)
-            h1=kl(sym,"Min60"); time.sleep(0.15)
-            m15=kl(sym,"Min15"); time.sleep(0.15)
-            m5=kl(sym,"Min5"); time.sleep(0.15)
+            d1=kl(sym,"Day1"); time.sleep(0.05)
+            d4=kl(sym,"Hour4"); time.sleep(0.05)
+            h1=kl(sym,"Min60"); time.sleep(0.05)
+            m15=kl(sym,"Min15"); time.sleep(0.05)
+            m5=kl(sym,"Min5"); time.sleep(0.05)
             if not d1 or not d4 or not h1 or not m15 or not m5: skipped[sym]="kl_fail"; continue
             dir4h = get_4h_dir(d4)
             box4h = get_4h_box(d4)
@@ -238,6 +237,15 @@ def scan():
             skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     cands.sort(key=lambda x: x[0], reverse=True)
     print(f"FOUND {len(cands)} signals | SKIPPED: {skipped}")
+
+    # NEW: send heartbeat so you know it ran every 15 min
+    if len(cands)==0:
+        # Only send heartbeat every hour to avoid spam, but log every 15 min
+        minute = datetime.now(EAT).minute
+        if minute < 15: # once per hour at :00-:14
+            tg(f"⏰ SCAN {get_time()} | active:{len(ACTIVE)} | daily:{COOLDOWN.get('daily_pnl',0):.2f}%\nNo entry: {list(skipped.values())[:3]}")
+        return
+
     for it in cands[:3]:
         if len(ACTIVE)>=MAX_ACTIVE: break
         rr,sym,msg,entry,is_buy,sl,tp1,tp2,tp3,HH,LL,ship=it
