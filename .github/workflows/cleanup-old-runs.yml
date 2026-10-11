@@ -1,5 +1,6 @@
 name: cleanup-old-runs
-on: workflow_dispatch:
+on:
+  workflow_dispatch:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
