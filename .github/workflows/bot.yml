@@ -1,4 +1,4 @@
-name: run-bot-v140-4H-1H-15M-5M
+name: run-bot-v143-HYBRID-RUNNER
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: bot-state-v140-CLEAN
+      group: bot-state-v143-HYBRID-RUNNER
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -22,14 +22,14 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-CLEAN
+          key: bot-state-v143-HYBRID-RUNNER
       - name: Ensure clean state
         run: |
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-11"}' > cooldown.json
           echo "active: $(cat active.json)"
           echo "cooldown: $(cat cooldown.json)"
-      - name: Run V140
+      - name: Run V143
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -41,4 +41,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-CLEAN
+          key: bot-state-v143-HYBRID-RUNNER
