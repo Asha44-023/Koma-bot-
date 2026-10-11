@@ -1,17 +1,12 @@
-name: cleanup
-on: workflow_dispatch
+name: cleanup-old-runs
+on: workflow_dispatch:
 jobs:
-  clean:
+  cleanup:
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
     steps:
-      - uses: actions/github-script@v7
+      - uses: Mattraks/delete-workflow-runs@v2
         with:
-          script: |
-            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 });
-            console.log(`Found ${runs.length} runs`);
-            for (const r of runs.slice(150)) {
-              console.log(`Deleting ${r.id}`);
-              await github.rest.actions.deleteWorkflowRun({ owner: context.repo.owner, repo: context.repo.repo, run_id: r.id });
-            }
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: Asha44-023/Koma-bot
+          retain_days: 0
+          keep_minimum_runs: 0
