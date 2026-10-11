@@ -22,13 +22,11 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-CLEAN-${{ github.run_id }}
-          restore-keys: |
-            bot-state-v140-CLEAN-
+          key: bot-state-v140-CLEAN
       - name: Ensure clean state
         run: |
           [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-10"}' > cooldown.json
+          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-11"}' > cooldown.json
           echo "active: $(cat active.json)"
           echo "cooldown: $(cat cooldown.json)"
       - name: Run V140
@@ -43,4 +41,4 @@ jobs:
           path: |
             active.json
             cooldown.json
-          key: bot-state-v140-CLEAN-${{ github.run_id }}
+          key: bot-state-v140-CLEAN
