@@ -1,7 +1,7 @@
 name: run-bot-v143-HYBRID-RUNNER
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/2 * * * *'
   workflow_dispatch:
 jobs:
   run:
@@ -9,13 +9,16 @@ jobs:
     timeout-minutes: 5
     concurrency:
       group: bot-state-v143-HYBRID-RUNNER
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          
       - run: pip install requests pytz
+      
       - name: Restore state
         uses: actions/cache/restore@v4
         with:
@@ -23,16 +26,30 @@ jobs:
             active.json
             cooldown.json
           key: bot-state-v143-HYBRID-RUNNER
+          
       - name: Ensure clean state
         run: |
           [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-11"}' > cooldown.json
+          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-10-11","signals":{}}' > cooldown.json
+          echo "=== ACTIVE ===" && cat active.json
+          echo "=== COOLDOWN ===" && cat cooldown.json
+          
       - name: Run V143
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
+        
       - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            active.json
+            cooldown.json
+          key: bot-state-v143-HYBRID-RUNNER-${{ github.run_id }}
+          
+      - name: Save state as fallback key
         if: always()
         uses: actions/cache/save@v4
         with:
