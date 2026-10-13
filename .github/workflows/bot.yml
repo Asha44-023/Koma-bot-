@@ -1,10 +1,8 @@
-name: Run Bot V148 PURE 4H LAST SR 32-68
-
+name: Run Bot V148.1 PURE AUTO
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -22,3 +20,10 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Commit state
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@github.com"
+          git add active.json cooldown.json || true
+          git diff --staged --quiet || git commit -m "auto save [skip ci]"
+          git push || true
