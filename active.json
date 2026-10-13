@@ -21,5 +21,74 @@
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
+  },
+  "FARTCOIN_USDT": {
+    "entry": 0.16074,
+    "is_buy": false,
+    "sl": 0.1655622,
+    "tp1": 0.14265,
+    "tp2": 0.139797,
+    "tp3": 0.13700106,
+    "runner": 0.1205609328,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "HH": 0.16696,
+    "LL": 0.15065,
+    "time": 1791890584.2009838,
+    "face": "DESC_TRI",
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP"
+  },
+  "SUI_USDT": {
+    "entry": 1.046,
+    "is_buy": false,
+    "sl": 1.07738,
+    "tp1": 0.9355,
+    "tp2": 0.9313,
+    "tp3": 0.912674,
+    "runner": 0.8031531199999999,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "HH": 1.0929,
+    "LL": 0.9929,
+    "time": 1791890586.7352679,
+    "face": "RECT_DIST",
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND"
+  },
+  "LAB_USDT": {
+    "entry": 0.04895,
+    "is_buy": false,
+    "sl": 0.050418500000000005,
+    "tp1": 0.04514,
+    "tp2": 0.04384,
+    "tp3": 0.04296319999999999,
+    "runner": 0.037807615999999995,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "HH": 0.05145,
+    "LL": 0.04595,
+    "time": 1791890589.058169,
+    "face": "RECT_DIST",
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP"
   }
 }
