@@ -13,7 +13,7 @@ DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 7200
 session = requests.Session()
 COUNTER_MIN_RR = 0.8
 TREND_MIN_RR = 0.6
-TAG = "BOT-V148.1-PURE-AUTO"
+TAG = "BOT-V148.2-TIGHT-SL"
 TP_CONFIG = {"PUMP": {"TP1": 1.0, "TP2": 2.8, "TP3": 6.0, "RUNNER_TARGET": 20.0, "CLOSE": [40,30,15,15]}, "TREND": {"TP1": 1.5, "TP2": 4.0, "TP3": 8.5, "RUNNER_TARGET": 15.0, "CLOSE": [30,30,20,20]},}
 PUMP_COINS = ["GRASS_USDT","SENT_USDT","SAND_USDT","SIREN_USDT","KOMA_USDT","LAB_USDT","FARTCOIN_USDT","VELVET_USDT","MUBARAK_USDT"]
 def get_tp_config(sym):
@@ -76,7 +76,7 @@ def send_chart(sym, d4, sr4h, live, direction, exp_hours):
         plt.close(fig)
         if TELEGRAM_TOKEN and TELEGRAM_CHAT:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-            session.post(url, data={"chat_id": TELEGRAM_CHAT, "caption": f"{sym.replace('_USDT','')} {direction} — V148.1 PURE"}, files={"photo": (f"{sym}.png", buf, "image/png")}, timeout=15)
+            session.post(url, data={"chat_id": TELEGRAM_CHAT, "caption": f"{sym.replace('_USDT','')} {direction} — V148.2 TIGHT"}, files={"photo": (f"{sym}.png", buf, "image/png")}, timeout=15)
     except Exception as e:
         print(f"chart err {e}")
 def kl(symbol,interval):
@@ -232,12 +232,21 @@ def scan():
             ship,_,_,_=daily_ship(d1); is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
             liq1,liq2=next_liquidity(d1,HH,LL,direction)
             tp1_raw,tp2_raw,tp3_raw,runner_raw,cfg,typ=calc_tps(sym,live,is_buy)
+            # === TIGHT SL FIX V148.2 ===
             if is_buy:
                 tp1=max(tp1_raw,liq1 if liq1>live else tp1_raw); tp2=max(tp2_raw,liq2 if liq2>live else tp2_raw); tp3=max(tp3_raw,tp2*1.02); runner=max(runner_raw,tp3*1.12)
-                sl=min(LL*0.998,live*0.993,box1h["mid"]*0.999,sr4h["SUPPORT_LOW"]*0.985)
+                if in_support:
+                    sl=min(LL*0.996, live*0.992, sr4h["SUPPORT_LOW"]*0.99)
+                else:
+                    sl=LL*0.994
+                sl=max(sl, live*0.97) # cap -3% max risk
             else:
                 tp1=min(tp1_raw,liq1 if liq1<live else tp1_raw); tp2=min(tp2_raw,liq2 if liq2<live else tp2_raw); tp3=min(tp3_raw,tp2*0.98); runner=min(runner_raw,tp3*0.88)
-                sl=max(HH*1.002,live*1.007,box1h["mid"]*1.001,sr4h["RESIST_HIGH"]*1.015)
+                if in_resist:
+                    sl=max(HH*1.004, live*1.008, sr4h["RESIST_HIGH"]*1.01)
+                else:
+                    sl=HH*1.006
+                sl=min(sl, live*1.03) # cap +3% max risk
             if is_buy:
                 if not (sl<live<tp1<tp2<tp3): skipped[sym]="bad_levels"; continue
                 rr=(tp2-live)/(live-sl) if live!=sl else 0
