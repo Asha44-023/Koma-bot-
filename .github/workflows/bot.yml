@@ -1,4 +1,4 @@
-name: Run Bot V144 Clean Eyes
+name: Run Bot V146 4H SR Chart
 
 on:
   schedule:
@@ -14,9 +14,9 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install deps
-        run: pip install requests pytz
+        run: pip install requests pytz matplotlib
       - name: Run scan once
-        run: python bot.py --once
+        run: python bot_v146.py --once
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
