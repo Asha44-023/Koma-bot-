@@ -90,5 +90,28 @@
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "PUMP"
+  },
+  "SAND_USDT": {
+    "entry": 0.06,
+    "is_buy": false,
+    "sl": 0.0618,
+    "tp1": 0.04427,
+    "tp2": 0.04414,
+    "tp3": 0.043257199999999996,
+    "runner": 0.038066336,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "HH": 0.0619,
+    "LL": 0.05789,
+    "time": 1791916086.7709866,
+    "face": "RISE_WEDGE",
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP"
   }
 }
