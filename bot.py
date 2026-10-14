@@ -104,7 +104,6 @@ def atr_from_kl(d,period=14):
     for i in range(1,len(c)): tr.append(max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])))
     if len(tr)<period: return tr[-1] if tr else 0.0001
     return sum(tr[-period:])/period
-
 def get_4h_sr_boxes(d4, sym=""):
     lookback = 50
     lows = d4["l"][-lookback:]
@@ -128,7 +127,6 @@ def get_4h_sr_boxes(d4, sym=""):
         "sup_touches": len(swing_lows), "res_touches": len(swing_highs),
         "gap_pct": gap_pct, "used_lookback": lookback,
     }
-
 def daily_ship(d1):
     h=d1["h"][-20:]; l=d1["l"][-20:]; c=d1["c"][-20:]
     if len(h)<20: return "RECT","BOTH",max(h),min(l)
@@ -141,7 +139,6 @@ def daily_ship(d1):
     if h1>h0+flat and l1>l0+flat: return "RISE_WEDGE","DOWN",HH,LL
     if h1<h0-flat and l1<l0-flat: return "FALL_WEDGE","UP",HH,LL
     return "RECT","BOTH",HH,LL
-
 def get_1h_box(d1h, sym=""):
     h=d1h["h"][-20:]; l=d1h["l"][-20:]; HH=max(h); LL=min(l); rng=HH-LL; mid=(HH+LL)/2
     if rng==0 or mid==0: return None
@@ -151,7 +148,6 @@ def get_1h_box(d1h, sym=""):
         if rng2/mid2>max_rng_pct: return None
         return {"HH":HH2,"LL":LL2,"mid":mid2,"rng":rng2}
     return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
-
 def get_4h_dir(d4):
     o,c=d4["o"][-1],d4["c"][-1]; s10=sum(d4["c"][-10:])/10; s20=sum(d4["c"][-20:])/20
     if c>o and s10>s20*1.001: return "BUY"
@@ -298,7 +294,16 @@ def scan():
         tg(msg)
         send_chart(sym,d4,sr4h,entry,direction,exp_hours)
         time.sleep(1.5)
-if "--once" in sys.argv: scan()
+
+if "--once" in sys.argv:
+    for i in range(3):
+        try:
+            scan()
+        except Exception as e:
+            print(f"scan {i} err {e}")
+        if i < 2:
+            print(f"sleep 240s before next scan in same run...")
+            time.sleep(240)
 else:
     while True:
         try: scan()
