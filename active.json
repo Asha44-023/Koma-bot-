@@ -90,5 +90,28 @@
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "PUMP"
+  },
+  "KOMA_USDT": {
+    "entry": 0.019641,
+    "is_buy": true,
+    "sl": 0.01905177,
+    "tp1": 0.020783,
+    "tp2": 0.020922,
+    "tp3": 0.02134044,
+    "runner": 0.0239012928,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "HH": 0.020525,
+    "LL": 0.019075,
+    "time": 1792009399.2244036,
+    "face": "RECT_DIST",
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP"
   }
 }
