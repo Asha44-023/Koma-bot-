@@ -1,7 +1,7 @@
-name: Run Bot V148.2 TIGHT AUTO
+name: Run Bot V148.3 SWING-FIX AUTO
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 permissions:
   contents: write
@@ -27,5 +27,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@github.com"
           git add active.json cooldown.json || true
-          git diff --staged --quiet || git commit -m "auto save V148.2 [skip ci]"
+          git diff --staged --quiet || git commit -m "auto save V148.3 [skip ci]"
           git push || true
