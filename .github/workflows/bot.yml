@@ -1,4 +1,4 @@
-name: Run Bot V148.3 SWING-FIX AUTO
+name: Run Bot V148.4.1 BUYSELL
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -27,5 +27,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@github.com"
           git add active.json cooldown.json || true
-          git diff --staged --quiet || git commit -m "auto save V148.3 [skip ci]"
+          git diff --staged --quiet || git commit -m "auto save V148.4.1 [skip ci]"
           git push || true
