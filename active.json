@@ -68,29 +68,6 @@
     "tp3_hit": false,
     "type": "TREND"
   },
-  "LAB_USDT": {
-    "entry": 0.04895,
-    "is_buy": false,
-    "sl": 0.04895,
-    "tp1": 0.04514,
-    "tp2": 0.04384,
-    "tp3": 0.04296319999999999,
-    "runner": 0.037807615999999995,
-    "cfg_close": [
-      40,
-      30,
-      15,
-      15
-    ],
-    "HH": 0.05145,
-    "LL": 0.04595,
-    "time": 1791890589.058169,
-    "face": "RECT_DIST",
-    "tp1_hit": true,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "PUMP"
-  },
   "SAND_USDT": {
     "entry": 0.06,
     "is_buy": false,
