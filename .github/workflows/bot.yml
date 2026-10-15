@@ -1,4 +1,4 @@
-name: Run Bot V148.5.2-5COIN-RELAXED
+name: Run Bot V148.5.3-FORCE-5COIN
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -15,6 +15,11 @@ jobs:
           python-version: '3.10'
       - name: Install deps
         run: pip install requests pytz matplotlib
+      - name: Force clear old active trades
+        run: |
+          echo '{}' > active.json
+          echo '{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-15"}' > cooldown.json
+          echo "Cleared active.json -> 0"
       - name: Run scan once
         run: python bot.py --once
         env:
@@ -27,5 +32,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@github.com"
           git add active.json cooldown.json || true
-          git diff --staged --quiet || git commit -m "auto save V148.5.2 RELAXED [skip ci]"
+          git diff --staged --quiet || git commit -m "auto save V148.5.3 FORCE RESET [skip ci]"
           git push || true
