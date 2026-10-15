@@ -13,7 +13,7 @@ DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 3600
 session = requests.Session()
 COUNTER_MIN_RR = 0.5
 TREND_MIN_RR = 0.4
-TAG = "BOT-V148.5.3-FORCE-5COIN"
+TAG = "BOT-V148.5.4-NO-OVERLAP"
 TP_CONFIG = {"PUMP": {"TP1": 1.0, "TP2": 2.8, "TP3": 6.0, "RUNNER_TARGET": 20.0, "CLOSE": [40,30,15,15]}, "TREND": {"TP1": 1.5, "TP2": 4.0, "TP3": 8.5, "RUNNER_TARGET": 15.0, "CLOSE": [30,30,20,20]},}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT"]
 def get_tp_config(sym):
@@ -34,11 +34,6 @@ def load_json(p,d):
     except: return d
 ACTIVE=load_json(ACTIVE_FILE,{}); COOLDOWN=load_json(COOLDOWN_FILE,{})
 COOLDOWN.setdefault("signals",{}); COOLDOWN.setdefault("daily_pnl",0.0); COOLDOWN.setdefault("last_day",get_today())
-# FORCE RESET if active is stuck at 5 with old version
-if len(ACTIVE)>=5:
-    ACTIVE={}
-    COOLDOWN={"signals":{},"daily_pnl":0.0,"last_day":get_today()}
-    print("!!! FORCE RESET active 5 -> 0!!!")
 def atomic_save(path,data):
     d=os.path.dirname(os.path.abspath(path)); fd,tp=tempfile.mkstemp(dir=d,prefix=".tmp_")
     try:
@@ -125,18 +120,33 @@ def get_4h_trend_structure(d4):
     if s10<s20*0.999: return "DOWN", "MA10<MA20"
     return "RANGE", "RANGE"
 def get_4h_sr_boxes(d4, sym=""):
-    lookback = 50
+    lookback = 70
     lows = d4["l"][-lookback:]; highs = d4["h"][-lookback:]
     swing_lows = []; swing_highs = []
     for i in range(2, len(lows)-2):
         if lows[i] < lows[i-1] and lows[i] < lows[i+1]: swing_lows.append(lows[i])
         if highs[i] > highs[i-1] and highs[i] > highs[i+1]: swing_highs.append(highs[i])
-    support = sum(swing_lows[-2:])/2 if len(swing_lows)>=2 else min(lows[-15:])
-    resist = sum(swing_highs[-2:])/2 if len(swing_highs)>=2 else max(highs[-15:])
+    live_est = d4["c"][-1]
+    lows_below = [x for x in swing_lows if x < live_est*1.08]
+    highs_above = [x for x in swing_highs if x > live_est*0.92]
+    if len(lows_below)>=2: support = sum(sorted(lows_below)[-2:])/2
+    elif len(lows_below)==1: support = lows_below[0]
+    else: support = min(lows[-20:])
+    if len(highs_above)>=2: resist = sum(sorted(highs_above)[:2])/2
+    elif len(highs_above)==1: resist = highs_above[0]
+    else: resist = max(highs[-20:])
     atr = atr_from_kl(d4, 14)
-    box_pct = max(0.008, min(0.03, (atr / support) * 0.6)) if support>0 else 0.015
-    gap_pct = (resist - support) / support * 100 if support>0 else 0
-    return {"SUPPORT_LOW": support*(1-box_pct), "SUPPORT_HIGH": support*(1+box_pct),"RESIST_LOW": resist*(1-box_pct), "RESIST_HIGH": resist*(1+box_pct),"support_level": support, "resist_level": resist,"sup_touches": len(swing_lows), "res_touches": len(swing_highs),"gap_pct": gap_pct, "used_lookback": lookback,}
+    box_pct = max(0.01, min(0.025, (atr / support) * 0.5)) if support>0 else 0.015
+    min_gap = 0.08
+    if support>0 and (resist - support)/support < min_gap:
+        mid = (support+resist)/2
+        support = mid*(1-min_gap/2)
+        resist = mid*(1+min_gap/2)
+    gap_pct = (resist - support)/support*100 if support>0 else 0
+    # FINAL no-overlap guard
+    if support*(1+box_pct) >= resist*(1-box_pct):
+        box_pct = min(box_pct, (gap_pct/100)/3)
+    return {"SUPPORT_LOW": support*(1-box_pct), "SUPPORT_HIGH": support*(1+box_pct),"RESIST_LOW": resist*(1-box_pct), "RESIST_HIGH": resist*(1+box_pct),"support_level": support, "resist_level": resist,"gap_pct": gap_pct, "used_lookback": lookback,}
 def check_bos_choch(d15, direction):
     if not d15 or len(d15["c"])<12: return True, "BOS relaxed"
     highs = d15["h"][-12:-1]; lows = d15["l"][-12:-1]
