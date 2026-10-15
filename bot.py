@@ -5,17 +5,17 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["GRASS_USDT","TAO_USDT","JASMY_USDT","SAND_USDT","SIREN_USDT","LAB_USDT","KOMA_USDT","FARTCOIN_USDT","SENT_USDT","SUI_USDT","PHA_USDT","ZEC_USDT","PEPE_USDT","VELVET_USDT","MUBARAK_USDT"]
+SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 7200
 session = requests.Session()
-COUNTER_MIN_RR = 0.8
-TREND_MIN_RR = 0.6
-TAG = "BOT-V148.4.1-BUYSELL"
+COUNTER_MIN_RR = 0.5
+TREND_MIN_RR = 0.4
+TAG = "BOT-V148.5.2-5COIN-RELAXED"
 TP_CONFIG = {"PUMP": {"TP1": 1.0, "TP2": 2.8, "TP3": 6.0, "RUNNER_TARGET": 20.0, "CLOSE": [40,30,15,15]}, "TREND": {"TP1": 1.5, "TP2": 4.0, "TP3": 8.5, "RUNNER_TARGET": 15.0, "CLOSE": [30,30,20,20]},}
-PUMP_COINS = ["GRASS_USDT","SENT_USDT","SAND_USDT","SIREN_USDT","KOMA_USDT","LAB_USDT","FARTCOIN_USDT","VELVET_USDT","MUBARAK_USDT"]
+PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT"]
 def get_tp_config(sym):
     return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
 def calc_tps(sym, live, is_buy):
@@ -76,7 +76,7 @@ def send_chart(sym, d4, sr4h, live, direction, exp_hours):
         plt.close(fig)
         if TELEGRAM_TOKEN and TELEGRAM_CHAT:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-            session.post(url, data={"chat_id": TELEGRAM_CHAT, "caption": f"{sym.replace('_USDT','')} {direction} — V148.4.1"}, files={"photo": (f"{sym}.png", buf, "image/png")}, timeout=15)
+            session.post(url, data={"chat_id": TELEGRAM_CHAT, "caption": f"{sym.replace('_USDT','')} {direction} — {TAG}"}, files={"photo": (f"{sym}.png", buf, "image/png")}, timeout=15)
     except Exception as e:
         print(f"chart err {e}")
 def kl(symbol,interval):
@@ -133,7 +133,7 @@ def get_4h_sr_boxes(d4, sym=""):
     gap_pct = (resist - support) / support * 100 if support>0 else 0
     return {"SUPPORT_LOW": support*(1-box_pct), "SUPPORT_HIGH": support*(1+box_pct),"RESIST_LOW": resist*(1-box_pct), "RESIST_HIGH": resist*(1+box_pct),"support_level": support, "resist_level": resist,"sup_touches": len(swing_lows), "res_touches": len(swing_highs),"gap_pct": gap_pct, "used_lookback": lookback,}
 def check_bos_choch(d15, direction):
-    if not d15 or len(d15["c"])<12: return True, "BOS relaxed (short data)"
+    if not d15 or len(d15["c"])<12: return True, "BOS relaxed"
     highs = d15["h"][-12:-1]; lows = d15["l"][-12:-1]
     last_high = max(highs); last_low = min(lows)
     curr_close = d15["c"][-1]
@@ -168,7 +168,7 @@ def daily_ship(d1):
 def get_1h_box(d1h, sym=""):
     h=d1h["h"][-20:]; l=d1h["l"][-20:]; HH=max(h); LL=min(l); rng=HH-LL; mid=(HH+LL)/2
     if rng==0 or mid==0: return None
-    max_rng_pct = 0.45 if sym in PUMP_COINS else 0.28
+    max_rng_pct = 0.50 if sym in PUMP_COINS else 0.32
     if rng/mid>max_rng_pct:
         h2=d1h["h"][-10:]; l2=d1h["l"][-10:]; HH2=max(h2); LL2=min(l2); rng2=HH2-LL2; mid2=(HH2+LL2)/2
         if rng2/mid2>max_rng_pct: return None
@@ -178,17 +178,15 @@ def check_pullback_15m(d15, box, direction):
     if not d15: return False, 0
     live_c=d15["c"][-1]; rng = box["rng"]
     if rng==0: return False, 0
-    zone_low = box["LL"] + rng*0.32; zone_high = box["LL"] + rng*0.68
+    zone_low = box["LL"] + rng*0.20
+    zone_high = box["LL"] + rng*0.80
     pct = (live_c - box["LL"]) / rng * 100
     in_zone = zone_low <= live_c <= zone_high
     return in_zone, pct
 def check_entry_5m(d5, direction):
     if not d5 or len(d5["c"])<3: return False
     o,c=d5["o"][-1],d5["c"][-1]; o2,c2=d5["o"][-2],d5["c"][-2]
-    if "v" in d5:
-        avg=sum(d5["v"][-10:-1])/9 if len(d5["v"])>10 else d5["v"][-1]
-        if avg>0 and d5["v"][-1] < avg*0.8: return False
-    return (c>o and c>o2 and c>c2) if direction=="BUY" else (c<o and c<o2 and c<c2)
+    return (c>o and c>=o2) if direction=="BUY" else (c<o and c<=o2)
 def next_liquidity(d1,HH,LL,direction):
     h=d1["h"][-20:]; l=d1["l"][-20:]
     liq_up=[x for x in h if x>HH]; liq_down=[x for x in l if x<LL]
@@ -269,12 +267,12 @@ def scan():
                 else: direction="SELL"
                 target_box=f'1H MID {fmt(box1h["LL"])}-{fmt(box1h["HH"])}'
                 dist=abs(box1h["HH"]-box1h["LL"]); exp_candles=max(2,min(12,dist/(atr1 or dist*0.2))); exp_hours=int(exp_candles*1)
-            in_32_68, pct_15m = check_pullback_15m(m15,box1h,direction)
-            if not in_32_68:
-                skipped[sym]=f"no_pullback_15m_{pct_15m:.1f}%_not_in_32-68"; continue
+            in_20_80, pct_15m = check_pullback_15m(m15,box1h,direction)
+            if not in_20_80:
+                skipped[sym]=f"no_pullback_20-80_{pct_15m:.1f}%"; continue
             bos_ok, bos_msg = check_bos_choch(m15, direction)
             fvg_ok, fvg_msg = check_fvg_ob(m15, direction)
-            if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
+            if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf_relaxed"; continue
             ship,_,_,_=daily_ship(d1); is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
             liq1,liq2=next_liquidity(d1,HH,LL,direction)
             tp1_raw,tp2_raw,tp3_raw,runner_raw,cfg,typ=calc_tps(sym,live,is_buy)
@@ -300,7 +298,7 @@ def scan():
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
             tag="🔄 COUNTER BUY" if is_buy and is_counter else "🔄 COUNTER SELL" if not is_buy and is_counter else "💚 BUY" if is_buy else "❤️ SELL"
             stop_pct=(sl/live-1)*100
-            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{typ} {cfg['TP1']}/{cfg['TP2']}/{cfg['TP3']}%] RR:{rr:.2f}\n4H TREND: {trend_4h} ({trend_reason}) | GREEN {fmt(sr4h['SUPPORT_LOW'])}-{fmt(sr4h['SUPPORT_HIGH'])} | RED {fmt(sr4h['RESIST_LOW'])}-{fmt(sr4h['RESIST_HIGH'])} | GAP {sr4h['gap_pct']:.1f}%\n1H BOX: {fmt(LL)}-{fmt(HH)} rng {(box1h['rng']/box1h['mid']*100):.2f}%\n✅ 15M {pct_15m:.1f}% IN 32-68% | {bos_msg} | {fvg_msg} | 5M {direction} ENGULF\nPos: {'IN RED → SHORT to GREEN' if in_resist else 'IN GREEN → LONG to RED' if in_support else '1H MID REVERSION'} | Target {target_box} | ⏱️ ~{exp_hours}h\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
+            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{typ} {cfg['TP1']}/{cfg['TP2']}/{cfg['TP3']}%] RR:{rr:.2f}\n4H TREND: {trend_4h} ({trend_reason}) | GREEN {fmt(sr4h['SUPPORT_LOW'])}-{fmt(sr4h['SUPPORT_HIGH'])} | RED {fmt(sr4h['RESIST_LOW'])}-{fmt(sr4h['RESIST_HIGH'])} | GAP {sr4h['gap_pct']:.1f}%\n1H BOX: {fmt(LL)}-{fmt(HH)} rng {(box1h['rng']/box1h['mid']*100):.2f}%\n✅ 15M {pct_15m:.1f}% IN 20-80% | {bos_msg} | {fvg_msg} | 5M {direction} ENGULF RELAXED\nPos: {'IN RED → SHORT to GREEN' if in_resist else 'IN GREEN → LONG to RED' if in_support else '1H MID REVERSION'} | Target {target_box} | ⏱️ ~{exp_hours}h\n🛡️ SL {fmt(sl)} ({stop_pct:+.2f}%)\n🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,HH,LL,ship,sr4h,d4,exp_hours,direction))
         except Exception as e:
             skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
