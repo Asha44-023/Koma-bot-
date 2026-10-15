@@ -1,9 +1,1 @@
-{
-  "signals": {
-    "SAND_USDT": 1792080674.0149584,
-    "JASMY_USDT": 1792080676.5144129,
-    "KOMA_USDT": 1792080678.981303
-  },
-  "daily_pnl": 0.0,
-  "last_day": "2026-10-15"
-}
+{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-15"}
