@@ -1,1 +1,7 @@
-{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-15"}
+{
+  "signals": {
+    "GRASS_USDT": 1792104709.0348947
+  },
+  "daily_pnl": 0.0,
+  "last_day": "2026-10-16"
+}
