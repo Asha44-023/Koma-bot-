@@ -9,11 +9,11 @@ SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
-DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 7200
+DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 3600
 session = requests.Session()
 COUNTER_MIN_RR = 0.5
 TREND_MIN_RR = 0.4
-TAG = "BOT-V148.5.2-5COIN-RELAXED"
+TAG = "BOT-V148.5.3-FORCE-5COIN"
 TP_CONFIG = {"PUMP": {"TP1": 1.0, "TP2": 2.8, "TP3": 6.0, "RUNNER_TARGET": 20.0, "CLOSE": [40,30,15,15]}, "TREND": {"TP1": 1.5, "TP2": 4.0, "TP3": 8.5, "RUNNER_TARGET": 15.0, "CLOSE": [30,30,20,20]},}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT"]
 def get_tp_config(sym):
@@ -34,6 +34,11 @@ def load_json(p,d):
     except: return d
 ACTIVE=load_json(ACTIVE_FILE,{}); COOLDOWN=load_json(COOLDOWN_FILE,{})
 COOLDOWN.setdefault("signals",{}); COOLDOWN.setdefault("daily_pnl",0.0); COOLDOWN.setdefault("last_day",get_today())
+# FORCE RESET if active is stuck at 5 with old version
+if len(ACTIVE)>=5:
+    ACTIVE={}
+    COOLDOWN={"signals":{},"daily_pnl":0.0,"last_day":get_today()}
+    print("!!! FORCE RESET active 5 -> 0!!!")
 def atomic_save(path,data):
     d=os.path.dirname(os.path.abspath(path)); fd,tp=tempfile.mkstemp(dir=d,prefix=".tmp_")
     try:
