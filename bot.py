@@ -124,7 +124,6 @@ def get_dynamic_duration(d1, live, target_price):
     elif days < 7: dur=f"{days:.1f} days"
     else: dur=f"{days:.0f} days"
     return days, dur
-# --- FIX: this function was missing ---
 def get_1h_box(d1h, sym=""):
     h=d1h["h"][-20:]; l=d1h["l"][-20:]; HH=max(h); LL=min(l); rng=HH-LL; mid=(HH+LL)/2
     if rng==0 or mid==0: return None
@@ -133,8 +132,6 @@ def get_1h_box(d1h, sym=""):
         if rng2/mid2>0.50: return None
         return {"HH":HH2,"LL":LL2,"mid":mid2,"rng":rng2}
     return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
-def get_1h_box_alias(d1h, sym=""): return get_1h_box(d1h, sym)
-get_1h_box = get_1h_box # keep name
 def daily_ship(d1):
     h=d1["h"][-20:]; l=d1["l"][-20:]; return "RECT","BOTH",max(h),min(l)
 def check_pullback_15m(d15, box, direction):
@@ -221,6 +218,20 @@ def scan():
                 if not (tp3<tp2<tp1<live<sl): skipped[sym]="bad_levels"; continue
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
             if rr<0.4: skipped[sym]=f"rr_low {rr:.2f}"; continue
+
+            # === QUALITY FILTER v2 - NEW ===
+            gap = sr4h.get("gap_pct",0)
+            perfect = sr4h.get("perfect_score",0)
+            if perfect==0 and gap < 10:
+                skipped[sym]=f"low_quality GAP {gap:.1f}% Perfect 0"; continue
+            if gap < 5:
+                skipped[sym]=f"gap_too_small {gap:.1f}%"; continue
+            if direction=="BUY" and trend_4h=="DOWN" and (gap<15 or perfect==0):
+                skipped[sym]=f"buy_vs_down GAP {gap:.1f}% P{perfect}"; continue
+            if direction=="SELL" and trend_4h=="UP" and (gap<15 or perfect==0):
+                skipped[sym]=f"sell_vs_up GAP {gap:.1f}% P{perfect}"; continue
+            # === END FILTER ===
+
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
             tag="💚 BUY" if is_buy else "❤️ SELL"
             msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f}\n📍 {'PUMP' if is_buy else 'DUMP'} {dur_str} → {fmt(target_for_duration)} ({dist:.1f}%) Perfect:{sr4h.get('perfect_score')}\n4H {trend_4h} GAP {sr4h['gap_pct']:.1f}% 15M {pct_15m:.1f}%\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
