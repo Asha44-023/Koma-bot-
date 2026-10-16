@@ -11,7 +11,7 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 3600
 session = requests.Session()
-TAG = "BOT-V149-FIX"
+TAG = "BOT-V150-SWEEP"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -68,6 +68,31 @@ def atr_from_kl(d,period=14):
     for i in range(1,len(c)): tr.append(max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])))
     if len(tr)<period: return tr[-1] if tr else 0.0001
     return sum(tr[-period:])/period
+
+def check_sweep_1h(d1h, box, direction, atr_val):
+    """ V150 NEW: 1.5x ATR Sweep Detector """
+    if not d1h or not box or atr_val==0: return False, 0.0
+    HH,LL=box["HH"],box["LL"]
+    # check last 5 x 1H candles
+    for i in range(-5,0):
+        try:
+            h=d1h["h"][i]; l=d1h["l"][i]; c=d1h["c"][i]
+            if direction=="SELL":
+                wick_above = h - HH
+                # must wick above HH and close back below
+                if wick_above > atr_val*0.5 and c < HH:
+                    strength = wick_above/atr_val
+                    if 0.5 <= strength <= 3.0: # 0.5x-3x = sweep, >3x = breakout
+                        return True, strength
+            else:
+                wick_below = LL - l
+                if wick_below > atr_val*0.5 and c > LL:
+                    strength = wick_below/atr_val
+                    if 0.5 <= strength <= 3.0:
+                        return True, strength
+        except: continue
+    return False, 0.0
+
 def is_origin_of_explosive_move(d, idx):
     if idx < 30 or idx > len(d["c"])-4: return False, 0
     origin_low = min(d["l"][idx-2:idx+1]); origin_high = max(d["h"][idx-2:idx+1])
@@ -192,6 +217,7 @@ def scan():
             trend_4h,_ = get_4h_trend_structure(d4); sr4h["trend_4h"]=trend_4h
             box1h=get_1h_box(h1, sym)
             if not box1h: skipped[sym]="no_1H_box"; continue
+            atr1h = atr_from_kl(h1,14)
             live=get_live_price(sym) or h1["c"][-1]
             in_resist= sr4h["RESIST_LOW"]*0.985 <= live <= sr4h["RESIST_HIGH"]*1.025
             in_support= sr4h["SUPPORT_LOW"]*0.975 <= live <= sr4h["SUPPORT_HIGH"]*1.015
@@ -219,9 +245,13 @@ def scan():
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
             if rr<0.4: skipped[sym]=f"rr_low {rr:.2f}"; continue
 
-            # === QUALITY FILTER v2 - NEW ===
+            # === QUALITY FILTER v2 + SWEEP v3 ===
             gap = sr4h.get("gap_pct",0)
             perfect = sr4h.get("perfect_score",0)
+            swept, sweep_x = check_sweep_1h(h1, box1h, direction, atr1h)
+            # 1.5x logic: if no sweep, block unless very big gap
+            if not swept and gap < 12:
+                skipped[sym]=f"no_sweep_{sweep_x:.1f}x GAP{gap:.1f}% P{perfect}"; continue
             if perfect==0 and gap < 10:
                 skipped[sym]=f"low_quality GAP {gap:.1f}% Perfect 0"; continue
             if gap < 5:
@@ -233,8 +263,9 @@ def scan():
             # === END FILTER ===
 
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
+            sweep_tag = f"SWEEP {sweep_x:.1f}x" if swept else f"NoSweep GAP{gap:.0f}%"
             tag="💚 BUY" if is_buy else "❤️ SELL"
-            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f}\n📍 {'PUMP' if is_buy else 'DUMP'} {dur_str} → {fmt(target_for_duration)} ({dist:.1f}%) Perfect:{sr4h.get('perfect_score')}\n4H {trend_4h} GAP {sr4h['gap_pct']:.1f}% 15M {pct_15m:.1f}%\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
+            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f} {sweep_tag}\n📍 {'PUMP' if is_buy else 'DUMP'} {dur_str} → {fmt(target_for_duration)} ({dist:.1f}%) Perfect:{perfect}\n4H {trend_4h} GAP {gap:.1f}% 15M {pct_15m:.1f}%\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,HH,LL,ship,sr4h,dur_str,direction))
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     cands.sort(key=lambda x:x[0], reverse=True); print(f"FOUND {len(cands)} | SKIPPED: {skipped}")
