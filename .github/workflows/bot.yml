@@ -1,4 +1,4 @@
-name: Run Bot V148.5.5-FINAL
+name: Run Bot V149-BEST-15MIN
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -15,13 +15,6 @@ jobs:
           python-version: '3.10'
       - name: Install deps
         run: pip install requests pytz matplotlib
-      - name: FORCE DELETE active 5
-        run: |
-          rm -f active.json
-          echo '{}' > active.json
-          echo '{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-15"}' > cooldown.json
-          cat active.json
-          echo "FORCED TO 0"
       - name: Run scan once
         run: python bot.py --once
         env:
@@ -34,5 +27,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@github.com"
           git add active.json cooldown.json || true
-          git diff --staged --quiet || git commit -m "auto save V148.5.5 FINAL RESET [skip ci]"
+          git diff --staged --quiet || git commit -m "auto save V149 [skip ci]"
           git push || true
