@@ -1,8 +1,8 @@
 {
   "GRASS_USDT": {
-    "entry": 0.6576,
+    "entry": 0.674,
     "is_buy": true,
-    "sl": 0.637872,
+    "sl": 0.65378,
     "tp1": 0.7317,
     "tp2": 0.7371,
     "tp3": 0.751842,
@@ -14,9 +14,9 @@
       15
     ],
     "HH": 0.6963,
-    "LL": 0.5915,
-    "time": 1792104709.0348918,
-    "face": "RISE_WEDGE",
+    "LL": 0.6137,
+    "time": 1792112576.209927,
+    "face": "RECT_DIST",
     "tp1_hit": false,
     "tp2_hit": false,
     "tp3_hit": false,
