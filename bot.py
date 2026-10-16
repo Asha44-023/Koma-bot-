@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT"]
+SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
@@ -85,24 +85,18 @@ def is_origin_of_explosive_move(d, idx):
     if idx < 30 or idx > len(d["c"])-4: return False, 0
     origin_low = min(d["l"][idx-2:idx+1]); origin_high = max(d["h"][idx-2:idx+1])
     origin_range = (origin_high-origin_low)/d["c"][idx]*100
-    if origin_range > 1.5: return False, 0
+    if origin_range > 2.0: return False, 0
     move = (d["c"][idx+3]-d["c"][idx])/d["c"][idx]*100
-    if abs(move) < 4.5: return False, 0
-    if move > 0:
-        if d["c"][idx+3] <= max(d["h"][idx-30:idx]): return False, 0
-    else:
-        if d["c"][idx+3] >= min(d["l"][idx-30:idx]): return False, 0
+    if abs(move) < 2.5: return False, 0
     return True, move
 def check_fresh_and_liquidity(d, zone_low, zone_high, zone_type):
     touches = 0
     for i in range(len(d["c"])-4, max(0, len(d["c"])-100), -1):
         if d["l"][i] <= zone_high and d["h"][i] >= zone_low: touches += 1
-    is_fresh = touches <= 1
+    is_fresh = touches <= 2
     swing_lows = [d["l"][i] for i in range(len(d["l"])-30, len(d["l"])-5) if d["l"][i] < d["l"][i-1] and d["l"][i] < d["l"][i+1]]
     swing_highs = [d["h"][i] for i in range(len(d["h"])-30, len(d["h"])-5) if d["h"][i] > d["h"][i-1] and d["h"][i] > d["h"][i+1]]
     at_liq = True
-    if zone_type == "DEMAND" and len(swing_lows)>=3: at_liq = zone_high < min(swing_lows[-3:]) * 1.002
-    if zone_type == "SUPPLY" and len(swing_highs)>=3: at_liq = zone_low > max(swing_highs[-3:]) * 0.998
     return is_fresh, at_liq, touches
 def get_4h_trend_structure(d4):
     lows = d4["l"][-30:]; highs = d4["h"][-30:]; swing_lows=[]; swing_highs=[]
@@ -126,7 +120,7 @@ def get_4h_sr_boxes(d4, sym=""):
         zl = min(d4["l"][i-2:i+1]); zh = max(d4["h"][i-2:i+1])
         ztype = "DEMAND" if move>0 else "SUPPLY"
         fresh, liq, touches = check_fresh_and_liquidity(d4, zl, zh, ztype)
-        if fresh and liq:
+        if fresh:
             if ztype=="DEMAND": perfect_supports.append(zl)
             else: perfect_resists.append(zh)
     for i in range(2, len(lows)-2):
@@ -142,7 +136,7 @@ def get_4h_sr_boxes(d4, sym=""):
         highs_above=[x for x in swing_highs if x > live_est*0.92]
         resist=sum(sorted(highs_above)[:2])/2 if len(highs_above)>=2 else (highs_above[0] if highs_above else max(highs[-20:]))
     atr=atr_from_kl(d4,14); box_pct=max(0.01, min(0.025, (atr/support)*0.5)) if support>0 else 0.015
-    min_gap=0.08
+    min_gap=0.03
     if support>0 and (resist-support)/support < min_gap:
         mid=(support+resist)/2; support=mid*(1-min_gap/2); resist=mid*(1+min_gap/2)
     gap_pct=(resist-support)/support*100 if support>0 else 0
@@ -160,42 +154,6 @@ def get_dynamic_duration(d1, live, target_price):
     elif days < 7: dur=f"{days:.1f} days"
     else: dur=f"{days:.0f} days"
     return days, dur
-def check_bos_choch(d15, direction):
-    if not d15 or len(d15["c"])<12: return True,"BOS relaxed"
-    highs=d15["h"][-12:-1]; lows=d15["l"][-12:-1]; last_high=max(highs); last_low=min(lows); curr_close=d15["c"][-1]
-    if direction=="BUY" and curr_close>last_high: return True,f"BOS_UP {curr_close:.4f}>{last_high:.4f}"
-    if direction=="SELL" and curr_close<last_low: return True,f"BOS_DOWN {curr_close:.4f}<{last_low:.4f}"
-    return True,f"BOS info"
-def check_fvg_ob(d15, direction):
-    if len(d15["c"])<5: return True,"FVG relaxed"
-    h=d15["h"]; l=d15["l"]
-    for i in range(-1,-4,-1):
-        try:
-            if direction=="BUY" and l[i]>h[i-2]: return True,f"FVG_BULL"
-            if direction=="SELL" and h[i]<l[i-2]: return True,f"FVG_BEAR"
-        except: pass
-    return True,"FVG/OB ok"
-def daily_ship(d1):
-    h=d1["h"][-20:]; l=d1["l"][-20:]; c=d1["c"][-20:]
-    if len(h)<20: return "RECT","BOTH",max(h),min(l)
-    HH=max(h); LL=min(l); rng=HH-LL or 0.00001; h0,h1=h[0],h[-1]; l0,l1=l[0],l[-1]; flat=rng*0.35
-    if abs(h1-h0)<flat and l1>l0+flat: return "ASC_TRI","UP",HH,LL
-    if abs(l1-l0)<flat and h1<h0-flat: return "DESC_TRI","DOWN",HH,LL
-    if h1<h0-flat and l1>l0+flat: return "SYM_TRI","BOTH",HH,LL
-    if abs(h1-h0)<flat and abs(l1-l0)<flat and c[-1]>sum(c[-12:-6])/6: return "RECT_ACC","UP",HH,LL
-    if abs(h1-h0)<flat and abs(l1-l0)<flat: return "RECT_DIST","DOWN",HH,LL
-    if h1>h0+flat and l1>l0+flat: return "RISE_WEDGE","DOWN",HH,LL
-    if h1<h0-flat and l1<l0-flat: return "FALL_WEDGE","UP",HH,LL
-    return "RECT","BOTH",HH,LL
-def get_1h_box(d1h, sym=""):
-    h=d1h["h"][-20:]; l=d1h["l"][-20:]; HH=max(h); LL=min(l); rng=HH-LL; mid=(HH+LL)/2
-    if rng==0 or mid==0: return None
-    max_rng_pct=0.50 if sym in PUMP_COINS else 0.32
-    if rng/mid>max_rng_pct:
-        h2=d1h["h"][-10:]; l2=d1h["l"][-10:]; HH2=max(h2); LL2=min(l2); rng2=HH2-LL2; mid2=(HH2+LL2)/2
-        if rng2/mid2>max_rng_pct: return None
-        return {"HH":HH2,"LL":LL2,"mid":mid2,"rng":rng2}
-    return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
 def check_pullback_15m(d15, box, direction):
     if not d15: return False,0
     live_c=d15["c"][-1]; rng=box["rng"]
@@ -254,7 +212,7 @@ def scan():
             if not d1 or not d4 or not h1 or not m15 or not m5: skipped[sym]="kl_fail"; continue
             sr4h=get_4h_sr_boxes(d4,sym)
             if not sr4h: skipped[sym]="no_4h_SR"; continue
-            if sr4h.get("perfect_score",0)==0: skipped[sym]="no_perfect_zone"; continue
+            if sr4h.get("gap_pct",0) < 2.5: skipped[sym]=f"gap_small {sr4h.get('gap_pct',0):.1f}%"; continue
             trend_4h, trend_reason = get_4h_trend_structure(d4); sr4h["trend_4h"]=trend_4h
             box1h=get_1h_box(h1, sym)
             if not box1h: skipped[sym]="no_1H_box"; continue
@@ -267,7 +225,6 @@ def scan():
             target_box=f'GREEN {fmt(sr4h["SUPPORT_LOW"])}-{fmt(sr4h["SUPPORT_HIGH"])}' if in_resist else f'RED {fmt(sr4h["RESIST_LOW"])}-{fmt(sr4h["RESIST_HIGH"])}' if in_support else f'1H {fmt(box1h["LL"])}-{fmt(box1h["HH"])}'
             in_20_80, pct_15m = check_pullback_15m(m15,box1h,direction)
             if not in_20_80: skipped[sym]=f"no_pullback_{pct_15m:.1f}%"; continue
-            bos_ok, bos_msg = check_bos_choch(m15, direction); fvg_ok, fvg_msg = check_fvg_ob(m15, direction)
             if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
             ship,_,_,_=daily_ship(d1); is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]; liq1,liq2=next_liquidity(d1,HH,LL,direction)
             if is_buy:
@@ -295,13 +252,11 @@ def scan():
                 tp1=min(tp1,liq1 if liq1<live else tp1); tp2=min(tp2,liq2 if liq2<live else tp2); tp3=min(tp3,tp2*0.98); runner=min(runner,tp3*0.98)
                 if not (tp3<tp2<tp1<live<sl): skipped[sym]="bad_levels"; continue
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
-            is_counter=(direction=="BUY" and trend_4h=="DOWN") or (direction=="SELL" and trend_4h=="UP")
-            if is_counter and rr<COUNTER_MIN_RR: skipped[sym]=f"counter_rr_low {rr:.2f}"; continue
-            if not is_counter and rr<TREND_MIN_RR: skipped[sym]=f"trend_rr_low {rr:.2f}"; continue
+            if rr<0.4: skipped[sym]=f"rr_low {rr:.2f}"; continue
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
-            tag="🔄 COUNTER BUY" if is_buy and is_counter else "🔄 COUNTER SELL" if not is_buy and is_counter else "💚 BUY" if is_buy else "❤️ SELL"
+            tag="🔄 COUNTER BUY" if is_buy and trend_4h=="DOWN" else "🔄 COUNTER SELL" if not is_buy and trend_4h=="UP" else "💚 BUY" if is_buy else "❤️ SELL"
             direction_label = f"{'PUMP' if is_buy else 'DUMP'} {dur_str} → {fmt(target_for_duration)} ({dist:.1f}%)"
-            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f}\n📍 {direction_label} | Perfect S:{sr4h.get('fresh_supply')} D:{sr4h.get('fresh_demand')}\n4H {trend_4h} GREEN {fmt(sr4h['SUPPORT_LOW'])}-{fmt(sr4h['SUPPORT_HIGH'])} RED {fmt(sr4h['RESIST_LOW'])}-{fmt(sr4h['RESIST_HIGH'])} GAP {sr4h['gap_pct']:.1f}%\n✅ 15M {pct_15m:.1f}% | {bos_msg} | 5M ENGULF | Target {target_box} ⏱️ {dur_str}\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
+            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f}\n📍 {direction_label} Perfect:{sr4h.get('perfect_score')} S:{sr4h.get('fresh_supply')} D:{sr4h.get('fresh_demand')}\n4H {trend_4h} GREEN {fmt(sr4h['SUPPORT_LOW'])}-{fmt(sr4h['SUPPORT_HIGH'])} RED {fmt(sr4h['RESIST_LOW'])}-{fmt(sr4h['RESIST_HIGH'])} GAP {sr4h['gap_pct']:.1f}%\n✅ 15M {pct_15m:.1f}% | Target {target_box} ⏱️ {dur_str}\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,HH,LL,ship,sr4h,d4,dur_str,direction))
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     cands.sort(key=lambda x:x[0], reverse=True); print(f"FOUND {len(cands)} | SKIPPED: {skipped}")
