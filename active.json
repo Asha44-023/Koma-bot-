@@ -85,7 +85,7 @@
   "SENT_USDT": {
     "entry": 0.02126,
     "is_buy": false,
-    "sl": 0.02199764,
+    "sl": 0.02126,
     "tp1": 0.0210474,
     "tp2": 0.0208348,
     "tp3": 0.0206222,
@@ -97,7 +97,7 @@
       20
     ],
     "time": 1792221204.8804486,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
