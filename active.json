@@ -22,26 +22,6 @@
     "tp3_hit": false,
     "type": "TREND"
   },
-  "AXS_USDT": {
-    "entry": 1.0513,
-    "is_buy": false,
-    "sl": 1.030274,
-    "tp1": 1.040787,
-    "tp2": 1.030274,
-    "tp3": 1.019761,
-    "runner": 1.009248,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792265835.078892,
-    "tp1_hit": true,
-    "tp2_hit": true,
-    "tp3_hit": true,
-    "type": "TREND"
-  },
   "SENT_USDT": {
     "entry": 0.02108,
     "is_buy": false,
