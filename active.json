@@ -44,5 +44,45 @@
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
+  },
+  "PENGU_USDT": {
+    "entry": 0.007583,
+    "is_buy": false,
+    "sl": 0.007838228,
+    "tp1": 0.0075071700000000005,
+    "tp2": 0.00743134,
+    "tp3": 0.00735551,
+    "runner": 0.00727968,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792218929.5329065,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND"
+  },
+  "PEPE_USDT": {
+    "entry": 4.0182e-06,
+    "is_buy": false,
+    "sl": 4.1581664e-06,
+    "tp1": 3.978018e-06,
+    "tp2": 3.937836e-06,
+    "tp3": 3.897654e-06,
+    "runner": 3.857472e-06,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "time": 1792218930.9949927,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP"
   }
 }
