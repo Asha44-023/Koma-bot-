@@ -2,7 +2,7 @@
   "FARTCOIN_USDT": {
     "entry": 0.155,
     "is_buy": false,
-    "sl": 0.15965000000000001,
+    "sl": 0.155,
     "tp1": 0.1491875,
     "tp2": 0.14569400000000002,
     "tp3": 0.141041,
@@ -17,7 +17,7 @@
     "LL": 0.15376,
     "time": 1792168677.794194,
     "face": "RECT",
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
@@ -25,7 +25,7 @@
   "PENGU_USDT": {
     "entry": 0.007583,
     "is_buy": false,
-    "sl": 0.007838228,
+    "sl": 0.0075071700000000005,
     "tp1": 0.0075071700000000005,
     "tp2": 0.00743134,
     "tp3": 0.00735551,
@@ -37,15 +37,15 @@
       20
     ],
     "time": 1792218929.5329065,
-    "tp1_hit": false,
-    "tp2_hit": false,
+    "tp1_hit": true,
+    "tp2_hit": true,
     "tp3_hit": false,
     "type": "TREND"
   },
   "PEPE_USDT": {
     "entry": 4.0182e-06,
     "is_buy": false,
-    "sl": 4.0182e-06,
+    "sl": 3.937836e-06,
     "tp1": 3.978018e-06,
     "tp2": 3.937836e-06,
     "tp3": 3.897654e-06,
@@ -58,14 +58,14 @@
     ],
     "time": 1792218930.9949927,
     "tp1_hit": true,
-    "tp2_hit": false,
-    "tp3_hit": false,
+    "tp2_hit": true,
+    "tp3_hit": true,
     "type": "PUMP"
   },
   "PENDLE_USDT": {
     "entry": 2.1198,
     "is_buy": false,
-    "sl": 2.098602,
+    "sl": 2.077404,
     "tp1": 2.098602,
     "tp2": 2.077404,
     "tp3": 2.056206,
@@ -79,13 +79,13 @@
     "time": 1792221203.6789906,
     "tp1_hit": true,
     "tp2_hit": true,
-    "tp3_hit": false,
+    "tp3_hit": true,
     "type": "TREND"
   },
   "SENT_USDT": {
     "entry": 0.02126,
     "is_buy": false,
-    "sl": 0.02126,
+    "sl": 0.0210474,
     "tp1": 0.0210474,
     "tp2": 0.0208348,
     "tp3": 0.0206222,
@@ -98,7 +98,7 @@
     ],
     "time": 1792221204.8804486,
     "tp1_hit": true,
-    "tp2_hit": false,
+    "tp2_hit": true,
     "tp3_hit": false,
     "type": "TREND"
   }
