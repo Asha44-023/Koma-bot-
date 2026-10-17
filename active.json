@@ -2,7 +2,7 @@
   "FARTCOIN_USDT": {
     "entry": 0.155,
     "is_buy": false,
-    "sl": 0.155,
+    "sl": 0.1491875,
     "tp1": 0.1491875,
     "tp2": 0.14569400000000002,
     "tp3": 0.141041,
@@ -18,74 +18,14 @@
     "time": 1792168677.794194,
     "face": "RECT",
     "tp1_hit": true,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND"
-  },
-  "PEPE_USDT": {
-    "entry": 4.0182e-06,
-    "is_buy": false,
-    "sl": 3.937836e-06,
-    "tp1": 3.978018e-06,
-    "tp2": 3.937836e-06,
-    "tp3": 3.897654e-06,
-    "runner": 3.857472e-06,
-    "cfg_close": [
-      40,
-      30,
-      15,
-      15
-    ],
-    "time": 1792218930.9949927,
-    "tp1_hit": true,
     "tp2_hit": true,
-    "tp3_hit": true,
-    "type": "PUMP"
-  },
-  "PENDLE_USDT": {
-    "entry": 2.1198,
-    "is_buy": false,
-    "sl": 2.077404,
-    "tp1": 2.098602,
-    "tp2": 2.077404,
-    "tp3": 2.056206,
-    "runner": 2.035008,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792221203.6789906,
-    "tp1_hit": true,
-    "tp2_hit": true,
-    "tp3_hit": true,
-    "type": "TREND"
-  },
-  "FLOKI_USDT": {
-    "entry": 2.381e-05,
-    "is_buy": true,
-    "sl": 2.3256599999999997e-05,
-    "tp1": 2.40481e-05,
-    "tp2": 2.42862e-05,
-    "tp3": 2.45243e-05,
-    "runner": 2.4762400000000002e-05,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792265833.8773296,
-    "tp1_hit": false,
-    "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
   },
   "AXS_USDT": {
     "entry": 1.0513,
     "is_buy": false,
-    "sl": 1.077292,
+    "sl": 1.030274,
     "tp1": 1.040787,
     "tp2": 1.030274,
     "tp3": 1.019761,
@@ -97,6 +37,46 @@
       20
     ],
     "time": 1792265835.078892,
+    "tp1_hit": true,
+    "tp2_hit": true,
+    "tp3_hit": true,
+    "type": "TREND"
+  },
+  "SENT_USDT": {
+    "entry": 0.02108,
+    "is_buy": false,
+    "sl": 0.02189724,
+    "tp1": 0.0208692,
+    "tp2": 0.0206584,
+    "tp3": 0.0204476,
+    "runner": 0.0202368,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792273521.0883918,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND"
+  },
+  "APE_USDT": {
+    "entry": 0.1483,
+    "is_buy": false,
+    "sl": 0.15471639999999998,
+    "tp1": 0.14681699999999998,
+    "tp2": 0.145334,
+    "tp3": 0.14385099999999998,
+    "runner": 0.142368,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792273522.280343,
     "tp1_hit": false,
     "tp2_hit": false,
     "tp3_hit": false,
