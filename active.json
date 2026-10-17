@@ -22,29 +22,6 @@
     "tp3_hit": false,
     "type": "PUMP"
   },
-  "MUBARAK_USDT": {
-    "entry": 0.05669,
-    "is_buy": true,
-    "sl": 0.055278,
-    "tp1": 0.058807999999999985,
-    "tp2": 0.059068999999999997,
-    "tp3": 0.060258500000000007,
-    "runner": 0.061448,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "HH": 0.05948,
-    "LL": 0.0555,
-    "time": 1792162271.7447796,
-    "face": "RECT",
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND"
-  },
   "FARTCOIN_USDT": {
     "entry": 0.155,
     "is_buy": false,
