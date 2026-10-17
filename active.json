@@ -45,7 +45,7 @@
   "PEPE_USDT": {
     "entry": 4.0182e-06,
     "is_buy": false,
-    "sl": 4.1581664e-06,
+    "sl": 4.0182e-06,
     "tp1": 3.978018e-06,
     "tp2": 3.937836e-06,
     "tp3": 3.897654e-06,
@@ -57,7 +57,7 @@
       15
     ],
     "time": 1792218930.9949927,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "PUMP"
@@ -65,7 +65,7 @@
   "PENDLE_USDT": {
     "entry": 2.1198,
     "is_buy": false,
-    "sl": 2.192736,
+    "sl": 2.098602,
     "tp1": 2.098602,
     "tp2": 2.077404,
     "tp3": 2.056206,
@@ -77,8 +77,8 @@
       20
     ],
     "time": 1792221203.6789906,
-    "tp1_hit": false,
-    "tp2_hit": false,
+    "tp1_hit": true,
+    "tp2_hit": true,
     "tp3_hit": false,
     "type": "TREND"
   },
