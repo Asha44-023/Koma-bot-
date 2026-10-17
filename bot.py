@@ -1,19 +1,16 @@
-import json, math, os, sys, time, tempfile, requests, io
+import json, math, os, sys, time, tempfile, requests
 from datetime import datetime
 import pytz
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT"]
+SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT","PEPE_USDT","BONK_USDT","WIF_USDT","FLOKI_USDT","DOGE_USDT","SHIB_USDT","MANA_USDT","AXS_USDT","APE_USDT","BOME_USDT","BRETT_USDT","MEW_USDT","PENGU_USDT","WLD_USDT","ARB_USDT","OP_USDT","SEI_USDT","ENA_USDT","PENDLE_USDT","MEME_USDT","TURBO_USDT","1000PEPE_USDT","1000BONK_USDT","1000SHIB_USDT","POPCAT_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE = "active.json", "cooldown.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 3600
 session = requests.Session()
-TAG = "BOT-V150-SWEEP"
+TAG = "BOT-V151-STRUCTURE-35"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
-PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT"]
+PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -68,31 +65,41 @@ def atr_from_kl(d,period=14):
     for i in range(1,len(c)): tr.append(max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])))
     if len(tr)<period: return tr[-1] if tr else 0.0001
     return sum(tr[-period:])/period
-
 def check_sweep_1h(d1h, box, direction, atr_val):
-    """ V150 NEW: 1.5x ATR Sweep Detector """
     if not d1h or not box or atr_val==0: return False, 0.0
     HH,LL=box["HH"],box["LL"]
-    # check last 5 x 1H candles
     for i in range(-5,0):
         try:
             h=d1h["h"][i]; l=d1h["l"][i]; c=d1h["c"][i]
             if direction=="SELL":
                 wick_above = h - HH
-                # must wick above HH and close back below
                 if wick_above > atr_val*0.5 and c < HH:
                     strength = wick_above/atr_val
-                    if 0.5 <= strength <= 3.0: # 0.5x-3x = sweep, >3x = breakout
-                        return True, strength
+                    if 0.5 <= strength <= 3.0: return True, strength
             else:
                 wick_below = LL - l
                 if wick_below > atr_val*0.5 and c > LL:
                     strength = wick_below/atr_val
-                    if 0.5 <= strength <= 3.0:
-                        return True, strength
+                    if 0.5 <= strength <= 3.0: return True, strength
         except: continue
     return False, 0.0
-
+def get_last_structure(d, lookback=70):
+    if not d or len(d["c"])<lookback: return None
+    c=d["c"][-lookback:]; h=d["h"][-lookback:]; l=d["l"][-lookback:]
+    swings_h=[]; swings_l=[]
+    for i in range(2, len(c)-2):
+        if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]: swings_h.append((i, h[i]))
+        if l[i] < l[i-1] and l[i] < l[i-2] and l[i] < l[i+1] and l[i] < l[i+2]: swings_l.append((i, l[i]))
+    if len(swings_h)<2 or len(swings_l)<2: return None
+    last_h = swings_h[-1][1]; prev_h = swings_h[-2][1]
+    last_l = swings_l[-1][1]; prev_l = swings_l[-2][1]
+    return {"last_high": last_h, "prev_high": prev_h, "last_low": last_l, "prev_low": prev_l, "last_hh_type": "HH" if last_h>prev_h else "LH", "last_ll_type": "HL" if last_l>prev_l else "LL"}
+def is_at_last_structure(live, struct, direction, tolerance_pct=1.5):
+    if not struct: return False, "no_struct"
+    if direction=="SELL": target=struct["last_high"]; label=struct["last_hh_type"]
+    else: target=struct["last_low"]; label=struct["last_ll_type"]
+    is_at = abs(live-target)/live <= tolerance_pct/100 if live>0 else False
+    return is_at, label
 def is_origin_of_explosive_move(d, idx):
     if idx < 30 or idx > len(d["c"])-4: return False, 0
     origin_low = min(d["l"][idx-2:idx+1]); origin_high = max(d["h"][idx-2:idx+1])
@@ -101,9 +108,9 @@ def is_origin_of_explosive_move(d, idx):
     if abs(move) < 2.5: return False, 0
     return True, move
 def check_fresh_and_liquidity(d, zl, zh, ztype):
-    touches = 0
+    touches=0
     for i in range(len(d["c"])-4, max(0, len(d["c"])-100), -1):
-        if d["l"][i] <= zh and d["h"][i] >= zl: touches += 1
+        if d["l"][i] <= zh and d["h"][i] >= zl: touches+=1
     return touches <= 2, True, touches
 def get_4h_trend_structure(d4):
     s10=sum(d4["c"][-10:])/10; s20=sum(d4["c"][-20:])/20
@@ -137,7 +144,7 @@ def get_4h_sr_boxes(d4, sym=""):
     if support>0 and (resist-support)/support < 0.03:
         mid=(support+resist)/2; support=mid*0.985; resist=mid*1.015
     gap_pct=(resist-support)/support*100 if support>0 else 0
-    return {"SUPPORT_LOW":support*(1-box_pct),"SUPPORT_HIGH":support*(1+box_pct),"RESIST_LOW":resist*(1-box_pct),"RESIST_HIGH":resist*(1+box_pct),"support_level":support,"resist_level":resist,"gap_pct":gap_pct,"perfect_score": len(perfect_supports)+len(perfect_resists),"fresh_supply":len(perfect_resists),"fresh_demand":len(perfect_supports)}
+    return {"SUPPORT_LOW":support*(1-box_pct),"SUPPORT_HIGH":support*(1+box_pct),"RESIST_LOW":resist*(1-box_pct),"RESIST_HIGH":resist*(1+box_pct),"support_level":support,"resist_level":resist,"gap_pct":gap_pct,"perfect_score": len(perfect_supports)+len(perfect_resists)}
 def get_dynamic_duration(d1, live, target_price):
     daily_moves = [abs(d1["c"][i]-d1["c"][i-1])/d1["c"][i-1]*100 for i in range(-6, -1) if d1["c"][i-1]!=0]
     if not daily_moves: return 2.0, "2.0 days"
@@ -157,12 +164,12 @@ def get_1h_box(d1h, sym=""):
         if rng2/mid2>0.50: return None
         return {"HH":HH2,"LL":LL2,"mid":mid2,"rng":rng2}
     return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
-def daily_ship(d1):
-    h=d1["h"][-20:]; l=d1["l"][-20:]; return "RECT","BOTH",max(h),min(l)
+def daily_ship(d1): h=d1["h"][-20:]; l=d1["l"][-20:]; return "RECT","BOTH",max(h),min(l)
 def check_pullback_15m(d15, box, direction):
-    if not d15: return False,0
+    if not d15: return False,0,"no_data"
     live_c=d15["c"][-1]; rng=box["rng"] or 0.00001
-    return box["LL"]+rng*0.20 <= live_c <= box["LL"]+rng*0.80, (live_c-box["LL"])/rng*100
+    pct = (live_c-box["LL"])/rng*100
+    return 45 <= pct <= 65, pct, f"{pct:.1f}%"
 def check_entry_5m(d5, direction):
     if not d5 or len(d5["c"])<3: return False
     o,c=d5["o"][-1],d5["c"][-1]; o2=d5["o"][-2]
@@ -213,21 +220,26 @@ def scan():
             d1=kl(sym,"Day1"); time.sleep(0.15); d4=kl(sym,"Hour4"); time.sleep(0.15); h1=kl(sym,"Min60"); time.sleep(0.15); m15=kl(sym,"Min15"); time.sleep(0.15); m5=kl(sym,"Min5"); time.sleep(0.15)
             if not d1 or not d4 or not h1 or not m15 or not m5: skipped[sym]="kl_fail"; continue
             sr4h=get_4h_sr_boxes(d4,sym)
-            if not sr4h or sr4h.get("gap_pct",0) < 2.5: skipped[sym]=f"gap_small {sr4h.get('gap_pct',0) if sr4h else 0:.1f}%"; continue
+            if not sr4h or sr4h.get("gap_pct",0) < 20: skipped[sym]=f"gap_small {sr4h.get('gap_pct',0) if sr4h else 0:.1f}% <20%"; continue
             trend_4h,_ = get_4h_trend_structure(d4); sr4h["trend_4h"]=trend_4h
             box1h=get_1h_box(h1, sym)
             if not box1h: skipped[sym]="no_1H_box"; continue
-            atr1h = atr_from_kl(h1,14)
+            struct = get_last_structure(h1, 70)
             live=get_live_price(sym) or h1["c"][-1]
             in_resist= sr4h["RESIST_LOW"]*0.985 <= live <= sr4h["RESIST_HIGH"]*1.025
             in_support= sr4h["SUPPORT_LOW"]*0.975 <= live <= sr4h["SUPPORT_HIGH"]*1.015
             direction="SELL" if in_resist or live>box1h["mid"] else "BUY"
+            at_struct, struct_label = is_at_last_structure(live, struct, direction, 1.5)
+            if not at_struct:
+                skipped[sym]=f"not_at_last_{struct_label}"
+                continue
+            atr1h = atr_from_kl(h1,14)
             target_for_duration = sr4h["resist_level"] if direction=="BUY" else sr4h["support_level"]
             exp_days_val, dur_str = get_dynamic_duration(d1, live, target_for_duration)
-            in_20_80, pct_15m = check_pullback_15m(m15,box1h,direction)
-            if not in_20_80: skipped[sym]=f"no_pullback_{pct_15m:.1f}%"; continue
+            in_ok, pct_15m, pct_label = check_pullback_15m(m15,box1h,direction)
+            if not in_ok: skipped[sym]=f"pullback_{pct_label}_need_45-65%"; continue
             if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
-            ship,_,_,_=daily_ship(d1); is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]; liq1,liq2=next_liquidity(d1,HH,LL,direction)
+            ship,_,_,_=daily_ship(d1); is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
             if is_buy:
                 sl_base = min(LL*0.996, live*0.992); risk_pct = max(0.4, min(2.5, abs(live-sl_base)/live*100))
                 dist = abs(sr4h["resist_level"]-live)/live*100
@@ -244,28 +256,14 @@ def scan():
                 if not (tp3<tp2<tp1<live<sl): skipped[sym]="bad_levels"; continue
                 rr=(live-tp2)/(sl-live) if sl!=live else 0
             if rr<0.4: skipped[sym]=f"rr_low {rr:.2f}"; continue
-
-            # === QUALITY FILTER v2 + SWEEP v3 ===
-            gap = sr4h.get("gap_pct",0)
-            perfect = sr4h.get("perfect_score",0)
+            gap = sr4h.get("gap_pct",0); perfect = sr4h.get("perfect_score",0)
             swept, sweep_x = check_sweep_1h(h1, box1h, direction, atr1h)
-            # 1.5x logic: if no sweep, block unless very big gap
-            if not swept and gap < 12:
-                skipped[sym]=f"no_sweep_{sweep_x:.1f}x GAP{gap:.1f}% P{perfect}"; continue
-            if perfect==0 and gap < 10:
-                skipped[sym]=f"low_quality GAP {gap:.1f}% Perfect 0"; continue
-            if gap < 5:
-                skipped[sym]=f"gap_too_small {gap:.1f}%"; continue
-            if direction=="BUY" and trend_4h=="DOWN" and (gap<15 or perfect==0):
-                skipped[sym]=f"buy_vs_down GAP {gap:.1f}% P{perfect}"; continue
-            if direction=="SELL" and trend_4h=="UP" and (gap<15 or perfect==0):
-                skipped[sym]=f"sell_vs_up GAP {gap:.1f}% P{perfect}"; continue
-            # === END FILTER ===
-
+            if perfect==0 and gap < 25: skipped[sym]=f"low_quality GAP {gap:.1f}%"; continue
+            if gap < 20: skipped[sym]=f"gap_too_small {gap:.1f}%"; continue
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
-            sweep_tag = f"SWEEP {sweep_x:.1f}x" if swept else f"NoSweep GAP{gap:.0f}%"
+            sweep_tag = f"SWEEP {sweep_x:.1f}x" if swept else f"NoSweep"
             tag="💚 BUY" if is_buy else "❤️ SELL"
-            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f} {sweep_tag}\n📍 {'PUMP' if is_buy else 'DUMP'} {dur_str} → {fmt(target_for_duration)} ({dist:.1f}%) Perfect:{perfect}\n4H {trend_4h} GAP {gap:.1f}% 15M {pct_15m:.1f}%\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
+            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} RR:{rr:.2f} {sweep_tag} [{struct_label}]\n📍 {struct_label} {dur_str} → {fmt(target_for_duration)} ({dist:.1f}%) Perfect:{perfect}\n4H {trend_4h} GAP {gap:.1f}% 15M {pct_label}\n🛡️ SL {fmt(sl)} 🎯 TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RUNNER {fmt(runner)} [{TAG}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,HH,LL,ship,sr4h,dur_str,direction))
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     cands.sort(key=lambda x:x[0], reverse=True); print(f"FOUND {len(cands)} | SKIPPED: {skipped}")
