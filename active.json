@@ -22,26 +22,6 @@
     "tp3_hit": false,
     "type": "TREND"
   },
-  "PENGU_USDT": {
-    "entry": 0.007583,
-    "is_buy": false,
-    "sl": 0.0075071700000000005,
-    "tp1": 0.0075071700000000005,
-    "tp2": 0.00743134,
-    "tp3": 0.00735551,
-    "runner": 0.00727968,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792218929.5329065,
-    "tp1_hit": true,
-    "tp2_hit": true,
-    "tp3_hit": false,
-    "type": "TREND"
-  },
   "PEPE_USDT": {
     "entry": 4.0182e-06,
     "is_buy": false,
@@ -82,23 +62,43 @@
     "tp3_hit": true,
     "type": "TREND"
   },
-  "SENT_USDT": {
-    "entry": 0.02126,
-    "is_buy": false,
-    "sl": 0.0210474,
-    "tp1": 0.0210474,
-    "tp2": 0.0208348,
-    "tp3": 0.0206222,
-    "runner": 0.0204096,
+  "FLOKI_USDT": {
+    "entry": 2.381e-05,
+    "is_buy": true,
+    "sl": 2.3256599999999997e-05,
+    "tp1": 2.40481e-05,
+    "tp2": 2.42862e-05,
+    "tp3": 2.45243e-05,
+    "runner": 2.4762400000000002e-05,
     "cfg_close": [
       30,
       30,
       20,
       20
     ],
-    "time": 1792221204.8804486,
-    "tp1_hit": true,
-    "tp2_hit": true,
+    "time": 1792265833.8773296,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND"
+  },
+  "AXS_USDT": {
+    "entry": 1.0513,
+    "is_buy": false,
+    "sl": 1.077292,
+    "tp1": 1.040787,
+    "tp2": 1.030274,
+    "tp3": 1.019761,
+    "runner": 1.009248,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792265835.078892,
+    "tp1_hit": false,
+    "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
   }
