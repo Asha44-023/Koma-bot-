@@ -23,7 +23,7 @@
   "ARB_USDT": {
     "entry": 0.1832,
     "is_buy": false,
-    "sl": 0.18923392,
+    "sl": 0.1832,
     "tp1": 0.17932,
     "tp2": 0.1741,
     "tp3": 0.16965,
@@ -35,37 +35,16 @@
       20
     ],
     "time": 1792306515.3618143,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
   },
-  "BRETT_USDT": {
-    "entry": 0.004626,
-    "is_buy": true,
-    "sl": 0.004502916,
-    "tp1": 0.005015,
-    "tp2": 0.005997,
-    "tp3": 0.006044,
-    "runner": 0.006217,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792323122.3645222,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LL"
-  },
   "WLD_USDT": {
     "entry": 0.4989,
     "is_buy": false,
-    "sl": 0.5130440000000001,
+    "sl": 0.4989,
     "tp1": 0.4927,
     "tp2": 0.4727,
     "tp3": 0.462,
@@ -77,7 +56,7 @@
       20
     ],
     "time": 1792323123.599825,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",

@@ -1,29 +1,30 @@
 {
-  "closed": [],
+  "closed": [
+    {
+      "sym": "ARB_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792334965.149293
+    },
+    {
+      "sym": "BRETT_USDT",
+      "result": "LOSS",
+      "label": "LL",
+      "ts": 1792334965.2921557
+    },
+    {
+      "sym": "WLD_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792334965.424295
+    }
+  ],
   "open": {
     "PEPE_USDT": {
       "entry_time": 1792306513.9014897,
       "label": "LH",
       "live": 3.8878e-06,
       "tp1": 3.7994e-06
-    },
-    "ARB_USDT": {
-      "entry_time": 1792306515.3618279,
-      "label": "LH",
-      "live": 0.1832,
-      "tp1": 0.17932
-    },
-    "BRETT_USDT": {
-      "entry_time": 1792323122.3645258,
-      "label": "LL",
-      "live": 0.004626,
-      "tp1": 0.005015
-    },
-    "WLD_USDT": {
-      "entry_time": 1792323123.5998402,
-      "label": "LH",
-      "live": 0.4989,
-      "tp1": 0.4927
     }
   }
 }
