@@ -1,65 +1,65 @@
 {
-  "PEPE_USDT": {
-    "entry": 3.8878e-06,
-    "is_buy": false,
-    "sl": 3.8878e-06,
-    "tp1": 3.7994e-06,
-    "tp2": 3.752e-06,
-    "tp3": 3.6334e-06,
-    "runner": 3.5607319999999997e-06,
+  "BOME_USDT": {
+    "entry": 0.0006211,
+    "is_buy": true,
+    "sl": 0.0005819628,
+    "tp1": 0.0010452,
+    "tp2": 0.001053,
+    "tp3": 0.0010994,
+    "runner": 0.0011226,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792367576.0885274,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LL"
+  },
+  "FARTCOIN_USDT": {
+    "entry": 0.1439,
+    "is_buy": true,
+    "sl": 0.13238832,
+    "tp1": 0.15992,
+    "tp2": 0.16742,
+    "tp3": 0.17488,
+    "runner": 0.1806,
     "cfg_close": [
       40,
       30,
       15,
       15
     ],
-    "time": 1792306513.9014864,
-    "tp1_hit": true,
+    "time": 1792367577.0932436,
+    "tp1_hit": false,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "PUMP",
-    "label": "LH"
+    "label": "LL"
   },
-  "ARB_USDT": {
-    "entry": 0.1832,
-    "is_buy": false,
-    "sl": 0.1832,
-    "tp1": 0.17932,
-    "tp2": 0.1741,
-    "tp3": 0.16965,
-    "runner": 0.16164,
+  "WLD_USDT": {
+    "entry": 0.4891,
+    "is_buy": true,
+    "sl": 0.4547736,
+    "tp1": 0.5255,
+    "tp2": 0.5334,
+    "tp3": 0.5472,
+    "runner": 0.576,
     "cfg_close": [
       30,
       30,
       20,
       20
     ],
-    "time": 1792306515.3618143,
-    "tp1_hit": true,
+    "time": 1792367578.0972545,
+    "tp1_hit": false,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
-    "label": "LH"
-  },
-  "WLD_USDT": {
-    "entry": 0.4989,
-    "is_buy": false,
-    "sl": 0.4727,
-    "tp1": 0.4927,
-    "tp2": 0.4727,
-    "tp3": 0.462,
-    "runner": 0.4588,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792323123.599825,
-    "tp1_hit": true,
-    "tp2_hit": true,
-    "tp3_hit": true,
-    "type": "TREND",
-    "label": "LH"
+    "label": "HL"
   }
 }

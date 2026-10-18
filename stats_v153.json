@@ -23,7 +23,44 @@
       "result": "WIN",
       "label": "LH",
       "ts": 1792352534.567224
+    },
+    {
+      "sym": "PEPE_USDT",
+      "result": "LOSS",
+      "label": "LH",
+      "ts": 1792367528.58078
+    },
+    {
+      "sym": "ARB_USDT",
+      "result": "LOSS",
+      "label": "LH",
+      "ts": 1792367528.7229354
+    },
+    {
+      "sym": "WLD_USDT",
+      "result": "LOSS",
+      "label": "LH",
+      "ts": 1792367528.8575184
     }
   ],
-  "open": {}
+  "open": {
+    "BOME_USDT": {
+      "entry_time": 1792367576.0885313,
+      "label": "LL",
+      "live": 0.0006211,
+      "tp1": 0.0010452
+    },
+    "FARTCOIN_USDT": {
+      "entry_time": 1792367577.0932574,
+      "label": "LL",
+      "live": 0.1439,
+      "tp1": 0.15992
+    },
+    "WLD_USDT": {
+      "entry_time": 1792367578.0972688,
+      "label": "HL",
+      "live": 0.4891,
+      "tp1": 0.5255
+    }
+  }
 }
