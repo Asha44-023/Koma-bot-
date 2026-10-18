@@ -1,4 +1,4 @@
-name: Run Bot V152-STRUCTURE-RULE-15MIN
+name: Run Bot V153-LIQ-TP1-NEAR
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: bot-v152-structure-rule
+  group: bot-v153-liq-tp1
   cancel-in-progress: false
 jobs:
   run-bot:
@@ -32,6 +32,6 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@github.com"
           git pull --rebase || true
-          git add active.json cooldown.json || true
-          git diff --staged --quiet || git commit -m "auto save V152-STRUCTURE-RULE [skip ci]"
+          git add active.json cooldown.json stats_v153.json liquidity.json || true
+          git diff --staged --quiet || git commit -m "auto save V153-LIQ-NEAR [skip ci]"
           git push || true
