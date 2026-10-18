@@ -1,0 +1,17 @@
+{
+  "closed": [],
+  "open": {
+    "PEPE_USDT": {
+      "entry_time": 1792306513.9014897,
+      "label": "LH",
+      "live": 3.8878e-06,
+      "tp1": 3.7994e-06
+    },
+    "ARB_USDT": {
+      "entry_time": 1792306515.3618279,
+      "label": "LH",
+      "live": 0.1832,
+      "tp1": 0.17932
+    }
+  }
+}
