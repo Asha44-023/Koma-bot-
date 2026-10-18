@@ -45,7 +45,7 @@
   "APE_USDT": {
     "entry": 0.1483,
     "is_buy": false,
-    "sl": 0.15471639999999998,
+    "sl": 0.145334,
     "tp1": 0.14681699999999998,
     "tp2": 0.145334,
     "tp3": 0.14385099999999998,
@@ -57,9 +57,9 @@
       20
     ],
     "time": 1792273522.280343,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
+    "tp1_hit": true,
+    "tp2_hit": true,
+    "tp3_hit": true,
     "type": "TREND"
   },
   "SHIB_USDT": {
@@ -85,7 +85,7 @@
   "TURBO_USDT": {
     "entry": 0.0008766,
     "is_buy": false,
-    "sl": 0.000905608,
+    "sl": 0.0008766,
     "tp1": 0.0008678339999999999,
     "tp2": 0.0008590679999999999,
     "tp3": 0.0008503019999999999,
@@ -97,7 +97,7 @@
       20
     ],
     "time": 1792286794.8023357,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND"
