@@ -1,4 +1,4 @@
-name: Run Bot V153-LIQ-TP1-NEAR
+name: Run Bot V153-AUTO
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -6,32 +6,25 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: bot-v153-liq-tp1
+  group: bot-v153-auto
   cancel-in-progress: false
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install deps
-        run: pip install requests pytz
-      - name: Run scan once
-        run: python bot.py --once
+      - run: pip install requests pytz
+      - run: python bot.py --once
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      - name: Commit state
-        run: |
+      - run: |
           git config user.name "bot"
           git config user.email "bot@github.com"
           git pull --rebase || true
-          git add active.json cooldown.json stats_v153.json liquidity.json || true
-          git diff --staged --quiet || git commit -m "auto save V153-LIQ-NEAR [skip ci]"
+          git add active.json cooldown.json stats_v153.json || true
+          git diff --staged --quiet || git commit -m "auto save V153-AUTO [skip ci]"
           git push || true
