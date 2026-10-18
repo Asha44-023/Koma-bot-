@@ -17,14 +17,13 @@
       "result": "WIN",
       "label": "LH",
       "ts": 1792334965.424295
+    },
+    {
+      "sym": "PEPE_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792352534.567224
     }
   ],
-  "open": {
-    "PEPE_USDT": {
-      "entry_time": 1792306513.9014897,
-      "label": "LH",
-      "live": 3.8878e-06,
-      "tp1": 3.7994e-06
-    }
-  }
+  "open": {}
 }

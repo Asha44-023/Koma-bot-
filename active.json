@@ -2,7 +2,7 @@
   "PEPE_USDT": {
     "entry": 3.8878e-06,
     "is_buy": false,
-    "sl": 4.0147952e-06,
+    "sl": 3.8878e-06,
     "tp1": 3.7994e-06,
     "tp2": 3.752e-06,
     "tp3": 3.6334e-06,
@@ -14,7 +14,7 @@
       15
     ],
     "time": 1792306513.9014864,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "PUMP",
@@ -44,7 +44,7 @@
   "WLD_USDT": {
     "entry": 0.4989,
     "is_buy": false,
-    "sl": 0.4989,
+    "sl": 0.4727,
     "tp1": 0.4927,
     "tp2": 0.4727,
     "tp3": 0.462,
@@ -57,8 +57,8 @@
     ],
     "time": 1792323123.599825,
     "tp1_hit": true,
-    "tp2_hit": false,
-    "tp3_hit": false,
+    "tp2_hit": true,
+    "tp3_hit": true,
     "type": "TREND",
     "label": "LH"
   }
