@@ -40,5 +40,47 @@
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
+  },
+  "BRETT_USDT": {
+    "entry": 0.004626,
+    "is_buy": true,
+    "sl": 0.004502916,
+    "tp1": 0.005015,
+    "tp2": 0.005997,
+    "tp3": 0.006044,
+    "runner": 0.006217,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792323122.3645222,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LL"
+  },
+  "WLD_USDT": {
+    "entry": 0.4989,
+    "is_buy": false,
+    "sl": 0.5130440000000001,
+    "tp1": 0.4927,
+    "tp2": 0.4727,
+    "tp3": 0.462,
+    "runner": 0.4588,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792323123.599825,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
   }
 }
