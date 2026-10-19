@@ -1,4 +1,4 @@
-name: Run Bot V155-BTC-FILTER
+name: Run Bot V155-BTC-FILTER-ALL
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -20,12 +20,15 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
       - name: Save State
         run: |
           git config user.name "bot"
           git config user.email "bot@github.com"
           git add active.json cooldown.json stats_v153.json || true
-          git diff --staged --quiet && exit 0
-          git commit -m "auto save"
+          git diff --staged --quiet && echo "no changes" && exit 0
+          git commit -m "auto save $(date -u)"
+          git pull --rebase
           git push
