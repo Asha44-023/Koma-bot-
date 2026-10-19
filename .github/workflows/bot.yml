@@ -35,5 +35,5 @@ jobs:
           git config user.email "bot@github.com"
           git add active.json cooldown.json stats_v153.json || true
           git diff --staged --quiet && exit 0
-          git commit -m "auto save V153 $(date -u +%Y-%m-%dT%H:%M:00Z)"
+          git commit -m "auto save V155-BTC $(date -u +%Y-%m-%dT%H:%M:00Z)"
           git push
