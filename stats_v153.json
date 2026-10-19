@@ -41,6 +41,12 @@
       "result": "LOSS",
       "label": "LH",
       "ts": 1792367528.8575184
+    },
+    {
+      "sym": "VELVET_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792392629.7158406
     }
   ],
   "open": {
@@ -67,12 +73,6 @@
       "label": "LH",
       "live": 1.0064,
       "tp1": 0.9964
-    },
-    "VELVET_USDT": {
-      "entry_time": 1792380539.8375862,
-      "label": "LH",
-      "live": 0.06738,
-      "tp1": 0.06666
     },
     "OP_USDT": {
       "entry_time": 1792382110.145022,

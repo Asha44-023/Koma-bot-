@@ -86,7 +86,7 @@
   "VELVET_USDT": {
     "entry": 0.06738,
     "is_buy": false,
-    "sl": 0.06934628000000001,
+    "sl": 0.06738,
     "tp1": 0.06666,
     "tp2": 0.066,
     "tp3": 0.06505,
@@ -98,7 +98,7 @@
       20
     ],
     "time": 1792380539.8375733,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
