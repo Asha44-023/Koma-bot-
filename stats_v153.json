@@ -61,6 +61,18 @@
       "label": "HL",
       "live": 0.4891,
       "tp1": 0.5255
+    },
+    "AXS_USDT": {
+      "entry_time": 1792380538.8336947,
+      "label": "LH",
+      "live": 1.0064,
+      "tp1": 0.9964
+    },
+    "VELVET_USDT": {
+      "entry_time": 1792380539.8375862,
+      "label": "LH",
+      "live": 0.06738,
+      "tp1": 0.06666
     }
   }
 }

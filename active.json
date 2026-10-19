@@ -61,5 +61,47 @@
     "tp3_hit": false,
     "type": "TREND",
     "label": "HL"
+  },
+  "AXS_USDT": {
+    "entry": 1.0064,
+    "is_buy": false,
+    "sl": 1.0301040000000001,
+    "tp1": 0.9964,
+    "tp2": 0.9764719999999999,
+    "tp3": 0.9569425599999999,
+    "runner": 0.9378037087999999,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792380538.8336923,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "VELVET_USDT": {
+    "entry": 0.06738,
+    "is_buy": false,
+    "sl": 0.06934628000000001,
+    "tp1": 0.06666,
+    "tp2": 0.066,
+    "tp3": 0.06505,
+    "runner": 0.063749,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792380539.8375733,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
   }
 }
