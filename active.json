@@ -103,5 +103,68 @@
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
+  },
+  "OP_USDT": {
+    "entry": 0.12516,
+    "is_buy": false,
+    "sl": 0.1286124,
+    "tp1": 0.11815,
+    "tp2": 0.11103,
+    "tp3": 0.1088094,
+    "runner": 0.106633212,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792382110.1450179,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "SAND_USDT": {
+    "entry": 0.06098,
+    "is_buy": false,
+    "sl": 0.06564152,
+    "tp1": 0.05789,
+    "tp2": 0.05355,
+    "tp3": 0.05273,
+    "runner": 0.051675399999999996,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "time": 1792382111.119041,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP",
+    "label": "LH"
+  },
+  "SEI_USDT": {
+    "entry": 0.06121,
+    "is_buy": false,
+    "sl": 0.06380419999999999,
+    "tp1": 0.06037,
+    "tp2": 0.05762,
+    "tp3": 0.0564676,
+    "runner": 0.055338248,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792382111.8007863,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
   }
 }
