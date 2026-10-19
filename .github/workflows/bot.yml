@@ -1,4 +1,4 @@
-name: Run Bot V153-AUTO
+name: Run Bot V155-BTC-FILTER
 on:
   schedule:
     - cron: '*/15 * * * *'
