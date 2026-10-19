@@ -27,8 +27,8 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@github.com"
-          git add active.json cooldown.json stats_v153.json || true
-          git diff --staged --quiet && echo "no changes" && exit 0
-          git commit -m "auto save $(date -u)"
+          date -u > last_run.txt
+          git add active.json cooldown.json stats_v153.json last_run.txt || true
+          git commit -m "auto save $(date -u)" || echo "no changes to commit"
           git pull --rebase
           git push
