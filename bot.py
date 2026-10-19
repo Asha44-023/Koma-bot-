@@ -41,11 +41,22 @@ def fmt(p):
     if p<0.01: return f"{p:.8f}"
     if p<1: return f"{p:.6f}"
     return f"{p:.4f}"
+
 def tg(m):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT: print(m); return
-    try: session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",data={"chat_id":TELEGRAM_CHAT,"text":m},timeout=10)
-    except: pass
-    print(m)
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+        print(f"NO TG CREDS")
+        print(m); return
+    try:
+        token = TELEGRAM_TOKEN.strip()
+        chat = str(TELEGRAM_CHAT).strip()
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        r = session.post(url, json={"chat_id": chat, "text": m}, timeout=15)
+        print(f"TG {r.status_code}: {r.text[:300]}")
+        print(m)
+    except Exception as e:
+        print(f"TG EXCEPTION {e}")
+        print(m)
+
 def kl(symbol,interval):
     sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400}
     sec=sec_map.get(interval,300); end=int(time.time()); start=end-sec*400
@@ -203,7 +214,6 @@ def scan():
                 skipped[sym]=f"not_at_last {struct['hh_type']}/{struct['ll_type']}"; continue
             if at_hh: label=struct["hh_type"]; direction="SELL"; setup_type=f"REV @{label}" if label=="HH" else f"CONT @{label}"
             else: label=struct["ll_type"]; direction="BUY"; setup_type=f"CONT @{label}" if label=="HL" else f"REV @{label}"
-            # BTC FILTER LOGIC
             if btc_trend=="UP" and direction=="SELL":
                 skipped[sym]=f"btc_up_skip_sell"; continue
             if btc_trend=="DOWN" and direction=="BUY":
