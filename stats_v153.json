@@ -53,6 +53,18 @@
       "result": "WIN",
       "label": "LH",
       "ts": 1792425139.0908883
+    },
+    {
+      "sym": "AXS_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792443067.368565
+    },
+    {
+      "sym": "SEI_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792443068.7922204
     }
   ],
   "open": {
@@ -74,12 +86,6 @@
       "live": 0.4891,
       "tp1": 0.5255
     },
-    "AXS_USDT": {
-      "entry_time": 1792380538.8336947,
-      "label": "LH",
-      "live": 1.0064,
-      "tp1": 0.9964
-    },
     "OP_USDT": {
       "entry_time": 1792382110.145022,
       "label": "LH",
@@ -91,12 +97,6 @@
       "label": "LH",
       "live": 0.06098,
       "tp1": 0.05789
-    },
-    "SEI_USDT": {
-      "entry_time": 1792382111.8008006,
-      "label": "LH",
-      "live": 0.06121,
-      "tp1": 0.06037
     },
     "GRASS_USDT": {
       "entry_time": 1792425174.7298975,
@@ -121,6 +121,36 @@
       "label": "HH",
       "live": 0.007514,
       "tp1": 0.007379
+    },
+    "MUBARAK_USDT": {
+      "entry_time": 1792443100.6333776,
+      "label": "HL",
+      "live": 0.05313,
+      "tp1": 0.05872
+    },
+    "SENT_USDT": {
+      "entry_time": 1792443101.436601,
+      "label": "HL",
+      "live": 0.0223,
+      "tp1": 0.02482
+    },
+    "PEPE_USDT": {
+      "entry_time": 1792443102.1572285,
+      "label": "HH",
+      "live": 4.1016e-06,
+      "tp1": 3.9724e-06
+    },
+    "DOGE_USDT": {
+      "entry_time": 1792443102.8933418,
+      "label": "LH",
+      "live": 0.07925,
+      "tp1": 0.07766
+    },
+    "WIF_USDT": {
+      "entry_time": 1792443103.6326652,
+      "label": "HH",
+      "live": 0.1987,
+      "tp1": 0.1957
     }
   }
 }
