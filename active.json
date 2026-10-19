@@ -86,7 +86,7 @@
   "VELVET_USDT": {
     "entry": 0.06738,
     "is_buy": false,
-    "sl": 0.06666,
+    "sl": 0.066,
     "tp1": 0.06666,
     "tp2": 0.066,
     "tp3": 0.06505,
@@ -100,7 +100,7 @@
     "time": 1792380539.8375733,
     "tp1_hit": true,
     "tp2_hit": true,
-    "tp3_hit": false,
+    "tp3_hit": true,
     "type": "TREND",
     "label": "LH"
   },
@@ -170,7 +170,7 @@
   "MANA_USDT": {
     "entry": 0.08371,
     "is_buy": false,
-    "sl": 0.0857416,
+    "sl": 0.08371,
     "tp1": 0.08314,
     "tp2": 0.0814772,
     "tp3": 0.079847656,
@@ -182,10 +182,94 @@
       20
     ],
     "time": 1792398847.2548668,
+    "tp1_hit": true,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "GRASS_USDT": {
+    "entry": 0.5874,
+    "is_buy": true,
+    "sl": 0.5513856,
+    "tp1": 0.7007,
+    "tp2": 0.7512,
+    "tp3": 0.777,
+    "runner": 0.7958,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "time": 1792425174.7298949,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP",
+    "label": "HL"
+  },
+  "MEW_USDT": {
+    "entry": 0.0004087,
+    "is_buy": false,
+    "sl": 0.000417664,
+    "tp1": 0.0004026,
+    "tp2": 0.000394548,
+    "tp3": 0.00038665704,
+    "runner": 0.00037892389919999997,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792425175.41705,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HH"
+  },
+  "POPCAT_USDT": {
+    "entry": 0.04359,
+    "is_buy": false,
+    "sl": 0.04468804,
+    "tp1": 0.04289,
+    "tp2": 0.0416,
+    "tp3": 0.040768,
+    "runner": 0.03995264,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792425176.1212971,
     "tp1_hit": false,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
+  },
+  "PENGU_USDT": {
+    "entry": 0.007514,
+    "is_buy": false,
+    "sl": 0.007824171999999999,
+    "tp1": 0.007379,
+    "tp2": 0.007304,
+    "tp3": 0.007097,
+    "runner": 0.00695506,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792425176.8335972,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HH"
   }
 }

@@ -47,6 +47,12 @@
       "result": "WIN",
       "label": "LH",
       "ts": 1792392629.7158406
+    },
+    {
+      "sym": "MANA_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792425139.0908883
     }
   ],
   "open": {
@@ -92,11 +98,29 @@
       "live": 0.06121,
       "tp1": 0.06037
     },
-    "MANA_USDT": {
-      "entry_time": 1792398847.254871,
+    "GRASS_USDT": {
+      "entry_time": 1792425174.7298975,
+      "label": "HL",
+      "live": 0.5874,
+      "tp1": 0.7007
+    },
+    "MEW_USDT": {
+      "entry_time": 1792425175.4170647,
+      "label": "HH",
+      "live": 0.0004087,
+      "tp1": 0.0004026
+    },
+    "POPCAT_USDT": {
+      "entry_time": 1792425176.1213114,
       "label": "LH",
-      "live": 0.08371,
-      "tp1": 0.08314
+      "live": 0.04359,
+      "tp1": 0.04289
+    },
+    "PENGU_USDT": {
+      "entry_time": 1792425176.8336122,
+      "label": "HH",
+      "live": 0.007514,
+      "tp1": 0.007379
     }
   }
 }
