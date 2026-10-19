@@ -6,13 +6,12 @@ SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_US
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v153.json"
-DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 5, 3600
+DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 20, 3600
 NEAR_THRESHOLD = 0.05
 session = requests.Session()
-TAG = "V155-BTC-FILTER"
+TAG = "V155-BTC-FILTER-ALL"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
-
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -41,22 +40,17 @@ def fmt(p):
     if p<0.01: return f"{p:.8f}"
     if p<1: return f"{p:.6f}"
     return f"{p:.4f}"
-
 def tg(m):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        print(f"NO TG CREDS")
-        print(m); return
+        print(f"NO TG CREDS"); print(m); return
     try:
         token = TELEGRAM_TOKEN.strip()
         chat = str(TELEGRAM_CHAT).strip()
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         r = session.post(url, json={"chat_id": chat, "text": m}, timeout=15)
-        print(f"TG {r.status_code}: {r.text[:300]}")
-        print(m)
+        print(f"TG {r.status_code}: {r.text[:300]}"); print(m)
     except Exception as e:
-        print(f"TG EXCEPTION {e}")
-        print(m)
-
+        print(f"TG EXCEPTION {e}"); print(m)
 def kl(symbol,interval):
     sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400}
     sec=sec_map.get(interval,300); end=int(time.time()); start=end-sec*400
@@ -97,14 +91,12 @@ def get_btc_filter():
         if not btc: return "RANGE"
         struct = get_last_structure(btc,80)
         return struct["trend"] if struct else "RANGE"
-    except:
-        return "RANGE"
+    except: return "RANGE"
 def get_4h_sr_boxes(d4):
     h=d4["h"]; l=d4["l"]; lookback=50
     lows=[l[i] for i in range(len(l)-lookback, len(l)-2) if l[i] < l[i-1] and l[i] < l[i+1]]
     highs=[h[i] for i in range(len(h)-lookback, len(h)-2) if h[i] > h[i-1] and h[i] > h[i+1]]
-    if not lows or not highs:
-        return {"support_level": min(l[-20:]), "resist_level": max(h[-20:]), "gap_pct": 15}
+    if not lows or not highs: return {"support_level": min(l[-20:]), "resist_level": max(h[-20:]), "gap_pct": 15}
     sup=min(lows); res=max(highs); gap=(res-sup)/sup*100 if sup>0 else 0
     return {"support_level":sup,"resist_level":res,"gap_pct":gap}
 def get_1h_box(d1h):
@@ -194,7 +186,7 @@ def scan():
         if data.get("tp3_hit") and ((is_buy and p>=runner_target) or (not is_buy and p<=runner_target)):
             profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=profit; save_c(); tg(f"🚀 RUNNER {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} [{label}]"); ACTIVE.pop(sym,None); save_a()
     print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} open:{len(STATS['open'])} ---")
-    if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT or len(ACTIVE)>=MAX_ACTIVE: return
+    if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
     cands=[]; skipped={}; near_ll=[]
     for sym in SYMBOLS:
         try:
@@ -214,10 +206,8 @@ def scan():
                 skipped[sym]=f"not_at_last {struct['hh_type']}/{struct['ll_type']}"; continue
             if at_hh: label=struct["hh_type"]; direction="SELL"; setup_type=f"REV @{label}" if label=="HH" else f"CONT @{label}"
             else: label=struct["ll_type"]; direction="BUY"; setup_type=f"CONT @{label}" if label=="HL" else f"REV @{label}"
-            if btc_trend=="UP" and direction=="SELL":
-                skipped[sym]=f"btc_up_skip_sell"; continue
-            if btc_trend=="DOWN" and direction=="BUY":
-                skipped[sym]=f"btc_down_skip_buy"; continue
+            if btc_trend=="UP" and direction=="SELL": skipped[sym]=f"btc_up_skip_sell"; continue
+            if btc_trend=="DOWN" and direction=="BUY": skipped[sym]=f"btc_down_skip_buy"; continue
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]=f"gap_small {sr4h.get('gap_pct',0):.1f}%"; continue
             in_ok,pct_15m,pct_label=check_pullback_15m(m15,box1h,direction)
@@ -241,12 +231,13 @@ def scan():
     print(f"FOUND {len(cands)} | BTC:{btc_trend} | SKIPPED: {skipped}")
     if near_ll: print(f"👀 NEAR (5% pipeline): {', '.join(near_ll)}")
     if not cands: return
-    for it in cands[:3]:
-        if len(ACTIVE)>=MAX_ACTIVE: break
+    for it in cands:  # SEND ALL
+        if len(ACTIVE)>=MAX_ACTIVE: 
+            print(f"MAX {MAX_ACTIVE} hit, {len(cands)} found"); break
         rr,sym,msg,entry,is_buy,sl,tp1,tp2,tp3,runner,cfg,label=it
         ACTIVE[sym]={"entry":entry,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"cfg_close":cfg["CLOSE"],"time":time.time(),"tp1_hit":False,"tp2_hit":False,"tp3_hit":False,"type":get_tp_config(sym)[1],"label":label}
         STATS["open"][sym]={"entry_time":time.time(),"label":label,"live":entry,"tp1":tp1}
-        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg); time.sleep(1)
+        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg); time.sleep(0.5)
 
 if "--once" in sys.argv: scan()
 else:
