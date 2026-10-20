@@ -9,7 +9,7 @@ ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 20, 3600
 NEAR_THRESHOLD = 0.05
 session = requests.Session()
-TAG = "V155-BTC-FILTER-ALL"
+TAG = "V156-NO-FADE-UP"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -208,6 +208,8 @@ def scan():
             else: label=struct["ll_type"]; direction="BUY"; setup_type=f"CONT @{label}" if label=="HL" else f"REV @{label}"
             if btc_trend=="UP" and direction=="SELL": skipped[sym]=f"btc_up_skip_sell"; continue
             if btc_trend=="DOWN" and direction=="BUY": skipped[sym]=f"btc_down_skip_buy"; continue
+            if struct["trend"]=="UP" and direction=="SELL": skipped[sym]=f"coin_up_skip_sell [{setup_type}]"; continue
+            if struct["trend"]=="DOWN" and direction=="BUY": skipped[sym]=f"coin_down_skip_buy [{setup_type}]"; continue
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]=f"gap_small {sr4h.get('gap_pct',0):.1f}%"; continue
             in_ok,pct_15m,pct_label=check_pullback_15m(m15,box1h,direction)
@@ -231,7 +233,7 @@ def scan():
     print(f"FOUND {len(cands)} | BTC:{btc_trend} | SKIPPED: {skipped}")
     if near_ll: print(f"👀 NEAR (5% pipeline): {', '.join(near_ll)}")
     if not cands: return
-    for it in cands:  # SEND ALL
+    for it in cands:
         if len(ACTIVE)>=MAX_ACTIVE: 
             print(f"MAX {MAX_ACTIVE} hit, {len(cands)} found"); break
         rr,sym,msg,entry,is_buy,sl,tp1,tp2,tp3,runner,cfg,label=it
