@@ -1,1 +1,18 @@
-{"closed": [], "open": {}}
+{
+  "closed": [
+    {
+      "sym": "LAB_USDT",
+      "result": "LOSS",
+      "label": "LH",
+      "ts": 1792502345.6223361
+    }
+  ],
+  "open": {
+    "KOMA_USDT": {
+      "entry_time": 1792502380.1631773,
+      "label": "LL",
+      "live": 0.017177,
+      "tp1": 0.016451
+    }
+  }
+}
