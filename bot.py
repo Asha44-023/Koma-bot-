@@ -8,7 +8,7 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 20, 3600
 NEAR_THRESHOLD = 0.05
-RETEST_THRESHOLD = 0.008  # 0.8% retest zone
+RETEST_THRESHOLD = 0.008
 session = requests.Session()
 TAG = "V157-TRUE-BNR-HH-LL"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
@@ -72,8 +72,7 @@ def get_live_price(s):
     return None
 def get_last_structure(d, lookback=80):
     if not d or len(d["c"])<lookback: return None
-    h=d["h"][-lookback:]; l=d["l"][-lookback:]
-    c=d["c"][-lookback:]
+    h=d["h"][-lookback:]; l=d["l"][-lookback:]; c=d["c"][-lookback:]
     swings_h=[]; swings_l=[]
     for i in range(5, len(h)-5):
         if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]: swings_h.append((i, h[i]))
@@ -86,15 +85,9 @@ def get_last_structure(d, lookback=80):
     if hh_type=="HH" and ll_type=="HL": trend="UP"
     elif hh_type=="LH" and ll_type=="LL": trend="DOWN"
     else: trend="RANGE"
-    # Break detection
-    last_close = c[-1]
-    # Has price broken last HH/LL recently? Check last 5 candles
     broke_hh = any(cc > last_h for cc in c[-5:])
     broke_ll = any(cc < last_l for cc in c[-5:])
-    broke_hl = any(cc < last_l for cc in c[-5:]) if ll_type=="HL" else False
-    broke_lh = any(cc > last_h for cc in c[-5:]) if hh_type=="LH" else False
-    return {"last_high":last_h,"prev_high":prev_h,"last_low":last_l,"prev_low":prev_l,"hh_type":hh_type,"ll_type":ll_type,"trend":trend,"broke_hh":broke_hh,"broke_ll":broke_ll,"broke_hl":broke_hl,"broke_lh":broke_lh,"last_close":last_close}
-
+    return {"last_high":last_h,"prev_high":prev_h,"last_low":last_l,"prev_low":prev_l,"hh_type":hh_type,"ll_type":ll_type,"trend":trend,"broke_hh":broke_hh,"broke_ll":broke_ll,"last_close":c[-1]}
 def get_btc_filter():
     try:
         btc = kl("BTC_USDT","Min60")
@@ -208,55 +201,32 @@ def scan():
             live=get_live_price(sym) or h1["c"][-1]
             box1h=get_1h_box(h1)
             if not box1h: skipped[sym]="no_1H_box"; continue
-            
-            # ===== V157 TRUE BNR LOGIC =====
-            # YOUR RULE: Cont = HH/LL break+retest, Rev = HL/LH break
-            direction = None; setup_type = None; retest_level = None; label = None
-            
-            # 1. UP CONT: Break HH then Retest HH
+            direction=None; setup_type=None; retest_level=None; label=None
             if struct["broke_hh"]:
                 dist = abs(live - struct["last_high"]) / live
                 if dist <= RETEST_THRESHOLD:
-                    direction = "BUY"
-                    setup_type = "CONT @HH-RETEST"
-                    retest_level = struct["last_high"]
-                    label = "HH"
-            
-            # 2. DOWN CONT: Break LL then Retest LL
+                    direction="BUY"; setup_type="CONT @HH-RETEST"; retest_level=struct["last_high"]; label="HH"
             if not direction and struct["broke_ll"]:
                 dist = abs(live - struct["last_low"]) / live
                 if dist <= RETEST_THRESHOLD:
-                    direction = "SELL"
-                    setup_type = "CONT @LL-RETEST"
-                    retest_level = struct["last_low"]
-                    label = "LL"
-
-            # REVERSALS - Disabled for high winrate, enable if you want:
-            # if not direction and struct["trend"]=="UP" and struct["broke_hl"]:
-            #     direction="SELL"; setup_type="REV @HL-BREAK"; label="HL"
-            # if not direction and struct["trend"]=="DOWN" and struct["broke_lh"]:
-            #     direction="BUY"; setup_type="REV @LH-BREAK"; label="LH"
-
+                    direction="SELL"; setup_type="CONT @LL-RETEST"; retest_level=struct["last_low"]; label="LL"
             if not direction:
-                # Show why skipped
                 if struct["broke_hh"] or struct["broke_ll"]:
-                    skipped[sym]=f"break_no_retest HH:{struct['broke_hh']} LL:{struct['broke_ll']} dist {dist*100:.2f}%"
+                    skipped[sym]=f"break_no_retest"
                 else:
                     dist_hh=abs(live-struct["last_high"])/live; dist_ll=abs(live-struct["last_low"])/live
                     if dist_hh<=NEAR_THRESHOLD or dist_ll<=NEAR_THRESHOLD:
-                        near_ll.append(f"{sym.replace('_USDT','')} {dist_hh*100:.1f}%/{dist_ll*100:.1f}% to {struct['hh_type']}/{struct['ll_type']}")
+                        near_ll.append(f"{sym.replace('_USDT','')} {dist_hh*100:.1f}%/{dist_ll*100:.1f}%")
                     skipped[sym]=f"no_break {struct['hh_type']}/{struct['ll_type']}"
                 continue
-            # ===== END V157 LOGIC =====
-
             if btc_trend=="UP" and direction=="SELL": skipped[sym]=f"btc_up_skip_sell"; continue
             if btc_trend=="DOWN" and direction=="BUY": skipped[sym]=f"btc_down_skip_buy"; continue
-            if struct["trend"]=="UP" and direction=="SELL": skipped[sym]=f"coin_up_skip_sell [{setup_type}]"; continue
-            if struct["trend"]=="DOWN" and direction=="BUY": skipped[sym]=f"coin_down_skip_buy [{setup_type}]"; continue
+            if struct["trend"]=="UP" and direction=="SELL": skipped[sym]=f"coin_up_skip_sell"; continue
+            if struct["trend"]=="DOWN" and direction=="BUY": skipped[sym]=f"coin_down_skip_buy"; continue
             sr4h=get_4h_sr_boxes(d4)
-            if sr4h.get("gap_pct",0)<3: skipped[sym]=f"gap_small {sr4h.get('gap_pct',0):.1f}%"; continue
+            if sr4h.get("gap_pct",0)<3: skipped[sym]=f"gap_small"; continue
             in_ok,pct_15m,pct_label=check_pullback_15m(m15,box1h,direction)
-            if not in_ok: skipped[sym]=f"pullback_{pct_label}_need_30-75%"; continue
+            if not in_ok: skipped[sym]=f"pullback_{pct_label}"; continue
             if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
             is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
             sl=min(LL*0.996, live*0.992) if is_buy else max(HH*1.004, live*1.008)
@@ -274,16 +244,14 @@ def scan():
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     cands.sort(key=lambda x:x[0], reverse=True)
     print(f"FOUND {len(cands)} | BTC:{btc_trend} | SKIPPED: {skipped}")
-    if near_ll: print(f"👀 NEAR (5% pipeline): {', '.join(near_ll)}")
+    if near_ll: print(f"👀 NEAR: {', '.join(near_ll)}")
     if not cands: return
     for it in cands:
-        if len(ACTIVE)>=MAX_ACTIVE: 
-            print(f"MAX {MAX_ACTIVE} hit, {len(cands)} found"); break
+        if len(ACTIVE)>=MAX_ACTIVE: break
         rr,sym,msg,entry,is_buy,sl,tp1,tp2,tp3,runner,cfg,label=it
         ACTIVE[sym]={"entry":entry,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"cfg_close":cfg["CLOSE"],"time":time.time(),"tp1_hit":False,"tp2_hit":False,"tp3_hit":False,"type":get_tp_config(sym)[1],"label":label}
         STATS["open"][sym]={"entry_time":time.time(),"label":label,"live":entry,"tp1":tp1}
         COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg); time.sleep(0.5)
-
 if "--once" in sys.argv: scan()
 else:
     while True:
