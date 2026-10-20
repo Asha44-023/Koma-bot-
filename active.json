@@ -44,7 +44,7 @@
   "WLD_USDT": {
     "entry": 0.4891,
     "is_buy": true,
-    "sl": 0.4547736,
+    "sl": 0.5255,
     "tp1": 0.5255,
     "tp2": 0.5334,
     "tp3": 0.5472,
@@ -56,8 +56,8 @@
       20
     ],
     "time": 1792367578.0972545,
-    "tp1_hit": false,
-    "tp2_hit": false,
+    "tp1_hit": true,
+    "tp2_hit": true,
     "tp3_hit": false,
     "type": "TREND",
     "label": "HL"

@@ -65,6 +65,12 @@
       "result": "WIN",
       "label": "LH",
       "ts": 1792443068.7922204
+    },
+    {
+      "sym": "WLD_USDT",
+      "result": "WIN",
+      "label": "HL",
+      "ts": 1792454677.537683
     }
   ],
   "open": {
@@ -79,12 +85,6 @@
       "label": "LL",
       "live": 0.1439,
       "tp1": 0.15992
-    },
-    "WLD_USDT": {
-      "entry_time": 1792367578.0972688,
-      "label": "HL",
-      "live": 0.4891,
-      "tp1": 0.5255
     },
     "OP_USDT": {
       "entry_time": 1792382110.145022,
