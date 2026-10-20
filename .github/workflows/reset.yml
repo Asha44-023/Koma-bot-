@@ -1,0 +1,20 @@
+name: RESET Daily PnL
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@github.com"
+          echo '{}' > active.json
+          echo '{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-20"}' > cooldown.json
+          echo '{"closed": [], "open": {}}' > stats_v157.json
+          git add active.json cooldown.json stats_v157.json
+          git commit -m "RESET after V158 LH fix"
+          git pull --rebase
+          git push
