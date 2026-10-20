@@ -151,6 +151,18 @@
       "label": "HH",
       "live": 0.1987,
       "tp1": 0.1957
+    },
+    "APE_USDT": {
+      "entry_time": 1792471196.9197888,
+      "label": "LH",
+      "live": 0.1466,
+      "tp1": 0.1445
+    },
+    "VELVET_USDT": {
+      "entry_time": 1792471197.883876,
+      "label": "LH",
+      "live": 0.06431,
+      "tp1": 0.06362
     }
   }
 }
