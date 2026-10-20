@@ -8,9 +8,9 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 20, 3600
 NEAR_THRESHOLD = 0.05
-RETEST_THRESHOLD = 0.008
+RETEST_THRESHOLD = 0.01
 session = requests.Session()
-TAG = "V157-TRUE-BNR-HH-LL"
+TAG = "V157-BEST-15-1.0"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -30,8 +30,7 @@ def atomic_save(path,data):
         try: os.unlink(tp)
         except: pass
         raise
-ACTIVE=load_json(ACTIVE_FILE,{}); COOLDOWN=load_json(COOLDOWN_FILE,{})
-STATS=load_json(STATS_FILE, {"closed": [], "open": {}})
+ACTIVE=load_json(ACTIVE_FILE,{}); COOLDOWN=load_json(COOLDOWN_FILE,{}); STATS=load_json(STATS_FILE, {"closed": [], "open": {}})
 COOLDOWN.setdefault("signals",{}); COOLDOWN.setdefault("daily_pnl",0.0); COOLDOWN.setdefault("last_day",get_today())
 def save_a(): atomic_save(ACTIVE_FILE,ACTIVE)
 def save_c(): atomic_save(COOLDOWN_FILE,COOLDOWN)
@@ -45,8 +44,7 @@ def tg(m):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
         print(f"NO TG CREDS"); print(m); return
     try:
-        token = TELEGRAM_TOKEN.strip()
-        chat = str(TELEGRAM_CHAT).strip()
+        token = TELEGRAM_TOKEN.strip(); chat = str(TELEGRAM_CHAT).strip()
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         r = session.post(url, json={"chat_id": chat, "text": m}, timeout=15)
         print(f"TG {r.status_code}: {r.text[:300]}"); print(m)
@@ -85,8 +83,8 @@ def get_last_structure(d, lookback=80):
     if hh_type=="HH" and ll_type=="HL": trend="UP"
     elif hh_type=="LH" and ll_type=="LL": trend="DOWN"
     else: trend="RANGE"
-    broke_hh = any(cc > last_h for cc in c[-5:])
-    broke_ll = any(cc < last_l for cc in c[-5:])
+    broke_hh = any(cc > last_h for cc in c[-15:])
+    broke_ll = any(cc < last_l for cc in c[-15:])
     return {"last_high":last_h,"prev_high":prev_h,"last_low":last_l,"prev_low":prev_l,"hh_type":hh_type,"ll_type":ll_type,"trend":trend,"broke_hh":broke_hh,"broke_ll":broke_ll,"last_close":c[-1]}
 def get_btc_filter():
     try:
