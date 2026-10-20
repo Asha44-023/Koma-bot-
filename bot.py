@@ -10,7 +10,7 @@ DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 20, 3600
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.01
 session = requests.Session()
-TAG = "V157-BEST-15-1.0"
+TAG = "V158-NO-LH-FIX"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -200,6 +200,7 @@ def scan():
             box1h=get_1h_box(h1)
             if not box1h: skipped[sym]="no_1H_box"; continue
             direction=None; setup_type=None; retest_level=None; label=None
+            # === PATCH V158: DISABLE LH COMPLETELY ===
             if struct["broke_hh"]:
                 dist = abs(live - struct["last_high"]) / live
                 if dist <= RETEST_THRESHOLD:
@@ -208,6 +209,16 @@ def scan():
                 dist = abs(live - struct["last_low"]) / live
                 if dist <= RETEST_THRESHOLD:
                     direction="SELL"; setup_type="CONT @LL-RETEST"; retest_level=struct["last_low"]; label="LL"
+            if not direction and struct["ll_type"]=="HL":
+                dist = abs(live - struct["last_low"]) / live
+                if dist <= NEAR_THRESHOLD:
+                    direction="BUY"; setup_type="PULLBACK @HL"; retest_level=struct["last_low"]; label="HL"
+            if struct["hh_type"]=="LH" and label=="LH":
+                skipped[sym]="LH_disabled_0W8L"
+                continue
+            if label=="LH":
+                skipped[sym]="LH_disabled"
+                continue
             if not direction:
                 if struct["broke_hh"] or struct["broke_ll"]:
                     skipped[sym]=f"break_no_retest"
