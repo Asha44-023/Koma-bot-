@@ -1,1 +1,44 @@
-{}
+{
+  "SHIB_USDT": {
+    "entry": 5.078e-06,
+    "is_buy": true,
+    "sl": 4.923228e-06,
+    "tp1": 5.19e-06,
+    "tp2": 5.522e-06,
+    "tp3": 5.551e-06,
+    "runner": 6.036e-06,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792521930.838199,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HH"
+  },
+  "DOGE_USDT": {
+    "entry": 0.08107,
+    "is_buy": true,
+    "sl": 0.07812624,
+    "tp1": 0.08283,
+    "tp2": 0.08563,
+    "tp3": 0.08669,
+    "runner": 0.08809,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792521931.763524,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL"
+  }
+}

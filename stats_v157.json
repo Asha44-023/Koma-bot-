@@ -1,1 +1,17 @@
-{"closed": [], "open": {}}
+{
+  "closed": [],
+  "open": {
+    "SHIB_USDT": {
+      "entry_time": 1792521930.838203,
+      "label": "HH",
+      "live": 5.078e-06,
+      "tp1": 5.19e-06
+    },
+    "DOGE_USDT": {
+      "entry_time": 1792521931.7635374,
+      "label": "HL",
+      "live": 0.08107,
+      "tp1": 0.08283
+    }
+  }
+}

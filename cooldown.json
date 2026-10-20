@@ -1,1 +1,8 @@
-{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-20"}
+{
+  "signals": {
+    "SHIB_USDT": 1792521930.8382037,
+    "DOGE_USDT": 1792521931.7635396
+  },
+  "daily_pnl": 0.0,
+  "last_day": "2026-10-20"
+}
