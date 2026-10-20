@@ -23,12 +23,13 @@ jobs:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python koma_rsi_47_bot.py --once
-      - name: Save State
+      - name: Save State + Keepalive
         run: |
           git config user.name "bot"
           git config user.email "bot@github.com"
           date -u > last_run.txt
-          git add active.json cooldown.json stats_v153.json last_run.txt || true
-          git commit -m "auto save V156 $(date -u)" || echo "no changes to commit"
+          date > keepalive.txt
+          git add active.json cooldown.json stats_v153.json last_run.txt keepalive.txt || true
+          git commit -m "V156 $(date -u)" || echo "no changes"
           git pull --rebase
           git push
