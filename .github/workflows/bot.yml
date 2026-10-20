@@ -1,4 +1,4 @@
-name: Run Bot V155-BTC-FILTER-ALL
+name: Run Bot V156-NO-FADE-UP
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -22,13 +22,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
+        run: python koma_rsi_47_bot.py --once
       - name: Save State
         run: |
           git config user.name "bot"
           git config user.email "bot@github.com"
           date -u > last_run.txt
           git add active.json cooldown.json stats_v153.json last_run.txt || true
-          git commit -m "auto save $(date -u)" || echo "no changes to commit"
+          git commit -m "auto save V156 $(date -u)" || echo "no changes to commit"
           git pull --rebase
           git push
