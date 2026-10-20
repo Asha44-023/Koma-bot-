@@ -40,5 +40,131 @@
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
+  },
+  "LAB_USDT": {
+    "entry": 0.04096,
+    "is_buy": false,
+    "sl": 0.04259972,
+    "tp1": 0.03777,
+    "tp2": 0.037014599999999995,
+    "tp3": 0.03627430799999999,
+    "runner": 0.03554882183999999,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792471668.7162397,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "MANA_USDT": {
+    "entry": 0.08308,
+    "is_buy": false,
+    "sl": 0.08454684,
+    "tp1": 0.08056,
+    "tp2": 0.0789488,
+    "tp3": 0.077369824,
+    "runner": 0.07582242752,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792471669.736186,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "BOME_USDT": {
+    "entry": 0.0006041,
+    "is_buy": false,
+    "sl": 0.0006207732,
+    "tp1": 0.0005843,
+    "tp2": 0.000572614,
+    "tp3": 0.0005611617200000001,
+    "runner": 0.0005499384856,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792471670.4168942,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "TAO_USDT": {
+    "entry": 267.85,
+    "is_buy": false,
+    "sl": 275.65824,
+    "tp1": 261.95,
+    "tp2": 256.0,
+    "tp3": 254.21,
+    "runner": 249.1258,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792471671.1457593,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "FARTCOIN_USDT": {
+    "entry": 0.14406,
+    "is_buy": false,
+    "sl": 0.14752775999999998,
+    "tp1": 0.14265,
+    "tp2": 0.13292,
+    "tp3": 0.1302616,
+    "runner": 0.127656368,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "time": 1792471671.8371193,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP",
+    "label": "LH"
+  },
+  "SEI_USDT": {
+    "entry": 0.06087,
+    "is_buy": false,
+    "sl": 0.0624488,
+    "tp1": 0.06037,
+    "tp2": 0.05831,
+    "tp3": 0.05762,
+    "runner": 0.0564676,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792471672.5618126,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
   }
 }

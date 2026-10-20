@@ -75,16 +75,16 @@
   ],
   "open": {
     "BOME_USDT": {
-      "entry_time": 1792367576.0885313,
-      "label": "LL",
-      "live": 0.0006211,
-      "tp1": 0.0010452
+      "entry_time": 1792471670.416907,
+      "label": "LH",
+      "live": 0.0006041,
+      "tp1": 0.0005843
     },
     "FARTCOIN_USDT": {
-      "entry_time": 1792367577.0932574,
-      "label": "LL",
-      "live": 0.1439,
-      "tp1": 0.15992
+      "entry_time": 1792471671.837132,
+      "label": "LH",
+      "live": 0.14406,
+      "tp1": 0.14265
     },
     "OP_USDT": {
       "entry_time": 1792382110.145022,
@@ -163,6 +163,30 @@
       "label": "LH",
       "live": 0.06431,
       "tp1": 0.06362
+    },
+    "LAB_USDT": {
+      "entry_time": 1792471668.7162433,
+      "label": "LH",
+      "live": 0.04096,
+      "tp1": 0.03777
+    },
+    "MANA_USDT": {
+      "entry_time": 1792471669.7361994,
+      "label": "LH",
+      "live": 0.08308,
+      "tp1": 0.08056
+    },
+    "TAO_USDT": {
+      "entry_time": 1792471671.1457732,
+      "label": "LH",
+      "live": 267.85,
+      "tp1": 261.95
+    },
+    "SEI_USDT": {
+      "entry_time": 1792471672.5618253,
+      "label": "LH",
+      "live": 0.06087,
+      "tp1": 0.06037
     }
   }
 }
