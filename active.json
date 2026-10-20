@@ -40,5 +40,47 @@
     "tp3_hit": false,
     "type": "TREND",
     "label": "HL"
+  },
+  "JASMY_USDT": {
+    "entry": 0.004901,
+    "is_buy": true,
+    "sl": 0.004633392,
+    "tp1": 0.005243,
+    "tp2": 0.005368,
+    "tp3": 0.00547536,
+    "runner": 0.0055848672,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792533397.6244102,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL"
+  },
+  "SEI_USDT": {
+    "entry": 0.06154,
+    "is_buy": true,
+    "sl": 0.0591126,
+    "tp1": 0.0622,
+    "tp2": 0.06628,
+    "tp3": 0.06762,
+    "runner": 0.07034,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792533398.444301,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL"
   }
 }
