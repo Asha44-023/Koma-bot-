@@ -1,4 +1,4 @@
-name: Run Bot V157-TRUE-BNR-HH-LL
+name: Run Bot V157-BEST-15-1.0
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -29,11 +29,10 @@ jobs:
           git config user.email "bot@github.com"
           date -u > last_run.txt
           date > keepalive.txt
-          # create stats if missing so git add doesn't fail
           [ -f stats_v157.json ] || echo '{"closed": [], "open": {}}' > stats_v157.json
           [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{"signals": {}, "daily_pnl": 0.0}' > cooldown.json
+          [ -f cooldown.json ] || echo '{"signals": {}, "daily_pnl": 0.0, "last_day": ""}' > cooldown.json
           git add active.json cooldown.json stats_v157.json last_run.txt keepalive.txt
-          git diff --staged --quiet || git commit -m "V157 $(date -u)"
+          git diff --staged --quiet || git commit -m "V157-BEST-15-1.0 $(date -u)"
           git pull --rebase --autostash
           git push
