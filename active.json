@@ -2,7 +2,7 @@
   "APE_USDT": {
     "entry": 0.1466,
     "is_buy": false,
-    "sl": 0.1491944,
+    "sl": 0.1466,
     "tp1": 0.1445,
     "tp2": 0.1416,
     "tp3": 0.1346,
@@ -14,7 +14,7 @@
       20
     ],
     "time": 1792471196.919785,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
@@ -23,7 +23,7 @@
   "VELVET_USDT": {
     "entry": 0.06431,
     "is_buy": false,
-    "sl": 0.06643468000000001,
+    "sl": 0.06431,
     "tp1": 0.06362,
     "tp2": 0.062347599999999996,
     "tp3": 0.061100647999999994,
@@ -35,7 +35,7 @@
       20
     ],
     "time": 1792471197.8838646,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
@@ -128,7 +128,7 @@
   "FARTCOIN_USDT": {
     "entry": 0.14406,
     "is_buy": false,
-    "sl": 0.14752775999999998,
+    "sl": 0.14406,
     "tp1": 0.14265,
     "tp2": 0.13292,
     "tp3": 0.1302616,
@@ -140,7 +140,7 @@
       15
     ],
     "time": 1792471671.8371193,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "PUMP",
@@ -149,7 +149,7 @@
   "SEI_USDT": {
     "entry": 0.06087,
     "is_buy": false,
-    "sl": 0.0624488,
+    "sl": 0.06087,
     "tp1": 0.06037,
     "tp2": 0.05831,
     "tp3": 0.05762,
@@ -161,10 +161,115 @@
       20
     ],
     "time": 1792471672.5618126,
+    "tp1_hit": true,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH"
+  },
+  "SENT_USDT": {
+    "entry": 0.02193,
+    "is_buy": true,
+    "sl": 0.02114508,
+    "tp1": 0.0237,
+    "tp2": 0.02482,
+    "tp3": 0.02499,
+    "runner": 0.02661,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792489634.9178967,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL"
+  },
+  "BRETT_USDT": {
+    "entry": 0.004637,
+    "is_buy": true,
+    "sl": 0.004567656,
+    "tp1": 0.00477,
+    "tp2": 0.005015,
+    "tp3": 0.006044,
+    "runner": 0.006217,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792489635.6076608,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LL"
+  },
+  "JASMY_USDT": {
+    "entry": 0.00469,
+    "is_buy": true,
+    "sl": 0.004610484000000001,
+    "tp1": 0.004839,
+    "tp2": 0.004899,
+    "tp3": 0.005243,
+    "runner": 0.005368,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792489636.276045,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL"
+  },
+  "TURBO_USDT": {
+    "entry": 0.0008302,
+    "is_buy": false,
+    "sl": 0.0008511912,
+    "tp1": 0.0008045,
+    "tp2": 0.00078841,
+    "tp3": 0.0007726418,
+    "runner": 0.0007571889639999999,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792489636.9100614,
     "tp1_hit": false,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
+  },
+  "WIF_USDT": {
+    "entry": 0.1982,
+    "is_buy": false,
+    "sl": 0.20310920000000002,
+    "tp1": 0.1957,
+    "tp2": 0.1948,
+    "tp3": 0.1873,
+    "runner": 0.1867,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "time": 1792489637.666954,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP",
+    "label": "HH"
   }
 }

@@ -71,6 +71,30 @@
       "result": "WIN",
       "label": "HL",
       "ts": 1792454677.537683
+    },
+    {
+      "sym": "APE_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792489581.6327038
+    },
+    {
+      "sym": "VELVET_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792489582.624614
+    },
+    {
+      "sym": "FARTCOIN_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792489584.6316948
+    },
+    {
+      "sym": "SEI_USDT",
+      "result": "WIN",
+      "label": "LH",
+      "ts": 1792489585.3205502
     }
   ],
   "open": {
@@ -79,12 +103,6 @@
       "label": "LH",
       "live": 0.0006041,
       "tp1": 0.0005843
-    },
-    "FARTCOIN_USDT": {
-      "entry_time": 1792471671.837132,
-      "label": "LH",
-      "live": 0.14406,
-      "tp1": 0.14265
     },
     "OP_USDT": {
       "entry_time": 1792382110.145022,
@@ -129,10 +147,10 @@
       "tp1": 0.05872
     },
     "SENT_USDT": {
-      "entry_time": 1792443101.436601,
+      "entry_time": 1792489634.9179006,
       "label": "HL",
-      "live": 0.0223,
-      "tp1": 0.02482
+      "live": 0.02193,
+      "tp1": 0.0237
     },
     "PEPE_USDT": {
       "entry_time": 1792443102.1572285,
@@ -147,22 +165,10 @@
       "tp1": 0.07766
     },
     "WIF_USDT": {
-      "entry_time": 1792443103.6326652,
+      "entry_time": 1792489637.6669672,
       "label": "HH",
-      "live": 0.1987,
+      "live": 0.1982,
       "tp1": 0.1957
-    },
-    "APE_USDT": {
-      "entry_time": 1792471196.9197888,
-      "label": "LH",
-      "live": 0.1466,
-      "tp1": 0.1445
-    },
-    "VELVET_USDT": {
-      "entry_time": 1792471197.883876,
-      "label": "LH",
-      "live": 0.06431,
-      "tp1": 0.06362
     },
     "LAB_USDT": {
       "entry_time": 1792471668.7162433,
@@ -182,11 +188,23 @@
       "live": 267.85,
       "tp1": 261.95
     },
-    "SEI_USDT": {
-      "entry_time": 1792471672.5618253,
+    "BRETT_USDT": {
+      "entry_time": 1792489635.6076746,
+      "label": "LL",
+      "live": 0.004637,
+      "tp1": 0.00477
+    },
+    "JASMY_USDT": {
+      "entry_time": 1792489636.2760594,
+      "label": "HL",
+      "live": 0.00469,
+      "tp1": 0.004839
+    },
+    "TURBO_USDT": {
+      "entry_time": 1792489636.9100745,
       "label": "LH",
-      "live": 0.06087,
-      "tp1": 0.06037
+      "live": 0.0008302,
+      "tp1": 0.0008045
     }
   }
 }
