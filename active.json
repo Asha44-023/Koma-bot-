@@ -1,25 +1,4 @@
 {
-  "APE_USDT": {
-    "entry": 0.1466,
-    "is_buy": false,
-    "sl": 0.1466,
-    "tp1": 0.1445,
-    "tp2": 0.1416,
-    "tp3": 0.1346,
-    "runner": 0.1338,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792471196.919785,
-    "tp1_hit": true,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LH"
-  },
   "VELVET_USDT": {
     "entry": 0.06431,
     "is_buy": false,
@@ -37,111 +16,6 @@
     "time": 1792471197.8838646,
     "tp1_hit": true,
     "tp2_hit": true,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LH"
-  },
-  "MANA_USDT": {
-    "entry": 0.08308,
-    "is_buy": false,
-    "sl": 0.08454684,
-    "tp1": 0.08056,
-    "tp2": 0.0789488,
-    "tp3": 0.077369824,
-    "runner": 0.07582242752,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792471669.736186,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LH"
-  },
-  "BOME_USDT": {
-    "entry": 0.0006041,
-    "is_buy": false,
-    "sl": 0.0006207732,
-    "tp1": 0.0005843,
-    "tp2": 0.000572614,
-    "tp3": 0.0005611617200000001,
-    "runner": 0.0005499384856,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792471670.4168942,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LH"
-  },
-  "TAO_USDT": {
-    "entry": 267.85,
-    "is_buy": false,
-    "sl": 275.65824,
-    "tp1": 261.95,
-    "tp2": 256.0,
-    "tp3": 254.21,
-    "runner": 249.1258,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792471671.1457593,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LH"
-  },
-  "FARTCOIN_USDT": {
-    "entry": 0.14406,
-    "is_buy": false,
-    "sl": 0.14406,
-    "tp1": 0.14265,
-    "tp2": 0.13292,
-    "tp3": 0.1302616,
-    "runner": 0.127656368,
-    "cfg_close": [
-      40,
-      30,
-      15,
-      15
-    ],
-    "time": 1792471671.8371193,
-    "tp1_hit": true,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "PUMP",
-    "label": "LH"
-  },
-  "SEI_USDT": {
-    "entry": 0.06087,
-    "is_buy": false,
-    "sl": 0.06087,
-    "tp1": 0.06037,
-    "tp2": 0.05831,
-    "tp3": 0.05762,
-    "runner": 0.0564676,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792471672.5618126,
-    "tp1_hit": true,
-    "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
     "label": "LH"
@@ -170,7 +44,7 @@
   "BRETT_USDT": {
     "entry": 0.004637,
     "is_buy": true,
-    "sl": 0.004567656,
+    "sl": 0.004637,
     "tp1": 0.00477,
     "tp2": 0.005015,
     "tp3": 0.006044,
@@ -182,7 +56,7 @@
       20
     ],
     "time": 1792489635.6076608,
-    "tp1_hit": false,
+    "tp1_hit": true,
     "tp2_hit": false,
     "tp3_hit": false,
     "type": "TREND",
@@ -191,7 +65,7 @@
   "JASMY_USDT": {
     "entry": 0.00469,
     "is_buy": true,
-    "sl": 0.004610484000000001,
+    "sl": 0.004839,
     "tp1": 0.004839,
     "tp2": 0.004899,
     "tp3": 0.005243,
@@ -203,53 +77,11 @@
       20
     ],
     "time": 1792489636.276045,
-    "tp1_hit": false,
-    "tp2_hit": false,
+    "tp1_hit": true,
+    "tp2_hit": true,
     "tp3_hit": false,
     "type": "TREND",
     "label": "HL"
-  },
-  "TURBO_USDT": {
-    "entry": 0.0008302,
-    "is_buy": false,
-    "sl": 0.0008511912,
-    "tp1": 0.0008045,
-    "tp2": 0.00078841,
-    "tp3": 0.0007726418,
-    "runner": 0.0007571889639999999,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792489636.9100614,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "LH"
-  },
-  "WIF_USDT": {
-    "entry": 0.1982,
-    "is_buy": false,
-    "sl": 0.20310920000000002,
-    "tp1": 0.1957,
-    "tp2": 0.1948,
-    "tp3": 0.1873,
-    "runner": 0.1867,
-    "cfg_close": [
-      40,
-      30,
-      15,
-      15
-    ],
-    "time": 1792489637.666954,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "PUMP",
-    "label": "HH"
   },
   "KOMA_USDT": {
     "entry": 0.017177,
