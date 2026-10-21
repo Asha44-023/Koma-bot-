@@ -7,12 +7,12 @@ TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 35, 3600
-MIN_SCORE_TO_ENTER = 80
+MIN_SCORE_TO_ENTER = 50
 TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
 session = requests.Session()
-TAG = "V160-ELITE80-62-38-LIQ-CLOSE"
+TAG = "V160-NO-TP-SCORE-50"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -171,36 +171,27 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
         if depth < len(close_candidates):
             return close_candidates[depth]
         return close_candidates[-1] * (1 - 0.006*(depth - len(close_candidates) +1))
-def get_elite_score(sym, label, pct_label, rr, btc_trend, direction, coin_trend, tp1_dist, broke_strength):
-    try: pb=float(str(pct_label).replace("%","").strip())
-    except: pb=50
-    s=0
-    if label=="HL":
-        if 60 <= pb <= 72: s+=35
-        elif 52 <= pb <= 78: s+=22
-        elif 40 <= pb <= 85: s+=5
-        else: s-=40
-    elif label=="HH":
-        if 68 <= pb <= 82: s+=30
-        elif 60 <= pb <= 88: s+=18
-        else: s-=25
-    else:
-        if 25 <= pb <= 45: s+=30
-        else: s+=10
-    if rr>=2.5: s+=30
-    elif rr>=1.8: s+=20
-    elif rr>=1.2: s+=8
-    else: s-=20
-    if btc_trend=="UP" and direction=="BUY" and coin_trend=="UP": s+=25
-    elif btc_trend=="UP" and direction=="BUY": s+=15
-    if tp1_dist < 1.5: s+=15
-    elif tp1_dist > 8: s-=10
-    if broke_strength >= 75: s+=20
-    elif broke_strength >= 62: s+=12
-    else: s-=20
-    if "1000" in sym: s-=25
-    if sym in ["SHIB_USDT","LAB_USDT","MEME_USDT","SAND_USDT"]: s-=15
-    if sym in ["FARTCOIN_USDT","WIF_USDT","PEPE_USDT","BONK_USDT"]: s+=10
+def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, broke_strength):
+    # TP REMOVED - pure structure only
+    try:
+        pb=float(str(pct_label).replace("%","").strip())
+    except:
+        pb=50
+    s=50
+    if label=="HL" and 30 <= pb <= 85:
+        s+=25
+    elif label=="HH" and 50 <= pb <= 88:
+        s+=20
+    elif label in ["LL","LH"]:
+        s+=10
+    if btc_trend==direction or (btc_trend=="UP" and direction=="BUY"):
+        s+=10
+    if coin_trend=="UP" and direction=="BUY":
+        s+=10
+    if broke_strength >= 62:
+        s+=15
+    if sym in ["FARTCOIN_USDT","WIF_USDT","PEPE_USDT","BONK_USDT","KOMA_USDT","SEI_USDT"]:
+        s+=5
     return s
 def send_stats_report():
     now=time.time()
@@ -314,11 +305,10 @@ def scan():
     scored_all=[]
     for it in cands:
         rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,coin_trend,broke_str = it
-        tp1_dist = abs(tp1-live)/live*100
-        sc = get_elite_score(sym, label, pct_label, rr, btc_trend, "BUY" if is_buy else "SELL", coin_trend, tp1_dist, broke_str)
+        sc = get_elite_score(sym, label, pct_label, btc_trend, "BUY" if is_buy else "SELL", coin_trend, broke_str)
         scored_all.append((sc, it))
     scored_all.sort(key=lambda x: x[0], reverse=True)
-    dbg = [(x[1][1].replace('_USDT',''), x[0], x[1][12], round(x[1][0],2)) for x in scored_all]
+    dbg = [(x[1][1].replace('_USDT',''), x[0], x[1][12]) for x in scored_all]
     print(f"DEBUG ALL SCORES: {dbg}")
     scored = [x for x in scored_all if x[0] >= MIN_SCORE_TO_ENTER]
     print(f"FOUND {len(cands)} raw -> {len(scored)} >={MIN_SCORE_TO_ENTER} ELITE | TOP: {[(x[1][1].replace('_USDT',''), x[0]) for x in scored[:5]]}")
@@ -330,7 +320,7 @@ def scan():
         rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,coin_trend,broke_str = it
         ACTIVE[sym]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"cfg_close":cfg["CLOSE"],"time":time.time(),"tp1_hit":False,"tp2_hit":False,"tp3_hit":False,"type":get_tp_config(sym)[1],"label":label,"score":score_val}
         STATS["open"][sym]={"entry_time":time.time(),"label":label,"live":live,"tp1":tp1}
-        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\n⭐ ELITE SCORE {score_val} >={MIN_SCORE_TO_ENTER} (Break {broke_str:.0f}%) CLOSE LIQ"); time.sleep(0.5)
+        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\n⭐ SCORE {score_val} STRUCTURE ONLY"); time.sleep(0.5)
 if "--once" in sys.argv: scan()
 else:
     while True:
