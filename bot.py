@@ -130,58 +130,48 @@ def valid_signal_data(d):
         return True
     except: return False
 def get_next_liquidity_auto(d4, live, is_buy, depth=0):
+    # CLOSE liquidity only: 0.5% to 4% max = next liquidity
     if not d4 or len(d4["h"])<50:
-        base = live*1.025 if is_buy else live*0.975
-        return base
-    h=d4["h"][-150:]; l=d4["l"][-150:]
+        pcts=[0.015, 0.028, 0.045, 0.10]
+        pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
+        return live*(1+pct) if is_buy else live*(1-pct)
+    h=d4["h"][-100:]; l=d4["l"][-100:]
     swings_h=[]; swings_l=[]
     for i in range(10, len(h)-10):
-        if h[i]==max(h[i-5:i+6]): swings_h.append(h[i])
-        if l[i]==min(l[i-5:i+6]): swings_l.append(l[i])
+        if h[i]==max(h[i-4:i+5]): swings_h.append(h[i])
+        if l[i]==min(l[i-4:i+5]): swings_l.append(l[i])
     if is_buy:
-        clusters=[]
-        sorted_h=sorted(set(swings_h))
-        for lvl in sorted_h:
-            if lvl <= live*1.002: continue
-            cnt=sum(1 for x in swings_h if abs(x-lvl)/lvl < 0.0035)
-            if cnt>=2:
-                clusters.append((lvl,cnt))
-        uniq=[]
-        for lvl,cnt in sorted(clusters):
-            if not uniq or abs(lvl-uniq[-1][0])/lvl>0.005:
-                uniq.append((lvl,cnt))
-        uniq=sorted(uniq, key=lambda x: x[0])
-        if not uniq:
-            pcts=[0.018, 0.032, 0.055, 0.12]
-            pct = pcts[depth] if depth < len(pcts) else 0.12 + (depth-3)*0.08
+        candidates = [x for x in set(swings_h) if x > live*1.003]
+        close_candidates = []
+        for lvl in candidates:
+            dist = (lvl - live)/live*100
+            cnt = sum(1 for x in swings_h if abs(x-lvl)/lvl < 0.003)
+            if cnt >= 2 and 0.5 <= dist <= 4.0:
+                close_candidates.append(lvl)
+        close_candidates = sorted(set(close_candidates))
+        if not close_candidates:
+            pcts=[0.015, 0.028, 0.045, 0.10]
+            pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
             return live*(1+pct)
-        if depth < len(uniq):
-            return uniq[depth][0]
-        last = uniq[-1][0]
-        extra = last * (1 + 0.008*(depth - len(uniq) +1))
-        return extra
+        if depth < len(close_candidates):
+            return close_candidates[depth]
+        return close_candidates[-1] * (1 + 0.006*(depth - len(close_candidates) +1))
     else:
-        clusters=[]
-        sorted_l=sorted(set(swings_l), reverse=True)
-        for lvl in sorted_l:
-            if lvl >= live*0.998: continue
-            cnt=sum(1 for x in swings_l if abs(x-lvl)/lvl < 0.0035)
-            if cnt>=2:
-                clusters.append((lvl,cnt))
-        uniq=[]
-        for lvl,cnt in sorted(clusters, reverse=True):
-            if not uniq or abs(lvl-uniq[-1][0])/lvl>0.005:
-                uniq.append((lvl,cnt))
-        uniq=sorted(uniq, key=lambda x: x[0], reverse=True)
-        if not uniq:
-            pcts=[0.018, 0.032, 0.055, 0.12]
-            pct = pcts[depth] if depth < len(pcts) else 0.12 + (depth-3)*0.08
+        candidates = [x for x in set(swings_l) if x < live*0.997]
+        close_candidates = []
+        for lvl in candidates:
+            dist = (live - lvl)/live*100
+            cnt = sum(1 for x in swings_l if abs(x-lvl)/lvl < 0.003)
+            if cnt >= 2 and 0.5 <= dist <= 4.0:
+                close_candidates.append(lvl)
+        close_candidates = sorted(set(close_candidates), reverse=True)
+        if not close_candidates:
+            pcts=[0.015, 0.028, 0.045, 0.10]
+            pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
             return live*(1-pct)
-        if depth < len(uniq):
-            return uniq[depth][0]
-        last = uniq[-1][0]
-        extra = last * (1 - 0.008*(depth - len(uniq) +1))
-        return extra
+        if depth < len(close_candidates):
+            return close_candidates[depth]
+        return close_candidates[-1] * (1 - 0.006*(depth - len(close_candidates) +1))
 def get_elite_score(sym, label, pct_label, rr, btc_trend, direction, coin_trend, tp1_dist, broke_strength):
     try: pb=float(str(pct_label).replace("%","").strip())
     except: pb=50
@@ -205,7 +195,7 @@ def get_elite_score(sym, label, pct_label, rr, btc_trend, direction, coin_trend,
     if btc_trend=="UP" and direction=="BUY" and coin_trend=="UP": s+=25
     elif btc_trend=="UP" and direction=="BUY": s+=15
     if tp1_dist < 1.5: s+=15
-    elif tp1_dist > 5: s-=10
+    elif tp1_dist > 8: s-=10
     if broke_strength >= 75: s+=20
     elif broke_strength >= 62: s+=12
     else: s-=20
