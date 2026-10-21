@@ -318,7 +318,8 @@ def scan():
         sc = get_elite_score(sym, label, pct_label, rr, btc_trend, "BUY" if is_buy else "SELL", coin_trend, tp1_dist, broke_str)
         scored_all.append((sc, it))
     scored_all.sort(key=lambda x: x[0], reverse=True)
-    print(f"DEBUG ALL SCORES: {[(x[1][1].replace('_USDT',''), x[0], x[1][12], f\"RR{x[1][0]:.2f}\") for x in scored_all]}")
+    dbg = [(x[1][1].replace('_USDT',''), x[0], x[1][12], round(x[1][0],2)) for x in scored_all]
+    print(f"DEBUG ALL SCORES: {dbg}")
     scored = [x for x in scored_all if x[0] >= MIN_SCORE_TO_ENTER]
     print(f"FOUND {len(cands)} raw -> {len(scored)} >={MIN_SCORE_TO_ENTER} ELITE | TOP: {[(x[1][1].replace('_USDT',''), x[0]) for x in scored[:5]]}")
     if not scored:
