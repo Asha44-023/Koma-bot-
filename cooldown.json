@@ -1,5 +1,8 @@
 {
-  "signals": {},
+  "signals": {
+    "VELVET_USDT": 1792566950.187789,
+    "FLOKI_USDT": 1792566951.0306673
+  },
   "daily_pnl": 0.0,
   "last_day": "2026-10-21"
 }

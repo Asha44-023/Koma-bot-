@@ -1,1 +1,46 @@
-{}
+{
+  "VELVET_USDT": {
+    "entry": 0.06329,
+    "is_buy": true,
+    "sl": 0.061423320000000003,
+    "tp1": 0.06423934999999999,
+    "tp2": 0.06506212,
+    "tp3": 0.06613804999999999,
+    "runner": 0.069619,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792566950.187783,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL",
+    "score": 100
+  },
+  "FLOKI_USDT": {
+    "entry": 2.467e-05,
+    "is_buy": true,
+    "sl": 2.332632e-05,
+    "tp1": 2.5040049999999998e-05,
+    "tp2": 2.536076e-05,
+    "tp3": 2.5780149999999997e-05,
+    "runner": 2.7137e-05,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792566951.0306501,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL",
+    "score": 100
+  }
+}
