@@ -7,12 +7,12 @@ TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 35, 3600
-MIN_SCORE_TO_ENTER = 85
+MIN_SCORE_TO_ENTER = 80
 TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
 session = requests.Session()
-TAG = "V160-ELITE90-62-38-LIQ"
+TAG = "V160-ELITE80-62-38-LIQ-CLOSE"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -130,7 +130,6 @@ def valid_signal_data(d):
         return True
     except: return False
 def get_next_liquidity_auto(d4, live, is_buy, depth=0):
-    # CLOSE liquidity only: 0.5% to 4% max = next liquidity
     if not d4 or len(d4["h"])<50:
         pcts=[0.015, 0.028, 0.045, 0.10]
         pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
@@ -312,24 +311,25 @@ def scan():
             msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{setup_type}] {struct['trend']} BTC:{btc_trend}\n📍 RETEST {fmt(retest_level)} | 1H {fmt(LL)}-{fmt(HH)} 15M {pct_label}\n🛡️ SL {fmt(sl)} 🎯 {liq_info} RUNNER {fmt(runner)} [{TAG} {label}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,struct["trend"],broke_str))
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
-    scored=[]
+    scored_all=[]
     for it in cands:
         rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,coin_trend,broke_str = it
         tp1_dist = abs(tp1-live)/live*100
         sc = get_elite_score(sym, label, pct_label, rr, btc_trend, "BUY" if is_buy else "SELL", coin_trend, tp1_dist, broke_str)
-        scored.append((sc, it))
-    scored = [x for x in scored if x[0] >= MIN_SCORE_TO_ENTER]
-    scored.sort(key=lambda x: x[0], reverse=True)
-    print(f"FOUND {len(cands)} raw -> {len(scored)} >=90 ELITE | TOP: {[(x[1][1].replace('_USDT',''), x[0]) for x in scored[:5]]}")
+        scored_all.append((sc, it))
+    scored_all.sort(key=lambda x: x[0], reverse=True)
+    print(f"DEBUG ALL SCORES: {[(x[1][1].replace('_USDT',''), x[0], x[1][12], f\"RR{x[1][0]:.2f}\") for x in scored_all]}")
+    scored = [x for x in scored_all if x[0] >= MIN_SCORE_TO_ENTER]
+    print(f"FOUND {len(cands)} raw -> {len(scored)} >={MIN_SCORE_TO_ENTER} ELITE | TOP: {[(x[1][1].replace('_USDT',''), x[0]) for x in scored[:5]]}")
     if not scored:
-        print("NO TRADE - NO COIN REACHED 90")
+        print("NO TRADE - NO COIN REACHED ELITE")
         return
     for score_val, it in scored[:TOP_N_PER_SCAN]:
         if len(ACTIVE)>=MAX_ACTIVE: break
         rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,coin_trend,broke_str = it
         ACTIVE[sym]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"cfg_close":cfg["CLOSE"],"time":time.time(),"tp1_hit":False,"tp2_hit":False,"tp3_hit":False,"type":get_tp_config(sym)[1],"label":label,"score":score_val}
         STATS["open"][sym]={"entry_time":time.time(),"label":label,"live":live,"tp1":tp1}
-        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\n⭐ ELITE SCORE {score_val} >=90 (Break {broke_str:.0f}%)"); time.sleep(0.5)
+        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\n⭐ ELITE SCORE {score_val} >={MIN_SCORE_TO_ENTER} (Break {broke_str:.0f}%) CLOSE LIQ"); time.sleep(0.5)
 if "--once" in sys.argv: scan()
 else:
     while True:
