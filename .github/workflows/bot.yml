@@ -1,4 +1,4 @@
-name: Run Bot V158-NO-LH-FIX
+name: Run Bot V160-ELITE90-62-38
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -33,6 +33,6 @@ jobs:
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{"signals": {}, "daily_pnl": 0.0, "last_day": ""}' > cooldown.json
           git add active.json cooldown.json stats_v157.json last_run.txt keepalive.txt
-          git diff --staged --quiet || git commit -m "V158-NO-LH-FIX $(date -u)"
+          git diff --staged --quiet || git commit -m "V160-ELITE90-62-38 $(date -u)"
           git pull --rebase --autostash
           git push
