@@ -1,5 +1,18 @@
 {
-  "closed": [],
+  "closed": [
+    {
+      "sym": "FLOKI_USDT",
+      "result": "WIN",
+      "label": "HL",
+      "ts": 1792595624.0234368
+    },
+    {
+      "sym": "SENT_USDT",
+      "result": "WIN",
+      "label": "HH",
+      "ts": 1792595625.247304
+    }
+  ],
   "open": {
     "VELVET_USDT": {
       "entry_time": 1792566950.1877878,
@@ -7,23 +20,23 @@
       "live": 0.06329,
       "tp1": 0.06423934999999999
     },
-    "FLOKI_USDT": {
-      "entry_time": 1792566951.0306644,
-      "label": "HL",
-      "live": 2.467e-05,
-      "tp1": 2.5040049999999998e-05
-    },
     "MANA_USDT": {
       "entry_time": 1792577265.6337256,
       "label": "HL",
       "live": 0.08787,
       "tp1": 0.08918804999999999
     },
-    "SENT_USDT": {
-      "entry_time": 1792577266.5426338,
+    "WIF_USDT": {
+      "entry_time": 1792595684.8199413,
       "label": "HH",
-      "live": 0.02207,
-      "tp1": 0.02240105
+      "live": 0.2123,
+      "tp1": 0.21548449999999997
+    },
+    "AXS_USDT": {
+      "entry_time": 1792595685.4588435,
+      "label": "HL",
+      "live": 1.0668,
+      "tp1": 1.0828019999999998
     }
   }
 }
