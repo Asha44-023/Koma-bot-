@@ -24,6 +24,72 @@
       "label": "HL",
       "live": 0.06154,
       "tp1": 0.0622
+    },
+    "VELVET_USDT": {
+      "entry_time": 1792559230.0458448,
+      "label": "HL",
+      "live": 0.06333,
+      "tp1": 0.07644
+    },
+    "SENT_USDT": {
+      "entry_time": 1792559231.136484,
+      "label": "HL",
+      "live": 0.02212,
+      "tp1": 0.0237
+    },
+    "WIF_USDT": {
+      "entry_time": 1792559231.8429966,
+      "label": "HH",
+      "live": 0.2071,
+      "tp1": 0.2225
+    },
+    "FARTCOIN_USDT": {
+      "entry_time": 1792559232.5171602,
+      "label": "HL",
+      "live": 0.14817,
+      "tp1": 0.15992
+    },
+    "OP_USDT": {
+      "entry_time": 1792559233.2092378,
+      "label": "HL",
+      "live": 0.13042,
+      "tp1": 0.14094
+    },
+    "TURBO_USDT": {
+      "entry_time": 1792559233.8943527,
+      "label": "HH",
+      "live": 0.000872,
+      "tp1": 0.0009286
+    },
+    "LAB_USDT": {
+      "entry_time": 1792559234.563254,
+      "label": "HH",
+      "live": 0.04444,
+      "tp1": 0.0489
+    },
+    "ARB_USDT": {
+      "entry_time": 1792559235.2598655,
+      "label": "HH",
+      "live": 0.19045,
+      "tp1": 0.19514
+    },
+    "MEME_USDT": {
+      "entry_time": 1792559235.9581869,
+      "label": "HL",
+      "live": 0.0005054,
+      "tp1": 0.000521
+    },
+    "APE_USDT": {
+      "entry_time": 1792559236.6757405,
+      "label": "HL",
+      "live": 0.1459,
+      "tp1": 0.1486
+    },
+    "TAO_USDT": {
+      "entry_time": 1792559237.4470944,
+      "label": "HL",
+      "live": 271.89,
+      "tp1": 276.32
     }
   }
 }
