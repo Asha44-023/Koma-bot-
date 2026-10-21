@@ -42,5 +42,49 @@
     "type": "TREND",
     "label": "HL",
     "score": 100
+  },
+  "MANA_USDT": {
+    "entry": 0.08787,
+    "is_buy": true,
+    "sl": 0.08422175999999999,
+    "tp1": 0.08918804999999999,
+    "tp2": 0.09033036000000001,
+    "tp3": 0.09182415,
+    "runner": 0.096657,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792577265.633721,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL",
+    "score": 90
+  },
+  "SENT_USDT": {
+    "entry": 0.02207,
+    "is_buy": true,
+    "sl": 0.0215136,
+    "tp1": 0.02240105,
+    "tp2": 0.02268796,
+    "tp3": 0.023063149999999998,
+    "runner": 0.024277,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792577266.5426204,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HH",
+    "score": 65
   }
 }
