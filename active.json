@@ -174,5 +174,49 @@
     "type": "PUMP",
     "label": "HH",
     "score": 100
+  },
+  "TAO_USDT": {
+    "entry": 274.7,
+    "is_buy": true,
+    "sl": 268.02360000000004,
+    "tp1": 278.8205,
+    "tp2": 282.3916,
+    "tp3": 287.06149999999997,
+    "runner": 302.17,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792622122.2408805,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL",
+    "score": 110
+  },
+  "TURBO_USDT": {
+    "entry": 0.0008891,
+    "is_buy": true,
+    "sl": 0.0008627352000000001,
+    "tp1": 0.0009024364999999999,
+    "tp2": 0.0009139948,
+    "tp3": 0.0009291095,
+    "runner": 0.00097801,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792622123.1359808,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL",
+    "score": 110
   }
 }
