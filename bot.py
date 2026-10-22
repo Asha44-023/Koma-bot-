@@ -7,12 +7,12 @@ TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 35, 3600
-MIN_SCORE_TO_ENTER = 50
+MIN_SCORE_TO_ENTER = 60
 TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
 session = requests.Session()
-TAG = "V160-NO-TP-SCORE-50"
+TAG = "V160-SCORE-60-ALL4-BTC"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -24,6 +24,7 @@ def load_json(p,d):
         return v if isinstance(v,type(d)) else d
     except: return d
 def atomic_save(path,data):
+    import os, tempfile
     d=os.path.dirname(os.path.abspath(path)) or "."; fd,tp=tempfile.mkstemp(dir=d,prefix=".tmp_")
     try:
         with os.fdopen(fd,"w") as f: json.dump(data,f,indent=2); f.flush(); os.fsync(f.fileno())
@@ -98,10 +99,11 @@ def get_last_structure(d, lookback=80):
 def get_btc_filter():
     try:
         btc = kl("BTC_USDT","Min60")
-        if not btc: return "RANGE"
+        if not btc: return {"trend":"RANGE","hh_str":0,"ll_str":0}
         struct = get_last_structure(btc,80)
-        return struct["trend"] if struct else "RANGE"
-    except: return "RANGE"
+        if not struct: return {"trend":"RANGE","hh_str":0,"ll_str":0}
+        return {"trend":struct["trend"],"hh_str":struct["broke_hh_strength"],"ll_str":struct["broke_ll_strength"]}
+    except: return {"trend":"RANGE","hh_str":0,"ll_str":0}
 def get_4h_sr_boxes(d4):
     h=d4["h"]; l=d4["l"]; lookback=50
     lows=[l[i] for i in range(len(l)-lookback, len(l)-2) if l[i] < l[i-1] and l[i] < l[i+1]]
@@ -172,24 +174,20 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
             return close_candidates[depth]
         return close_candidates[-1] * (1 - 0.006*(depth - len(close_candidates) +1))
 def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, broke_strength):
-    # TP REMOVED - pure structure only
     try:
         pb=float(str(pct_label).replace("%","").strip())
     except:
         pb=50
     s=50
-    if label=="HL" and 30 <= pb <= 85:
-        s+=25
-    elif label=="HH" and 50 <= pb <= 88:
-        s+=20
-    elif label in ["LL","LH"]:
-        s+=10
-    if btc_trend==direction or (btc_trend=="UP" and direction=="BUY"):
-        s+=10
-    if coin_trend=="UP" and direction=="BUY":
-        s+=10
-    if broke_strength >= 62:
+    if label=="HH" and broke_strength>=62: s+=25
+    elif label=="LL" and broke_strength<=38: s+=25
+    elif label=="HL" and 30 <= pb <= 85: s+=20
+    elif label=="LH" and 30 <= pb <= 85: s+=20
+    else: s-=20
+    if btc_trend==direction or (btc_trend=="UP" and direction=="BUY") or (btc_trend=="DOWN" and direction=="SELL"):
         s+=15
+    if coin_trend==direction or (coin_trend=="UP" and direction=="BUY") or (coin_trend=="DOWN" and direction=="SELL"):
+        s+=10
     if sym in ["FARTCOIN_USDT","WIF_USDT","PEPE_USDT","BONK_USDT","KOMA_USDT","SEI_USDT"]:
         s+=5
     return s
@@ -198,13 +196,14 @@ def send_stats_report():
     closed_7d=[x for x in STATS["closed"] if now-x.get("ts",0)<7*86400]
     wins=len([x for x in closed_7d if x["result"]=="WIN"]); losses=len([x for x in closed_7d if x["result"]=="LOSS"])
     total=wins+losses; wr=(wins/total*100) if total>0 else 0
-    msg=(f"📊 STATS {TAG} {get_time()}\nCLOSED (7d): {total} WIN {wins} LOSS {losses} = {wr:.0f}%\nOPEN: {len(STATS['open'])} pending")
+    msg=(f"STATS {TAG} {get_time()}\nCLOSED (7d): {total} WIN {wins} LOSS {losses} = {wr:.0f}%\nOPEN: {len(STATS['open'])} pending")
     tg(msg)
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
-    btc_trend = get_btc_filter()
-    print(f"BTC 1H TREND: {btc_trend}")
+    btc_info = get_btc_filter()
+    btc_trend = btc_info["trend"]
+    print(f"BTC 1H TREND: {btc_trend} HH:{btc_info['hh_str']:.0f}% LL:{btc_info['ll_str']:.0f}%")
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
@@ -222,30 +221,30 @@ def scan():
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=pnl; save_c()
             STATS["closed"].append({"sym":sym,"result":"LOSS","label":label,"ts":time.time()}); STATS["open"].pop(sym,None); save_s()
-            tg(f"🔴 STOP {sym.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)} [{label}]"); ACTIVE.pop(sym,None); save_a(); send_stats_report(); continue
+            tg(f"STOP {sym.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a(); send_stats_report(); continue
         changed=False
         if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)):
             data["tp1_hit"]=True; data["sl"]=entry; changed=True
             STATS["closed"].append({"sym":sym,"result":"WIN","label":label,"ts":time.time()}); STATS["open"].pop(sym,None); save_s()
-            tg(f"💚 TP1 LIQ {sym.replace('_USDT','')} @ {fmt(p)} -> BE [{label}] WIN"); send_stats_report()
+            tg(f"TP1 LIQ {sym.replace('_USDT','')} @ {fmt(p)} -> BE [{label}] BTC:{btc_trend} WIN"); send_stats_report()
         if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)):
-            data["tp1_hit"]=True; data["tp2_hit"]=True; data["sl"]=tp1; changed=True; tg(f"💚💚 TP2 LIQ {sym.replace('_USDT','')} @ {fmt(p)} [{label}]")
+            data["tp1_hit"]=True; data["tp2_hit"]=True; data["sl"]=tp1; changed=True; tg(f"TP2 LIQ {sym.replace('_USDT','')} @ {fmt(p)} [{label}] BTC:{btc_trend}")
         if changed: save_a()
         if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
-            data["tp3_hit"]=True; data["sl"]=tp2; save_a(); tg(f"💚💚💚 TP3 SWEEP {sym.replace('_USDT','')} -> RUNNER {fmt(runner_target)} [{label}] 30% TRAIL ON"); continue
+            data["tp3_hit"]=True; data["sl"]=tp2; save_a(); tg(f"TP3 SWEEP {sym.replace('_USDT','')} -> RUNNER {fmt(runner_target)} [{label}] BTC:{btc_trend} 30% TRAIL ON"); continue
         if data.get("tp3_hit") and ((is_buy and p>=runner_target) or (not is_buy and p<=runner_target)):
             d4=kl(sym,"Hour4")
             if d4:
                 next_liq = get_next_liquidity_auto(d4, p, is_buy, 4)
                 data["runner"]=next_liq; save_a()
                 profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
-                tg(f"🚀 RUNNER EXTEND {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} -> NEXT {fmt(next_liq)} [{label}]")
+                tg(f"RUNNER EXTEND {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} -> NEXT {fmt(next_liq)} [{label}] BTC:{btc_trend}")
                 if profit >= 30:
                     COOLDOWN["daily_pnl"]+=profit; save_c()
-                    tg(f"🏆 SUPER RUNNER 30%+ {sym.replace('_USDT','')} +{profit:.2f}% CLOSED @ {fmt(p)} [{label}]")
+                    tg(f"SUPER RUNNER 30%+ {sym.replace('_USDT','')} +{profit:.2f}% CLOSED @ {fmt(p)} [{label}]")
                     ACTIVE.pop(sym,None); save_a()
                 continue
-            profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=profit; save_c(); tg(f"🚀 RUNNER {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} [{label}]"); ACTIVE.pop(sym,None); save_a()
+            profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=profit; save_c(); tg(f"RUNNER {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a()
     print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
     cands=[]; skipped={}
@@ -260,24 +259,35 @@ def scan():
             box1h=get_1h_box(h1)
             if not box1h: skipped[sym]="no_1H_box"; continue
             direction=None; setup_type=None; retest_level=None; label=None; broke_str=0
-            if struct["broke_hh"]:
+            if struct["broke_hh"] and struct["broke_hh_strength"]>=62:
                 dist = abs(live - struct["last_high"]) / live
                 if dist <= RETEST_THRESHOLD:
                     direction="BUY"; setup_type=f"STRONG HH {struct['broke_hh_strength']:.0f}%"; retest_level=struct["last_high"]; label="HH"; broke_str=struct["broke_hh_strength"]
-            if not direction and struct["broke_ll"]:
-                dist = abs(live - struct["last_low"]) / live
-                if dist <= RETEST_THRESHOLD:
-                    direction="SELL"; setup_type=f"STRONG LL {struct['broke_ll_strength']:.0f}%"; retest_level=struct["last_low"]; label="LL"; broke_str=struct["broke_ll_strength"] if struct["broke_ll_strength"]>0 else 20
-            if not direction and struct["ll_type"]=="HL":
+            if not direction and struct["broke_ll"] and (struct["broke_ll_strength"]<=38 or struct["broke_ll_strength"]==0):
+                ll_strength = struct["broke_ll_strength"] if struct["broke_ll_strength"]!=0 else 25
+                if ll_strength<=38:
+                    dist = abs(live - struct["last_low"]) / live
+                    if dist <= RETEST_THRESHOLD:
+                        direction="SELL"; setup_type=f"STRONG LL {ll_strength:.0f}%"; retest_level=struct["last_low"]; label="LL"; broke_str=ll_strength
+            if not direction and struct["ll_type"]=="HL" and struct["trend"]=="UP":
                 dist = abs(live - struct["last_low"]) / live
                 if dist <= NEAR_THRESHOLD:
-                    direction="BUY"; setup_type="PULLBACK @HL"; retest_level=struct["last_low"]; label="HL"; broke_str=75
-            if label=="LH": skipped[sym]="LH_disabled"; continue
-            if not direction: skipped[sym]=f"no_break {struct['hh_type']}/{struct['ll_type']}"; continue
-            if btc_trend=="UP" and direction=="SELL": skipped[sym]="btc_up_skip_sell"; continue
-            if btc_trend=="DOWN" and direction=="BUY": skipped[sym]="btc_down_skip_buy"; continue
-            if struct["trend"]=="UP" and direction=="SELL": skipped[sym]="coin_up_skip_sell"; continue
-            if struct["trend"]=="DOWN" and direction=="BUY": skipped[sym]="coin_down_skip_buy"; continue
+                    if struct["hh_type"]=="HH":
+                        direction="BUY"; setup_type="PULLBACK @HL [MOTHER HH>=62%]"; retest_level=struct["last_low"]; label="HL"; broke_str=70
+            if not direction and struct["hh_type"]=="LH" and struct["trend"]=="DOWN":
+                dist = abs(live - struct["last_high"]) / live
+                if dist <= NEAR_THRESHOLD:
+                    if struct["ll_type"]=="LL":
+                        direction="SELL"; setup_type="PULLBACK @LH [MOTHER LL<=38%]"; retest_level=struct["last_high"]; label="LH"; broke_str=30
+            if not direction: skipped[sym]=f"no_strong_break {struct['hh_type']}/{struct['ll_type']} HH:{struct['broke_hh_strength']:.0f}% LL:{struct['broke_ll_strength']:.0f}%"; continue
+            if direction=="BUY" and btc_trend!="UP":
+                skipped[sym]=f"btc_filter BUY need BTC UP got {btc_trend}"; continue
+            if direction=="SELL" and btc_trend!="DOWN":
+                skipped[sym]=f"btc_filter SELL need BTC DOWN got {btc_trend}"; continue
+            if direction=="BUY" and btc_info["hh_str"]>0 and btc_info["hh_str"]<62:
+                skipped[sym]=f"btc_weak HH {btc_info['hh_str']:.0f}% <62%"; continue
+            if direction=="SELL" and btc_info["ll_str"]>0 and btc_info["ll_str"]>38:
+                skipped[sym]=f"btc_weak LL {btc_info['ll_str']:.0f}% >38%"; continue
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]="gap_small"; continue
             in_ok,pct_15m,pct_label=check_pullback_15m(m15,box1h,direction)
@@ -297,9 +307,9 @@ def scan():
             rr=(tp1-live)/(live-sl) if is_buy and live!=sl else (live-tp1)/(sl-live) if not is_buy and sl!=live else 0
             if rr<0.2: skipped[sym]=f"rr_low {rr:.2f}"; continue
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
-            tag="💚 BUY" if is_buy else "❤️ SELL"
+            tag="BUY" if is_buy else "SELL"
             liq_info = f"LIQ {fmt(tp1)}->{fmt(tp2)}->{fmt(tp3)}"
-            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{setup_type}] {struct['trend']} BTC:{btc_trend}\n📍 RETEST {fmt(retest_level)} | 1H {fmt(LL)}-{fmt(HH)} 15M {pct_label}\n🛡️ SL {fmt(sl)} 🎯 {liq_info} RUNNER {fmt(runner)} [{TAG} {label}]")
+            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{setup_type}] {struct['trend']} BTC:{btc_trend} STRONG:{btc_info['hh_str']:.0f}%/{btc_info['ll_str']:.0f}%\nRETEST {fmt(retest_level)} | 1H {fmt(LL)}-{fmt(HH)} 15M {pct_label}\nSL {fmt(sl)} {liq_info} RUNNER {fmt(runner)} [{TAG} {label}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,struct["trend"],broke_str))
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     scored_all=[]
@@ -313,14 +323,14 @@ def scan():
     scored = [x for x in scored_all if x[0] >= MIN_SCORE_TO_ENTER]
     print(f"FOUND {len(cands)} raw -> {len(scored)} >={MIN_SCORE_TO_ENTER} ELITE | TOP: {[(x[1][1].replace('_USDT',''), x[0]) for x in scored[:5]]}")
     if not scored:
-        print("NO TRADE - NO COIN REACHED ELITE")
+        print("NO TRADE - NO COIN REACHED ELITE"); print(f"SKIPPED: {skipped}")
         return
     for score_val, it in scored[:TOP_N_PER_SCAN]:
         if len(ACTIVE)>=MAX_ACTIVE: break
         rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,coin_trend,broke_str = it
         ACTIVE[sym]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"cfg_close":cfg["CLOSE"],"time":time.time(),"tp1_hit":False,"tp2_hit":False,"tp3_hit":False,"type":get_tp_config(sym)[1],"label":label,"score":score_val}
         STATS["open"][sym]={"entry_time":time.time(),"label":label,"live":live,"tp1":tp1}
-        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\n⭐ SCORE {score_val} STRUCTURE ONLY"); time.sleep(0.5)
+        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\nSCORE {score_val} | FBS {broke_str:.0f}% | BTC {btc_trend} {btc_info['hh_str']:.0f}%/{btc_info['ll_str']:.0f}% STRUCTURE ONLY"); time.sleep(0.5)
 if "--once" in sys.argv: scan()
 else:
     while True:
