@@ -12,7 +12,7 @@ TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
 session = requests.Session()
-TAG = "V160-SCORE-60-ALL4-BTC"
+TAG = "V161-SL15-SCORE60-ALL4"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -294,7 +294,8 @@ def scan():
             if not in_ok: skipped[sym]=f"pullback_{pct_label}"; continue
             if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
             is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
-            sl=min(LL*0.996, live*0.992) if is_buy else max(HH*1.004, live*1.008)
+            # SL 1.5% - IMPROVED FROM 0.8%
+            sl=min(LL*0.996, live*0.985) if is_buy else max(HH*1.004, live*1.015)
             tp1=get_next_liquidity_auto(d4, live, is_buy, 0)
             tp2=get_next_liquidity_auto(d4, live, is_buy, 1)
             tp3=get_next_liquidity_auto(d4, live, is_buy, 2)
