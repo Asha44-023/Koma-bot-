@@ -3,36 +3,23 @@ on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
-permissions:
-  contents: write
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
       - run: pip install requests pytz
-      - name: Run Bot
+      - run: python bot.py --once
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py --once
-      - name: Save State + Keepalive
-        run: |
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+      - run: |
           git config user.name "bot"
-          git config user.email "bot@github.com"
-          date -u > last_run.txt
-          date > keepalive.txt
-          [ -f stats_v157.json ] || echo '{"closed": [], "open": {}}' > stats_v157.json
-          [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{"signals": {}, "daily_pnl": 0.0, "last_day": ""}' > cooldown.json
-          git add active.json cooldown.json stats_v157.json last_run.txt keepalive.txt
-          git diff --staged --quiet || git commit -m "V160-SCORE-60-ALL4-BTC $(date -u)"
-          git pull --rebase --autostash
+          git config user.email "bot@bot.com"
+          git add active.json cooldown.json stats_v157.json
+          git diff --staged --quiet || git commit -m "update state"
           git push
