@@ -1,1 +1,7 @@
-{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-22"}
+{
+  "signals": {
+    "POPCAT_USDT": 1792709218.6626966
+  },
+  "daily_pnl": 0.0,
+  "last_day": "2026-10-23"
+}

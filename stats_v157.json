@@ -1,1 +1,11 @@
-{"closed": [], "open": {}}
+{
+  "closed": [],
+  "open": {
+    "POPCAT_USDT": {
+      "entry_time": 1792709218.662696,
+      "label": "LH",
+      "live": 0.04453,
+      "tp1": 0.04386205
+    }
+  }
+}

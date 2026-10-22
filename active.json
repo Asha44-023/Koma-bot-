@@ -1,1 +1,24 @@
-{}
+{
+  "POPCAT_USDT": {
+    "entry": 0.04453,
+    "is_buy": false,
+    "sl": 0.046746239999999994,
+    "tp1": 0.04386205,
+    "tp2": 0.04328316,
+    "tp3": 0.04252615,
+    "runner": 0.040077,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792709218.6626937,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH",
+    "score": 95
+  }
+}
