@@ -65,26 +65,26 @@
       "result": "LOSS",
       "label": "HL",
       "ts": 1792647709.9303648
+    },
+    {
+      "sym": "MANA_USDT",
+      "result": "LOSS",
+      "label": "HL",
+      "ts": 1792662784.6018782
+    },
+    {
+      "sym": "KOMA_USDT",
+      "result": "LOSS",
+      "label": "HL",
+      "ts": 1792662785.6159265
     }
   ],
   "open": {
-    "MANA_USDT": {
-      "entry_time": 1792577265.6337256,
-      "label": "HL",
-      "live": 0.08787,
-      "tp1": 0.08918804999999999
-    },
     "PEPE_USDT": {
       "entry_time": 1792610381.0264049,
       "label": "HH",
       "live": 4.6809e-06,
       "tp1": 4.7511134999999996e-06
-    },
-    "KOMA_USDT": {
-      "entry_time": 1792630495.5748231,
-      "label": "HL",
-      "live": 0.017665,
-      "tp1": 0.017929974999999997
     }
   }
 }

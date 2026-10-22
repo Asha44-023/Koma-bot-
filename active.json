@@ -1,26 +1,4 @@
 {
-  "MANA_USDT": {
-    "entry": 0.08787,
-    "is_buy": true,
-    "sl": 0.08422175999999999,
-    "tp1": 0.08918804999999999,
-    "tp2": 0.09033036000000001,
-    "tp3": 0.09182415,
-    "runner": 0.096657,
-    "cfg_close": [
-      30,
-      30,
-      20,
-      20
-    ],
-    "time": 1792577265.633721,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "TREND",
-    "label": "HL",
-    "score": 90
-  },
   "PEPE_USDT": {
     "entry": 4.6809e-06,
     "is_buy": true,
@@ -42,27 +20,5 @@
     "type": "PUMP",
     "label": "HH",
     "score": 100
-  },
-  "KOMA_USDT": {
-    "entry": 0.017665,
-    "is_buy": true,
-    "sl": 0.017180004,
-    "tp1": 0.017929974999999997,
-    "tp2": 0.01815962,
-    "tp3": 0.018459925,
-    "runner": 0.0194315,
-    "cfg_close": [
-      40,
-      30,
-      15,
-      15
-    ],
-    "time": 1792630495.5748196,
-    "tp1_hit": false,
-    "tp2_hit": false,
-    "tp3_hit": false,
-    "type": "PUMP",
-    "label": "HL",
-    "score": 115
   }
 }
