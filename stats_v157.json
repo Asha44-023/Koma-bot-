@@ -77,14 +77,13 @@
       "result": "LOSS",
       "label": "HL",
       "ts": 1792662785.6159265
+    },
+    {
+      "sym": "PEPE_USDT",
+      "result": "LOSS",
+      "label": "HH",
+      "ts": 1792683601.9659448
     }
   ],
-  "open": {
-    "PEPE_USDT": {
-      "entry_time": 1792610381.0264049,
-      "label": "HH",
-      "live": 4.6809e-06,
-      "tp1": 4.7511134999999996e-06
-    }
-  }
+  "open": {}
 }
