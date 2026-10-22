@@ -218,5 +218,49 @@
     "type": "TREND",
     "label": "HL",
     "score": 110
+  },
+  "KOMA_USDT": {
+    "entry": 0.017665,
+    "is_buy": true,
+    "sl": 0.017180004,
+    "tp1": 0.017929974999999997,
+    "tp2": 0.01815962,
+    "tp3": 0.018459925,
+    "runner": 0.0194315,
+    "cfg_close": [
+      40,
+      30,
+      15,
+      15
+    ],
+    "time": 1792630495.5748196,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "PUMP",
+    "label": "HL",
+    "score": 115
+  },
+  "JASMY_USDT": {
+    "entry": 0.004824,
+    "is_buy": true,
+    "sl": 0.00466626,
+    "tp1": 0.00489636,
+    "tp2": 0.004959072,
+    "tp3": 0.00504108,
+    "runner": 0.0053064,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792630496.59717,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "HL",
+    "score": 110
   }
 }
