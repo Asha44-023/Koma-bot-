@@ -13,7 +13,7 @@ NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
 RR_MIN = 0.8
 session = requests.Session()
-TAG = "V162-65-REDGREEN-NO-RANGE-LIQCOUNT"
+TAG = "V163-65-SMART-RANGE-LIQ"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -208,10 +208,21 @@ def scan():
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
     btc_info = get_btc_filter()
     btc_trend = btc_info["trend"]
-    print(f"BTC 1H TREND: {btc_trend} HH:{btc_info['hh_str']:.0f}% LL:{btc_info['ll_str']:.0f}%")
+    hh = btc_info["hh_str"]; ll = btc_info["ll_str"]
+    # SMART RANGE LOGIC
+    effective_trend = btc_trend
     if btc_trend == "RANGE":
-        print(f"BTC RANGE -> SLEEP NO TRADE [NO-RANGE RULE]")
-        return
+        if hh >= 62:
+            effective_trend = "UP"
+            print(f"BTC RANGE but HH {hh:.0f}% >=62% -> SMART UP")
+        elif ll != 0 and ll <= 38:
+            effective_trend = "DOWN"
+            print(f"BTC RANGE but LL {ll:.0f}% <=38% -> SMART DOWN")
+        else:
+            print(f"BTC 1H TREND: {btc_trend} HH:{hh:.0f}% LL:{ll:.0f}% -> TRUE RANGE SLEEP")
+            return
+    print(f"BTC 1H TREND: {btc_trend} -> EFFECTIVE: {effective_trend} HH:{hh:.0f}% LL:{ll:.0f}%")
+    btc_trend = effective_trend  # use effective for rest of logic
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
