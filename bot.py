@@ -11,9 +11,9 @@ MIN_SCORE_TO_ENTER = 65
 TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
-RR_MIN = 0.8
+RR_MIN = 0.7
 session = requests.Session()
-TAG = "V163-65-SMART-RANGE-LIQ"
+TAG = "V165-65-SMART-90-RR07-LABEL"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -120,7 +120,7 @@ def check_pullback_15m(d15, box, direction):
     if not d15: return False,0,"no_data"
     live_c=d15["c"][-1]; rng=box["rng"] or 0.00001
     pct=(live_c-box["LL"])/rng*100
-    return 30 <= pct <= 85, pct, f"{pct:.1f}%"
+    return 30 <= pct <= 90, pct, f"{pct:.1f}%"
 def check_entry_5m(d5, direction):
     if not d5 or len(d5["c"])<3: return False
     o,c=d5["o"][-1],d5["c"][-1]; o2=d5["o"][-2]
@@ -186,8 +186,8 @@ def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, bro
     s=50
     if label=="HH" and broke_strength>=62: s+=25
     elif label=="LL" and broke_strength<=38: s+=25
-    elif label=="HL" and 30 <= pb <= 85: s+=20
-    elif label=="LH" and 30 <= pb <= 85: s+=20
+    elif label=="HL" and 30 <= pb <= 90: s+=20
+    elif label=="LH" and 30 <= pb <= 90: s+=20
     else: s-=20
     if btc_trend==direction or (btc_trend=="UP" and direction=="BUY") or (btc_trend=="DOWN" and direction=="SELL"):
         s+=15
@@ -201,7 +201,22 @@ def send_stats_report():
     closed_7d=[x for x in STATS["closed"] if now-x.get("ts",0)<7*86400]
     wins=len([x for x in closed_7d if x["result"]=="WIN"]); losses=len([x for x in closed_7d if x["result"]=="LOSS"])
     total=wins+losses; wr=(wins/total*100) if total>0 else 0
-    msg=(f"STATS {TAG} {get_time()}\nCLOSED (7d): {total} WIN {wins} LOSS {losses} = {wr:.0f}%\nOPEN: {len(STATS['open'])} pending")
+    # breakdown by label
+    by_label={}
+    for x in closed_7d:
+        lb=x.get("label","?"); by_label.setdefault(lb,{"W":0,"L":0})
+        if x["result"]=="WIN": by_label[lb]["W"]+=1
+        else: by_label[lb]["L"]+=1
+    label_str = " | ".join([f"{k}:{v['W']}W-{v['L']}L" for k,v in by_label.items()]) if by_label else "no data"
+    # best coin
+    by_sym={}
+    for x in closed_7d:
+        s=x.get("sym","?"); by_sym.setdefault(s,{"W":0,"L":0})
+        if x["result"]=="WIN": by_sym[s]["W"]+=1
+        else: by_sym[s]["L"]+=1
+    best = sorted(by_sym.items(), key=lambda kv: kv[1]["W"]-kv[1]["L"], reverse=True)[:3]
+    best_str = " | ".join([f"{k.replace('_USDT','')} {v['W']}W" for k,v in best]) if best else "no data"
+    msg=(f"STATS {TAG} {get_time()}\nCLOSED (7d): {total} WIN {wins} LOSS {losses} = {wr:.0f}%\nBY LABEL: {label_str}\nBEST COIN: {best_str}\nOPEN: {len(STATS['open'])} pending")
     tg(msg)
 def scan():
     today=get_today()
@@ -209,7 +224,6 @@ def scan():
     btc_info = get_btc_filter()
     btc_trend = btc_info["trend"]
     hh = btc_info["hh_str"]; ll = btc_info["ll_str"]
-    # SMART RANGE LOGIC
     effective_trend = btc_trend
     if btc_trend == "RANGE":
         if hh >= 62:
@@ -222,7 +236,7 @@ def scan():
             print(f"BTC 1H TREND: {btc_trend} HH:{hh:.0f}% LL:{ll:.0f}% -> TRUE RANGE SLEEP")
             return
     print(f"BTC 1H TREND: {btc_trend} -> EFFECTIVE: {effective_trend} HH:{hh:.0f}% LL:{ll:.0f}%")
-    btc_trend = effective_trend  # use effective for rest of logic
+    btc_trend = effective_trend
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
