@@ -1,4 +1,4 @@
-name: Run Bot V160-SCORE-60-ALL4-BTC
+name: Run Bot V162-65-REDGREEN-NO-RANGE-LIQCOUNT
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -21,5 +21,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add active.json cooldown.json stats_v157.json
-          git diff --staged --quiet || git commit -m "update state"
+          git diff --staged --quiet || git commit -m "update state V162"
           git push
