@@ -1,6 +1,8 @@
 {
   "signals": {
-    "POPCAT_USDT": 1792709218.6626966
+    "POPCAT_USDT": 1792709218.6626966,
+    "TAO_USDT": 1792717820.4275303,
+    "VELVET_USDT": 1792717820.93076
   },
   "daily_pnl": 0.0,
   "last_day": "2026-10-23"

@@ -20,5 +20,49 @@
     "type": "TREND",
     "label": "LH",
     "score": 95
+  },
+  "TAO_USDT": {
+    "entry": 258.09,
+    "is_buy": false,
+    "sl": 267.27484,
+    "tp1": 254.21,
+    "tp2": 252.17632,
+    "tp3": 250.15890944,
+    "runner": 247.6573203456,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792717820.4275002,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH",
+    "score": 95
+  },
+  "VELVET_USDT": {
+    "entry": 0.05826,
+    "is_buy": false,
+    "sl": 0.060541199999999996,
+    "tp1": 0.057386099999999995,
+    "tp2": 0.05662872,
+    "tp3": 0.055638299999999995,
+    "runner": 0.052434,
+    "cfg_close": [
+      30,
+      30,
+      20,
+      20
+    ],
+    "time": 1792717820.9307437,
+    "tp1_hit": false,
+    "tp2_hit": false,
+    "tp3_hit": false,
+    "type": "TREND",
+    "label": "LH",
+    "score": 95
   }
 }
