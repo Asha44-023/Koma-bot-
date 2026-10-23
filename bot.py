@@ -7,12 +7,13 @@ TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 35, 3600
-MIN_SCORE_TO_ENTER = 60
+MIN_SCORE_TO_ENTER = 65
 TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
+RR_MIN = 0.8
 session = requests.Session()
-TAG = "V161-SL15-SCORE60-ALL4"
+TAG = "V162-65-REDGREEN-NO-RANGE-LIQCOUNT"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -24,7 +25,6 @@ def load_json(p,d):
         return v if isinstance(v,type(d)) else d
     except: return d
 def atomic_save(path,data):
-    import os, tempfile
     d=os.path.dirname(os.path.abspath(path)) or "."; fd,tp=tempfile.mkstemp(dir=d,prefix=".tmp_")
     try:
         with os.fdopen(fd,"w") as f: json.dump(data,f,indent=2); f.flush(); os.fsync(f.fileno())
@@ -135,7 +135,8 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
     if not d4 or len(d4["h"])<50:
         pcts=[0.015, 0.028, 0.045, 0.10]
         pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
-        return live*(1+pct) if is_buy else live*(1-pct)
+        price = live*(1+pct) if is_buy else live*(1-pct)
+        return price, 0, True
     h=d4["h"][-100:]; l=d4["l"][-100:]
     swings_h=[]; swings_l=[]
     for i in range(10, len(h)-10):
@@ -148,15 +149,17 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
             dist = (lvl - live)/live*100
             cnt = sum(1 for x in swings_h if abs(x-lvl)/lvl < 0.003)
             if cnt >= 2 and 0.5 <= dist <= 4.0:
-                close_candidates.append(lvl)
-        close_candidates = sorted(set(close_candidates))
+                close_candidates.append((lvl, cnt))
+        close_candidates = sorted(list(set(close_candidates)), key=lambda x: x[0])
         if not close_candidates:
             pcts=[0.015, 0.028, 0.045, 0.10]
             pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
-            return live*(1+pct)
+            return live*(1+pct), 0, True
         if depth < len(close_candidates):
-            return close_candidates[depth]
-        return close_candidates[-1] * (1 + 0.006*(depth - len(close_candidates) +1))
+            price, cnt = close_candidates[depth]
+            return price, cnt, False
+        last_price, last_cnt = close_candidates[-1]
+        return last_price * (1 + 0.006*(depth - len(close_candidates) +1)), last_cnt, False
     else:
         candidates = [x for x in set(swings_l) if x < live*0.997]
         close_candidates = []
@@ -164,15 +167,17 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
             dist = (live - lvl)/live*100
             cnt = sum(1 for x in swings_l if abs(x-lvl)/lvl < 0.003)
             if cnt >= 2 and 0.5 <= dist <= 4.0:
-                close_candidates.append(lvl)
-        close_candidates = sorted(set(close_candidates), reverse=True)
+                close_candidates.append((lvl, cnt))
+        close_candidates = sorted(list(set(close_candidates)), key=lambda x: x[0], reverse=True)
         if not close_candidates:
             pcts=[0.015, 0.028, 0.045, 0.10]
             pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06
-            return live*(1-pct)
+            return live*(1-pct), 0, True
         if depth < len(close_candidates):
-            return close_candidates[depth]
-        return close_candidates[-1] * (1 - 0.006*(depth - len(close_candidates) +1))
+            price, cnt = close_candidates[depth]
+            return price, cnt, False
+        last_price, last_cnt = close_candidates[-1]
+        return last_price * (1 - 0.006*(depth - len(close_candidates) +1)), last_cnt, False
 def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, broke_strength):
     try:
         pb=float(str(pct_label).replace("%","").strip())
@@ -204,6 +209,9 @@ def scan():
     btc_info = get_btc_filter()
     btc_trend = btc_info["trend"]
     print(f"BTC 1H TREND: {btc_trend} HH:{btc_info['hh_str']:.0f}% LL:{btc_info['ll_str']:.0f}%")
+    if btc_trend == "RANGE":
+        print(f"BTC RANGE -> SLEEP NO TRADE [NO-RANGE RULE]")
+        return
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
@@ -221,30 +229,32 @@ def scan():
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=pnl; save_c()
             STATS["closed"].append({"sym":sym,"result":"LOSS","label":label,"ts":time.time()}); STATS["open"].pop(sym,None); save_s()
-            tg(f"STOP {sym.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a(); send_stats_report(); continue
+            emoji="🔴" if not is_buy else "🟢"
+            tg(f"{emoji} STOP {sym.replace('_USDT','')} {pnl:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a(); send_stats_report(); continue
         changed=False
         if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)):
             data["tp1_hit"]=True; data["sl"]=entry; changed=True
             STATS["closed"].append({"sym":sym,"result":"WIN","label":label,"ts":time.time()}); STATS["open"].pop(sym,None); save_s()
-            tg(f"TP1 LIQ {sym.replace('_USDT','')} @ {fmt(p)} -> BE [{label}] BTC:{btc_trend} WIN"); send_stats_report()
+            tg(f"🟢 TP1 LIQ {sym.replace('_USDT','')} @ {fmt(p)} -> BE [{label}] BTC:{btc_trend} WIN"); send_stats_report()
         if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)):
-            data["tp1_hit"]=True; data["tp2_hit"]=True; data["sl"]=tp1; changed=True; tg(f"TP2 LIQ {sym.replace('_USDT','')} @ {fmt(p)} [{label}] BTC:{btc_trend}")
+            data["tp1_hit"]=True; data["tp2_hit"]=True; data["sl"]=tp1; changed=True; tg(f"🟢 TP2 LIQ {sym.replace('_USDT','')} @ {fmt(p)} [{label}] BTC:{btc_trend}")
         if changed: save_a()
         if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
-            data["tp3_hit"]=True; data["sl"]=tp2; save_a(); tg(f"TP3 SWEEP {sym.replace('_USDT','')} -> RUNNER {fmt(runner_target)} [{label}] BTC:{btc_trend} 30% TRAIL ON"); continue
+            data["tp3_hit"]=True; data["sl"]=tp2; save_a(); tg(f"🟢 TP3 SWEEP {sym.replace('_USDT','')} -> RUNNER {fmt(runner_target)} [{label}] BTC:{btc_trend} 30% TRAIL ON"); continue
         if data.get("tp3_hit") and ((is_buy and p>=runner_target) or (not is_buy and p<=runner_target)):
             d4=kl(sym,"Hour4")
             if d4:
-                next_liq = get_next_liquidity_auto(d4, p, is_buy, 4)
+                next_liq, cntN, is_pctN = get_next_liquidity_auto(d4, p, is_buy, 4)
                 data["runner"]=next_liq; save_a()
                 profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100
-                tg(f"RUNNER EXTEND {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} -> NEXT {fmt(next_liq)} [{label}] BTC:{btc_trend}")
+                tagN = f"{cntN}x" if cntN>0 else "%"
+                tg(f"🟢 RUNNER EXTEND {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} -> NEXT {fmt(next_liq)}[{tagN}] [{label}] BTC:{btc_trend}")
                 if profit >= 30:
                     COOLDOWN["daily_pnl"]+=profit; save_c()
-                    tg(f"SUPER RUNNER 30%+ {sym.replace('_USDT','')} +{profit:.2f}% CLOSED @ {fmt(p)} [{label}]")
+                    tg(f"🟢 SUPER RUNNER 30%+ {sym.replace('_USDT','')} +{profit:.2f}% CLOSED @ {fmt(p)} [{label}]")
                     ACTIVE.pop(sym,None); save_a()
                 continue
-            profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=profit; save_c(); tg(f"RUNNER {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a()
+            profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=profit; save_c(); tg(f"🟢 RUNNER {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a()
     print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
     cands=[]; skipped={}
@@ -294,23 +304,28 @@ def scan():
             if not in_ok: skipped[sym]=f"pullback_{pct_label}"; continue
             if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
             is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
-            # SL 1.5% - IMPROVED FROM 0.8%
             sl=min(LL*0.996, live*0.985) if is_buy else max(HH*1.004, live*1.015)
-            tp1=get_next_liquidity_auto(d4, live, is_buy, 0)
-            tp2=get_next_liquidity_auto(d4, live, is_buy, 1)
-            tp3=get_next_liquidity_auto(d4, live, is_buy, 2)
-            runner=get_next_liquidity_auto(d4, live, is_buy, 3)
+            tp1, cnt1, is_pct1 = get_next_liquidity_auto(d4, live, is_buy, 0)
+            tp2, cnt2, is_pct2 = get_next_liquidity_auto(d4, live, is_buy, 1)
+            tp3, cnt3, is_pct3 = get_next_liquidity_auto(d4, live, is_buy, 2)
+            runner, cntR, is_pctR = get_next_liquidity_auto(d4, live, is_buy, 3)
             if is_buy:
                 tp1=max(tp1, live*1.012); tp2=max(tp2, tp1*1.008); tp3=max(tp3, tp2*1.008); runner=max(runner, tp3*1.01)
             else:
                 tp1=min(tp1, live*0.988); tp2=min(tp2, tp1*0.992); tp3=min(tp3, tp2*0.992); runner=min(runner, tp3*0.99)
             cfg,typ=get_tp_config(sym)
             rr=(tp1-live)/(live-sl) if is_buy and live!=sl else (live-tp1)/(sl-live) if not is_buy and sl!=live else 0
-            if rr<0.2: skipped[sym]=f"rr_low {rr:.2f}"; continue
+            if rr<RR_MIN: skipped[sym]=f"rr_low {rr:.2f} < {RR_MIN}"; continue
             if time.time()-COOLDOWN["signals"].get(sym,0)<SYMBOL_COOLDOWN_SECONDS: skipped[sym]="cooldown"; continue
-            tag="BUY" if is_buy else "SELL"
-            liq_info = f"LIQ {fmt(tp1)}->{fmt(tp2)}->{fmt(tp3)}"
-            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{setup_type}] {struct['trend']} BTC:{btc_trend} STRONG:{btc_info['hh_str']:.0f}%/{btc_info['ll_str']:.0f}%\nRETEST {fmt(retest_level)} | 1H {fmt(LL)}-{fmt(HH)} 15M {pct_label}\nSL {fmt(sl)} {liq_info} RUNNER {fmt(runner)} [{TAG} {label}]")
+            tag="🟢 BUY" if is_buy else "🔴 SELL"
+            def fmt_liq(price, cnt, is_pct):
+                if is_pct or cnt==0:
+                    return f"{fmt(price)}[%]"
+                else:
+                    return f"{fmt(price)}[{cnt}x]"
+            liq_info = f"LIQ {fmt_liq(tp1,cnt1,is_pct1)}->{fmt_liq(tp2,cnt2,is_pct2)}->{fmt_liq(tp3,cnt3,is_pct3)}"
+            runner_str = f"{fmt(runner)}[{cntR}x]" if cntR>0 and not is_pctR else f"{fmt(runner)}[%]"
+            msg=(f"{tag} {sym.replace('_USDT','')} @ {fmt(live)} [{setup_type}] {struct['trend']} BTC:{btc_trend} STRONG:{btc_info['hh_str']:.0f}%/{btc_info['ll_str']:.0f}%\nRETEST {fmt(retest_level)} | 1H {fmt(LL)}-{fmt(HH)} 15M {pct_label}\nSL {fmt(sl)} {liq_info} RUNNER {runner_str} [{TAG} {label}]")
             cands.append((rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,struct["trend"],broke_str))
         except Exception as e: skipped[sym]=f"err {e}"; print(f"{sym} err {e}")
     scored_all=[]
@@ -331,7 +346,7 @@ def scan():
         rr,sym,msg,live,is_buy,sl,tp1,tp2,tp3,runner,cfg,label,pct_label,coin_trend,broke_str = it
         ACTIVE[sym]={"entry":live,"is_buy":is_buy,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"cfg_close":cfg["CLOSE"],"time":time.time(),"tp1_hit":False,"tp2_hit":False,"tp3_hit":False,"type":get_tp_config(sym)[1],"label":label,"score":score_val}
         STATS["open"][sym]={"entry_time":time.time(),"label":label,"live":live,"tp1":tp1}
-        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\nSCORE {score_val} | FBS {broke_str:.0f}% | BTC {btc_trend} {btc_info['hh_str']:.0f}%/{btc_info['ll_str']:.0f}% STRUCTURE ONLY"); time.sleep(0.5)
+        COOLDOWN["signals"][sym]=time.time(); save_a(); save_c(); save_s(); tg(msg + f"\nELITE SCORE {score_val} | FBS {broke_str:.0f}% | BTC {btc_trend} {btc_info['hh_str']:.0f}%/{btc_info['ll_str']:.0f}% RR {rr:.2f}"); time.sleep(0.5)
 if "--once" in sys.argv: scan()
 else:
     while True:
