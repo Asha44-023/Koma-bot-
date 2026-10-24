@@ -39,7 +39,7 @@ def get_seasonality():
     elif wr<65: mult, min_score = 1.2, 62
     else: mult, min_score = 2.0, 55
     return q, wr, mult, min_score
-session = requests.Session(); TAG = "V169-FBS-RETRY-BOXFIX"
+session = requests.Session(); TAG = "V170-FBS-BOX-PCT-FIX"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -161,6 +161,7 @@ def valid_signal_data(d):
         return True
     except: return False
 def get_next_liquidity_auto(d4, live, is_buy, depth=0):
+    pct=0.02
     if not d4 or len(d4["h"])<50:
         pcts=[0.015, 0.028, 0.045, 0.10]; pct = pcts[depth] if depth < len(pcts) else 0.10 + (depth-3)*0.06; price = live*(1+pct) if is_buy else live*(1-pct); return price, 0, True
     h=d4["h"][-100:]; l=d4["l"][-100:]; swings_h=[]; swings_l=[]
