@@ -39,7 +39,7 @@ def get_seasonality():
     elif wr<65: mult, min_score = 1.2, 62
     else: mult, min_score = 2.0, 55
     return q, wr, mult, min_score
-session = requests.Session(); TAG = "V168-FBS-COLOR-FIXED-BTC-RETRY"
+session = requests.Session(); TAG = "V169-FBS-RETRY-BOXFIX"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -146,7 +146,8 @@ def get_4h_sr_boxes(d4):
 def get_1h_box(d1h):
     h=d1h["h"][-20:]; l=d1h["l"][-20:]; HH=max(h); LL=min(l); rng=HH-LL; mid=(HH+LL)/2; 
     if rng==0 or mid==0: return None; 
-    if rng/mid>0.5: return None; return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
+    if rng/mid>1.5: return None
+    return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
 def check_pullback_15m(d15, box, direction):
     if not d15: return False,0,"no_data"; live_c=d15["c"][-1]; rng=box["rng"] or 0.00001; pct=(live_c-box["LL"])/rng*100
     if direction=="BUY": ok = 15 <= pct <= 55
