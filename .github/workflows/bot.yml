@@ -1,4 +1,4 @@
-name: Run Bot V171-FBS-PCT-FINAL
+name: Run Bot V172-NO-PCT-VAR
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -8,6 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -20,5 +22,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V171-FBS-PCT-FINAL"
+          git diff --staged --quiet || git commit -m "update state V172-NO-PCT-VAR"
           git push
