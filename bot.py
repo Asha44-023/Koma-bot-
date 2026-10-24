@@ -12,7 +12,6 @@ try:
     RESET = Style.RESET_ALL
 except:
     GREEN=RED=YELLOW=BLUE=RESET=""
-
 SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT","PEPE_USDT","BONK_USDT","WIF_USDT","FLOKI_USDT","DOGE_USDT","SHIB_USDT","MANA_USDT","AXS_USDT","APE_USDT","BOME_USDT","BRETT_USDT","MEW_USDT","PENGU_USDT","WLD_USDT","ARB_USDT","OP_USDT","SEI_USDT","ENA_USDT","PENDLE_USDT","MEME_USDT","TURBO_USDT","1000PEPE_USDT","1000BONK_USDT","1000SHIB_USDT","POPCAT_USDT"]
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
@@ -38,7 +37,7 @@ def get_seasonality():
     elif wr<65: mult, min_score = 1.2, 62
     else: mult, min_score = 2.0, 55
     return q, wr, mult, min_score
-session = requests.Session(); TAG = "V171-FBS-PCT-FINAL"
+session = requests.Session(); TAG = "V172-NO-PCT-VAR"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -110,18 +109,18 @@ def get_last_structure(d, lookback=80):
     for i in range(len(c)-15, len(c)):
         try:
             rng = h[i]-l[i]
-            if rng==0: continue; close_pct = (c[i]-l[i])/rng*100
+            if rng==0: continue; close_percent = (c[i]-l[i])/rng*100
             if c[i] > last_h:
-                if close_pct >= 62: broke_hh=True; broke_hh_strength=max(broke_hh_strength, close_pct)
-                else: weak_bull = max(weak_bull, close_pct)
+                if close_percent >= 62: broke_hh=True; broke_hh_strength=max(broke_hh_strength, close_percent)
+                else: weak_bull = max(weak_bull, close_percent)
             if c[i] < last_l:
-                if close_pct <= 38: broke_ll=True; broke_ll_strength=close_pct if broke_ll_strength==0 else min(broke_ll_strength, close_pct)
-                else: weak_bear = max(weak_bear, close_pct) if weak_bear!=0 else close_pct
+                if close_percent <= 38: broke_ll=True; broke_ll_strength=close_percent if broke_ll_strength==0 else min(broke_ll_strength, close_percent)
+                else: weak_bear = max(weak_bear, close_percent) if weak_bear!=0 else close_percent
         except: pass
     return {"last_high":last_h,"prev_high":prev_h,"last_low":last_l,"prev_low":prev_l,"hh_type":hh_type,"ll_type":ll_type,"trend":trend,"broke_hh":broke_hh,"broke_ll":broke_ll,"broke_hh_strength":broke_hh_strength,"broke_ll_strength":broke_ll_strength,"weak_bull":weak_bull,"weak_bear":weak_bear,"last_close":c[-1]}
 def get_3m_trend(d1):
     if not d1 or len(d1["c"])<90: return {"trend_3m":"RANGE","pct_3m":0}
-    try: now_close = d1["c"][-1]; ago_90 = d1["c"][-90]; pct = (now_close - ago_90) / ago_90 * 100 if ago_90>0 else 0; t="UP" if pct>=5 else "DOWN" if pct<=-5 else "RANGE"; return {"trend_3m":t,"pct_3m":pct}
+    try: now_close = d1["c"][-1]; ago_90 = d1["c"][-90]; change_val = (now_close - ago_90) / ago_90 * 100 if ago_90>0 else 0; t="UP" if change_val>=5 else "DOWN" if change_val<=-5 else "RANGE"; return {"trend_3m":t,"pct_3m":change_val}
     except: return {"trend_3m":"RANGE","pct_3m":0}
 def get_btc_filter():
     try:
@@ -148,9 +147,12 @@ def get_1h_box(d1h):
     if rng/mid>1.5: return None
     return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
 def check_pullback_15m(d15, box, direction):
-    if not d15: return False,0,"no_data"; live_c=d15["c"][-1]; rng=box["rng"] or 0.00001; pct=(live_c-box["LL"])/rng*100
-    if direction=="BUY": ok = 15 <= pct <= 55
-    else: ok = 60 <= pct <= 105; return ok, pct, f"{pct:.1f}%"
+    if not d15: return False,0,"no_data"
+    live_c=d15["c"][-1]; rng=box["rng"] or 0.00001
+    pull_percent=(live_c-box["LL"])/rng*100
+    if direction=="BUY": ok = 15 <= pull_percent <= 55
+    else: ok = 60 <= pull_percent <= 105
+    return ok, pull_percent, f"{pull_percent:.1f}%"
 def check_entry_5m(d5, direction):
     if not d5 or len(d5["c"])<3: return False; o,c=d5["o"][-1],d5["c"][-1]; o2=d5["o"][-2]; return (c>o and c>=o2) if direction=="BUY" else (c<o and c<=o2)
 def valid_signal_data(d):
@@ -160,54 +162,58 @@ def valid_signal_data(d):
         return True
     except: return False
 def get_next_liquidity_auto(d4, live, is_buy, depth=0):
-    default_pcts=[0.015, 0.028, 0.045, 0.10]
-    def _def_pct(d):
-        return default_pcts[d] if d < len(default_pcts) else 0.10 + (d-3)*0.06
-    if not d4 or len(d4["h"])<50:
-        p=_def_pct(depth)
-        price = live*(1+p) if is_buy else live*(1-p)
-        return price, 0, True
-    h=d4["h"][-100:]; l=d4["l"][-100:]
-    swings_h=[]; swings_l=[]
-    for i in range(10, len(h)-10):
-        if h[i]==max(h[i-4:i+5]): swings_h.append(h[i])
-        if l[i]==min(l[i-4:i+5]): swings_l.append(l[i])
-    if is_buy:
-        candidates = [x for x in set(swings_h) if x > live*1.003]
-        close_candidates = []
-        for lvl in candidates:
-            dist = (lvl - live)/live*100
-            cnt = sum(1 for x in swings_h if abs(x-lvl)/lvl < 0.003)
-            if cnt >= 2 and 0.5 <= dist <= 4.0:
-                close_candidates.append((lvl, cnt))
-        close_candidates = sorted(list(set(close_candidates)), key=lambda x: x[0])
-        if not close_candidates:
-            p=_def_pct(depth)
-            return live*(1+p), 0, True
-        if depth < len(close_candidates):
-            price, cnt = close_candidates[depth]
-            return price, cnt, False
-        last_price, last_cnt = close_candidates[-1]
-        return last_price * (1 + 0.006*(depth - len(close_candidates) +1)), last_cnt, False
-    else:
-        candidates = [x for x in set(swings_l) if x < live*0.997]
-        close_candidates = []
-        for lvl in candidates:
-            dist = (live - lvl)/live*100
-            cnt = sum(1 for x in swings_l if abs(x-lvl)/lvl < 0.003)
-            if cnt >= 2 and 0.5 <= dist <= 4.0:
-                close_candidates.append((lvl, cnt))
-        close_candidates = sorted(list(set(close_candidates)), key=lambda x: x[0], reverse=True)
-        if not close_candidates:
-            p=_def_pct(depth)
-            return live*(1-p), 0, True
-        if depth < len(close_candidates):
-            price, cnt = close_candidates[depth]
-            return price, cnt, False
-        last_price, last_cnt = close_candidates[-1]
-        return last_price * (1 - 0.006*(depth - len(close_candidates) +1)), last_cnt, False
-def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, broke_strength):
-    try: pb=float(str(pct_label).replace("%","").strip())
+    try:
+        default_levels=[0.015, 0.028, 0.045, 0.10]
+        if depth < len(default_levels):
+            level_p = default_levels[depth]
+        else:
+            level_p = 0.10 + (depth-3)*0.06
+        if not d4 or len(d4["h"])<50:
+            price = live*(1+level_p) if is_buy else live*(1-level_p)
+            return price, 0, True
+        h=d4["h"][-100:]; l=d4["l"][-100:]
+        swings_h=[]; swings_l=[]
+        for i in range(10, len(h)-10):
+            if h[i]==max(h[i-4:i+5]): swings_h.append(h[i])
+            if l[i]==min(l[i-4:i+5]): swings_l.append(l[i])
+        if is_buy:
+            candidates = [x for x in set(swings_h) if x > live*1.003]
+            close_candidates = []
+            for lvl in candidates:
+                dist = (lvl - live)/live*100
+                cnt = sum(1 for x in swings_h if abs(x-lvl)/lvl < 0.003)
+                if cnt >= 2 and 0.5 <= dist <= 4.0:
+                    close_candidates.append((lvl, cnt))
+            close_candidates = sorted(list(set(close_candidates)), key=lambda x: x[0])
+            if not close_candidates:
+                return live*(1+level_p), 0, True
+            if depth < len(close_candidates):
+                price, cnt = close_candidates[depth]
+                return price, cnt, False
+            last_price, last_cnt = close_candidates[-1]
+            return last_price * (1 + 0.006*(depth - len(close_candidates) +1)), last_cnt, False
+        else:
+            candidates = [x for x in set(swings_l) if x < live*0.997]
+            close_candidates = []
+            for lvl in candidates:
+                dist = (live - lvl)/live*100
+                cnt = sum(1 for x in swings_l if abs(x-lvl)/lvl < 0.003)
+                if cnt >= 2 and 0.5 <= dist <= 4.0:
+                    close_candidates.append((lvl, cnt))
+            close_candidates = sorted(list(set(close_candidates)), key=lambda x: x[0], reverse=True)
+            if not close_candidates:
+                return live*(1-level_p), 0, True
+            if depth < len(close_candidates):
+                price, cnt = close_candidates[depth]
+                return price, cnt, False
+            last_price, last_cnt = close_candidates[-1]
+            return last_price * (1 - 0.006*(depth - len(close_candidates) +1)), last_cnt, False
+    except Exception as e:
+        print(f"liq auto fallback {e}")
+        fp = 0.015 if depth==0 else 0.028 if depth==1 else 0.045 if depth==2 else 0.10
+        return (live*(1+fp) if is_buy else live*(1-fp)), 0, True
+def get_elite_score(sym, label, pull_label, btc_trend, direction, coin_trend, broke_strength):
+    try: pb=float(str(pull_label).replace("%","").strip())
     except: pb=50
     s=50
     if label=="HH" and broke_strength>=62: s+=25
@@ -247,20 +253,6 @@ def scan():
             data["tp3_hit"]=True; data["sl"]=tp2; save_a(); print(f"{GREEN}TP3 SWEEP {sym} -> RUNNER{RESET}"); tg(f"🟢 TP3 SWEEP {sym.replace('_USDT','')} -> RUNNER {fmt(runner_target)} [{label}] BTC:{btc_trend} 30% TRAIL ON"); continue
     if len(ACTIVE) >= MAX_ACTIVE: return
     print(f"{BLUE}--- SCAN {TAG} {get_time()} BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}% Q:{q} WR:{wr_q:.0f}% ---{RESET}")
-    print(f"{YELLOW}--- FBS BREAKOUT CHECK ---{RESET}")
-    for sym in SYMBOLS[:12]:
-        try:
-            h1 = kl(sym,"Min60")
-            if not h1: continue; st = get_last_structure(h1,80)
-            if not st: continue
-            if st.get("weak_bull",0)>0 and not st["broke_hh"]: print(f"{RED}{sym}: WEAK BULL {st['weak_bull']:.0f}% DO NOT ENTER X{RESET}")
-            if st.get("weak_bear",0)>0 and not st["broke_ll"]: print(f"{RED}{sym}: WEAK BEAR {st['weak_bear']:.0f}% DO NOT ENTER X{RESET}")
-            if st["broke_hh"]: print(f"{GREEN}{sym}: STRONG BULL {st['broke_hh_strength']:.0f}% ENTER OK{RESET}")
-            if st["broke_ll"]: print(f"{BLUE}{sym}: STRONG BEAR {st['broke_ll_strength']:.0f}% ENTER OK{RESET}")
-            time.sleep(0.8)
-        except: pass
-    print(f"{YELLOW}--- END FBS CHECK ---{RESET}")
-    if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
     cands=[]; skipped={}
     for sym in SYMBOLS:
         try:
@@ -293,23 +285,25 @@ def scan():
             if direction=="SELL" and btc_trend!="DOWN": skipped[sym]=f"btc filter SELL need DOWN got {btc_trend}"; continue
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]="gap_small"; continue
-            in_ok,pct_15m,pct_label=check_pullback_15m(m15,box1h,direction)
-            if not in_ok: skipped[sym]=f"pullback_{pct_label}"; continue
+            in_ok,pull_val,pull_label=check_pullback_15m(m15,box1h,direction)
+            if not in_ok: skipped[sym]=f"pullback_{pull_label}"; continue
             if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
             is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]; sl=min(LL*0.996, live*0.985) if is_buy else max(HH*1.004, live*1.015)
             tp1, _, _ = get_next_liquidity_auto(d4, live, is_buy, 0); tp2, _, _ = get_next_liquidity_auto(d4, live, is_buy, 1); tp3, _, _ = get_next_liquidity_auto(d4, live, is_buy, 2); runner, _, _ = get_next_liquidity_auto(d4, live, is_buy, 3)
             risk=(live-sl)/live*100 if is_buy else (sl-live)/live*100; reward1=(tp1-live)/live*100 if is_buy else (live-tp1)/live*100; rr=reward1/risk if risk!=0 else 0
             if rr<RR_MIN: skipped[sym]=f"rr_{rr:.2f}"; continue
-            score=get_elite_score(sym,label,pct_label,btc_trend,direction,struct["trend"],broke_str)
+            score=get_elite_score(sym,label,pull_label,btc_trend,direction,struct["trend"],broke_str)
             if score<min_score_threshold: skipped[sym]=f"score_{score}"; continue
-            cands.append((score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pct_label,broke_str,rr,coin_3m))
-        except Exception as e: skipped[sym]=f"ex_{e}"; continue
+            cands.append((score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pull_label,broke_str,rr,coin_3m))
+        except Exception as e:
+            import traceback; print(f"CRASH {sym}: {e}"); traceback.print_exc()
+            skipped[sym]=f"ex_{e}"; continue
     cands=sorted(cands, key=lambda x: x[0], reverse=True)[:TOP_N_PER_SCAN]
-    for score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pct_label,broke_str,rr,coin_3m in cands:
-        is_buy=direction=="BUY"; tp_cfg, tp_type = get_tp_config(sym); ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":label,"score":score,"pct":pct_label,"rr":rr,"ts":time.time(),"tp_cfg":tp_cfg,"tp_type":tp_type}; save_a(); STATS["open"][sym]={"label":label,"entry":live,"ts":time.time()}; save_s()
+    for score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pull_label,broke_str,rr,coin_3m in cands:
+        is_buy=direction=="BUY"; tp_cfg, tp_type = get_tp_config(sym); ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":label,"score":score,"pct":pull_label,"rr":rr,"ts":time.time(),"tp_cfg":tp_cfg,"tp_type":tp_type}; save_a(); STATS["open"][sym]={"label":label,"entry":live,"ts":time.time()}; save_s()
         col = GREEN if is_buy else RED; print(f"{col}NEW {sym} {direction} [{label} {broke_str:.0f}%] SCORE {score}{RESET}")
-        tg(f"NEW {sym.replace('_USDT','')} {direction} [{label} {broke_str:.0f}%] @ {fmt(live)} SL {fmt(sl)} TP {fmt(tp1)}/{fmt(tp2)}/{fmt(tp3)} RUNNER {fmt(runner)} PB {pct_label} SCORE {score} RR {rr:.2f} Q:{q} WR:{wr_q:.0f}% BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}%")
-    if not cands: print(f"{YELLOW}No cands, skips:{RESET}", list(skipped.items())[:8])
+        tg(f"NEW {sym.replace('_USDT','')} {direction} [{label} {broke_str:.0f}%] @ {fmt(live)} SL {fmt(sl)} TP {fmt(tp1)}/{fmt(tp2)}/{fmt(tp3)} RUNNER {fmt(runner)} PB {pull_label} SCORE {score} RR {rr:.2f} Q:{q} WR:{wr_q:.0f}% BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}%")
+    if not cands: print(f"{YELLOW}No cands, skips:{RESET}", list(skipped.items())[:10])
 
 if __name__=="__main__":
     if "--once" in sys.argv: scan()
