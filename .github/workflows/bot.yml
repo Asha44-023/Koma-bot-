@@ -15,8 +15,8 @@ jobs:
       - run: pip install requests pytz
       - run: python bot.py --once
         env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT: ${{ secrets.TG_CHAT }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
       - run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
