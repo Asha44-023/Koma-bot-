@@ -1,4 +1,4 @@
-name: Run Bot V165-65-SMART-90-RR07-LABEL
+name: Run Bot V166-SEASONAL-Q4-2X-55
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -20,6 +20,6 @@ jobs:
       - run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          git add active.json cooldown.json stats_v157.json
-          git diff --staged --quiet || git commit -m "update state V165"
+          git add active.json cooldown.json stats_v157.json seasonality.json
+          git diff --staged --quiet || git commit -m "update state V166 Q4-2X"
           git push
