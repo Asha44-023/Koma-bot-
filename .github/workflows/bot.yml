@@ -1,9 +1,8 @@
-name: Run Bot V170-FBS-BOX-PCT-FIX
+name: Run Bot V171-FBS-PCT-FINAL
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -21,5 +20,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V170-FBS-BOX-PCT-FIX"
+          git diff --staged --quiet || git commit -m "update state V171-FBS-PCT-FINAL"
           git push
