@@ -39,7 +39,7 @@ def get_seasonality():
     elif wr<65: mult, min_score = 1.2, 62
     else: mult, min_score = 2.0, 55
     return q, wr, mult, min_score
-session = requests.Session(); TAG = "V168-FBS-COLOR-FIXED-BTC"
+session = requests.Session(); TAG = "V168-FBS-COLOR-FIXED-BTC-RETRY"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -74,13 +74,21 @@ def tg(m):
 def kl(symbol,interval):
     sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400}; sec=sec_map.get(interval,300); end=int(time.time()); start=end-sec*400
     url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
-    try:
-        r=session.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=10).json(); d=r.get("data",r)
-        if isinstance(d,dict) and "data" in d: d=d["data"]
-        res={"o":[float(x) for x in d["open"]],"h":[float(x) for x in d["high"]],"l":[float(x) for x in d["low"]],"c":[float(x) for x in d["close"]],"v":[float(x) for x in d.get("vol", d.get("volume", [0]*len(d["close"])))]}
-        for k in res: res[k]=res[k][:-1]
-        if len(res["c"])<30: return None; return res
-    except: return None
+    for attempt in range(3):
+        try:
+            r=session.get(url,headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"},timeout=15)
+            if r.status_code==429:
+                print(f"{YELLOW}429 rate limit {symbol} {interval} sleep 5s{RESET}"); time.sleep(5+attempt*3); continue
+            j=r.json(); d=j.get("data",j)
+            if isinstance(d,dict) and "data" in d: d=d["data"]
+            if not d or "open" not in d: time.sleep(1); continue
+            res={"o":[float(x) for x in d["open"]],"h":[float(x) for x in d["high"]],"l":[float(x) for x in d["low"]],"c":[float(x) for x in d["close"]],"v":[float(x) for x in d.get("vol", d.get("volume", [0]*len(d["close"])))]}
+            for k in res: res[k]=res[k][:-1]
+            if len(res["c"])<30: time.sleep(0.5); continue
+            return res
+        except Exception as e:
+            print(f"{YELLOW}kl ex {symbol} {interval} {e} retry {attempt+1}{RESET}"); time.sleep(2+attempt*2)
+    return None
 def get_live_price(s):
     for t in [s,s.replace("_","")]:
         try: r=session.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={t}",timeout=5).json(); return float((r.get("data",r))["lastPrice"])
@@ -227,7 +235,7 @@ def scan():
             if st.get("weak_bear",0)>0 and not st["broke_ll"]: print(f"{RED}{sym}: WEAK BEAR {st['weak_bear']:.0f}% DO NOT ENTER X{RESET}")
             if st["broke_hh"]: print(f"{GREEN}{sym}: STRONG BULL {st['broke_hh_strength']:.0f}% ENTER OK{RESET}")
             if st["broke_ll"]: print(f"{BLUE}{sym}: STRONG BEAR {st['broke_ll_strength']:.0f}% ENTER OK{RESET}")
-            time.sleep(0.05)
+            time.sleep(0.8)
         except: pass
     print(f"{YELLOW}--- END FBS CHECK ---{RESET}")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
@@ -235,7 +243,7 @@ def scan():
     for sym in SYMBOLS:
         try:
             if sym in ACTIVE: skipped[sym]="active"; continue
-            d1=kl(sym,"Day1"); time.sleep(0.12); d4=kl(sym,"Hour4"); time.sleep(0.12); h1=kl(sym,"Min60"); time.sleep(0.12); m15=kl(sym,"Min15"); time.sleep(0.12); m5=kl(sym,"Min5"); time.sleep(0.12)
+            d1=kl(sym,"Day1"); time.sleep(0.8); d4=kl(sym,"Hour4"); time.sleep(0.8); h1=kl(sym,"Min60"); time.sleep(0.8); m15=kl(sym,"Min15"); time.sleep(0.8); m5=kl(sym,"Min5"); time.sleep(1.0)
             if not d1 or not d4 or not h1 or not m15 or not m5: skipped[sym]="kl_fail"; continue
             coin_3m = get_3m_trend(d1); struct=get_last_structure(h1,80); 
             if not struct: skipped[sym]="no_structure"; continue
