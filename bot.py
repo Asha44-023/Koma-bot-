@@ -39,7 +39,7 @@ def get_seasonality():
     elif wr<65: mult, min_score = 1.2, 62
     else: mult, min_score = 2.0, 55
     return q, wr, mult, min_score
-session = requests.Session(); TAG = "V168-FBS-COLOR-FIXED"
+session = requests.Session(); TAG = "V168-FBS-COLOR-FIXED-BTC"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -119,11 +119,18 @@ def get_3m_trend(d1):
 def get_btc_filter():
     try:
         btc_d1 = kl("BTC_USDT","Day1"); btc_h1 = kl("BTC_USDT","Min60"); t3m = get_3m_trend(btc_d1)
-        if not btc_h1: return {"trend":t3m["trend_3m"],"hh_str":0,"ll_str":0,"pct_3m":t3m["pct_3m"]}
+        if not btc_d1 or t3m["pct_3m"]==0:
+            print(f"{YELLOW}BTC API fail, using Q4 fallback UP 24%{RESET}")
+            return {"trend":"UP","hh_str":70,"ll_str":0,"pct_3m":24.0}
+        if not btc_h1: return {"trend":t3m["trend_3m"] if t3m["trend_3m"]!="RANGE" else "UP","hh_str":0,"ll_str":0,"pct_3m":t3m["pct_3m"]}
         struct = get_last_structure(btc_h1,80)
-        if not struct: return {"trend":t3m["trend_3m"],"hh_str":0,"ll_str":0,"pct_3m":t3m["pct_3m"]}
-        trend = t3m["trend_3m"] if t3m["trend_3m"]!="RANGE" else struct["trend"]; return {"trend":trend,"hh_str":struct["broke_hh_strength"],"ll_str":struct["broke_ll_strength"],"pct_3m":t3m["pct_3m"]}
-    except: return {"trend":"RANGE","hh_str":0,"ll_str":0,"pct_3m":0}
+        if not struct: return {"trend":t3m["trend_3m"] if t3m["trend_3m"]!="RANGE" else "UP","hh_str":0,"ll_str":0,"pct_3m":t3m["pct_3m"]}
+        trend = t3m["trend_3m"] if t3m["trend_3m"]!="RANGE" else struct["trend"]
+        if trend=="RANGE": trend="UP"
+        return {"trend":trend,"hh_str":struct["broke_hh_strength"],"ll_str":struct["broke_ll_strength"],"pct_3m":t3m["pct_3m"]}
+    except Exception as e:
+        print(f"{YELLOW}BTC filter ex {e}, fallback UP{RESET}")
+        return {"trend":"UP","hh_str":70,"ll_str":0,"pct_3m":24.0}
 def get_4h_sr_boxes(d4):
     h=d4["h"]; l=d4["l"]; lookback=50; lows=[l[i] for i in range(len(l)-lookback, len(l)-2) if l[i] < l[i-1] and l[i] < l[i+1]]; highs=[h[i] for i in range(len(h)-lookback, len(h)-2) if h[i] > h[i-1] and h[i] > h[i+1]]
     if not lows or not highs: return {"support_level": min(l[-20:]), "resist_level": max(h[-20:]), "gap_pct": 15}
@@ -171,7 +178,7 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
         last_price, last_cnt = close_candidates[-1]; return last_price * (1 - 0.006*(depth - len(close_candidates) +1)), last_cnt, False
 def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, broke_strength):
     try: pb=float(str(pct_label).replace("%","").strip())
-    except: pb=50; s=50
+    except: pb=50
     s=50
     if label=="HH" and broke_strength>=62: s+=25
     elif label=="LL" and broke_strength<=38: s+=25
@@ -187,7 +194,7 @@ def scan():
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
     if len(ACTIVE) >= MAX_ACTIVE: print(f"{RED}MAX ACTIVE {len(ACTIVE)}/{MAX_ACTIVE}{RESET}")
     btc_info = get_btc_filter(); btc_trend = btc_info["trend"]; hh = btc_info["hh_str"]; ll = btc_info["ll_str"]; effective_trend = btc_trend
-    if btc_trend == "RANGE":
+    if btc_trend == "RANGE" and btc_info.get("pct_3m",0) != 0:
         if hh >= 62: effective_trend = "UP"
         elif ll != 0 and ll <= 38: effective_trend = "DOWN"
         else: print(f"{YELLOW}BTC 3M {btc_info.get('pct_3m',0):.1f}% RANGE -> SLEEP{RESET}"); return
@@ -234,7 +241,6 @@ def scan():
             if not struct: skipped[sym]="no_structure"; continue
             live=get_live_price(sym) or h1["c"][-1]; box1h=get_1h_box(h1); 
             if not box1h: skipped[sym]="no_1H_box"; continue
-            # FBS FIX: Block weak
             if struct.get("weak_bull",0) > 0 and not struct["broke_hh"]: skipped[sym]=f"FBS_WEAK_BULL {struct['weak_bull']:.0f}%"; continue
             if struct.get("weak_bear",0) > 0 and not struct["broke_ll"]: skipped[sym]=f"FBS_WEAK_BEAR {struct['weak_bear']:.0f}%"; continue
             direction=None; label=None; broke_str=0
