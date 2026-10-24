@@ -367,10 +367,14 @@ def scan():
         tg(f"🟢 NEW {sym.replace('_USDT','')} {direction} [{label} {tag}] @ {fmt(live)} SL {fmt(sl)} TP {fmt(tp1)}/{fmt(tp2)}/{fmt(tp3)} RUNNER {fmt(runner)} PB {pct_label} SCORE {score} RR {rr:.2f} Q:{q} WR:{wr_q:.0f}% x{risk_mult} BTC:{btc_trend}")
     if not cands:
         print("No candidates, top skips:", list(skipped.items())[:8])
+
 if __name__=="__main__":
-    while True:
-        try: scan()
-        except Exception as e:
-            print(f"SCAN EX {e}")
-            import traceback; traceback.print_exc()
-        time.sleep(60)
+    if "--once" in sys.argv:
+        scan()
+    else:
+        while True:
+            try: scan()
+            except Exception as e:
+                print(f"SCAN EX {e}")
+                import traceback; traceback.print_exc()
+            time.sleep(60)
