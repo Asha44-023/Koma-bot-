@@ -6,12 +6,11 @@ SYMBOLS = ["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_US
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
-DAILY_LOSS_LIMIT, MAX_ACTIVE, SYMBOL_COOLDOWN_SECONDS = -8.0, 35, 3600
+DAILY_LOSS_LIMIT, MAX_ACTIVE = -8.0, 35
 TOP_N_PER_SCAN = 2
 NEAR_THRESHOLD = 0.05
 RETEST_THRESHOLD = 0.03
 RR_MIN = 0.7
-MIN_SCORE_BASE = 65
 try:
     with open("seasonality.json","r") as f:
         _sj=json.load(f)
@@ -33,7 +32,7 @@ def get_seasonality():
     else: mult, min_score = 2.0, 55
     return q, wr, mult, min_score
 session = requests.Session()
-TAG = "V166-SEASONAL-Q4-2X-55"
+TAG = "V166-FBS-62-38-FIXED"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -138,9 +137,14 @@ def get_1h_box(d1h):
     return {"HH":HH,"LL":LL,"mid":mid,"rng":rng}
 def check_pullback_15m(d15, box, direction):
     if not d15: return False,0,"no_data"
-    live_c=d15["c"][-1]; rng=box["rng"] or 0.00001
+    live_c=d15["c"][-1]
+    rng=box["rng"] or 0.00001
     pct=(live_c-box["LL"])/rng*100
-    return 30 <= pct <= 90, pct, f"{pct:.1f}%"
+    if direction=="BUY":
+        ok = 15 <= pct <= 55
+    else:
+        ok = 60 <= pct <= 105
+    return ok, pct, f"{pct:.1f}%"
 def check_entry_5m(d5, direction):
     if not d5 or len(d5["c"])<3: return False
     o,c=d5["o"][-1],d5["c"][-1]; o2=d5["o"][-2]
@@ -204,8 +208,8 @@ def get_elite_score(sym, label, pct_label, btc_trend, direction, coin_trend, bro
     s=50
     if label=="HH" and broke_strength>=62: s+=25
     elif label=="LL" and broke_strength<=38: s+=25
-    elif label=="HL" and 30 <= pb <= 90: s+=20
-    elif label=="LH" and 30 <= pb <= 90: s+=20
+    elif label=="HL" and 15 <= pb <= 55: s+=20
+    elif label=="LH" and 60 <= pb <= 105: s+=20
     else: s-=20
     if btc_trend==direction or (btc_trend=="UP" and direction=="BUY") or (btc_trend=="DOWN" and direction=="SELL"): s+=15
     if coin_trend==direction or (coin_trend=="UP" and direction=="BUY") or (coin_trend=="DOWN" and direction=="SELL"): s+=10
@@ -237,7 +241,7 @@ def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
     if len(ACTIVE) >= MAX_ACTIVE:
-        print(f"MAX ACTIVE {len(ACTIVE)}/{MAX_ACTIVE} - skip new entries, only manage")
+        print(f"MAX ACTIVE {len(ACTIVE)}/{MAX_ACTIVE} - manage only")
     btc_info = get_btc_filter()
     btc_trend = btc_info["trend"]
     hh = btc_info["hh_str"]; ll = btc_info["ll_str"]
@@ -308,27 +312,27 @@ def scan():
             live=get_live_price(sym) or h1["c"][-1]
             box1h=get_1h_box(h1)
             if not box1h: skipped[sym]="no_1H_box"; continue
-            direction=None; setup_type=None; retest_level=None; label=None; broke_str=0
+            direction=None; label=None; broke_str=0
             if struct["broke_hh"] and struct["broke_hh_strength"]>=62:
                 dist = abs(live - struct["last_high"]) / live
                 if dist <= RETEST_THRESHOLD:
-                    direction="BUY"; setup_type=f"STRONG HH {struct['broke_hh_strength']:.0f}%"; retest_level=struct["last_high"]; label="HH"; broke_str=struct["broke_hh_strength"]
+                    direction="BUY"; label="HH"; broke_str=struct["broke_hh_strength"]
             if not direction and struct["broke_ll"] and (struct["broke_ll_strength"]<=38 or struct["broke_ll_strength"]==0):
                 ll_strength = struct["broke_ll_strength"] if struct["broke_ll_strength"]!=0 else 25
                 if ll_strength<=38:
                     dist = abs(live - struct["last_low"]) / live
                     if dist <= RETEST_THRESHOLD:
-                        direction="SELL"; setup_type=f"STRONG LL {ll_strength:.0f}%"; retest_level=struct["last_low"]; label="LL"; broke_str=ll_strength
+                        direction="SELL"; label="LL"; broke_str=ll_strength
             if not direction and struct["ll_type"]=="HL" and struct["trend"]=="UP":
                 dist = abs(live - struct["last_low"]) / live
                 if dist <= NEAR_THRESHOLD:
                     if struct["hh_type"]=="HH":
-                        direction="BUY"; setup_type="PULLBACK @HL [MOTHER HH>=62%]"; retest_level=struct["last_low"]; label="HL"; broke_str=70
+                        direction="BUY"; label="HL"; broke_str=70
             if not direction and struct["hh_type"]=="LH" and struct["trend"]=="DOWN":
                 dist = abs(live - struct["last_high"]) / live
                 if dist <= NEAR_THRESHOLD:
                     if struct["ll_type"]=="LL":
-                        direction="SELL"; setup_type="PULLBACK @LH [MOTHER LL<=38%]"; retest_level=struct["last_high"]; label="LH"; broke_str=30
+                        direction="SELL"; label="LH"; broke_str=30
             if not direction: skipped[sym]=f"no_strong_break {struct['hh_type']}/{struct['ll_type']}"; continue
             if direction=="BUY" and btc_trend!="UP": skipped[sym]=f"btc_filter BUY need UP got {btc_trend}"; continue
             if direction=="SELL" and btc_trend!="DOWN": skipped[sym]=f"btc_filter SELL need DOWN got {btc_trend}"; continue
@@ -377,4 +381,4 @@ if __name__=="__main__":
             except Exception as e:
                 print(f"SCAN EX {e}")
                 import traceback; traceback.print_exc()
-            time.sleep(60)
+            time.sleep(900)
