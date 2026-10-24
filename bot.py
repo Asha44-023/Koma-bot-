@@ -236,6 +236,8 @@ def scan():
     q, wr_q, risk_mult, min_score_threshold = get_seasonality()
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
+    if len(ACTIVE) >= MAX_ACTIVE:
+        print(f"MAX ACTIVE {len(ACTIVE)}/{MAX_ACTIVE} - skip new entries, only manage")
     btc_info = get_btc_filter()
     btc_trend = btc_info["trend"]
     hh = btc_info["hh_str"]; ll = btc_info["ll_str"]
@@ -243,14 +245,11 @@ def scan():
     if btc_trend == "RANGE":
         if hh >= 62:
             effective_trend = "UP"
-            print(f"BTC RANGE but HH {hh:.0f}% >=62% -> SMART UP")
         elif ll != 0 and ll <= 38:
             effective_trend = "DOWN"
-            print(f"BTC RANGE but LL {ll:.0f}% <=38% -> SMART DOWN")
         else:
-            print(f"BTC 1H TREND: {btc_trend} HH:{hh:.0f}% LL:{ll:.0f}% -> TRUE RANGE SLEEP")
+            print(f"BTC TRUE RANGE HH:{hh:.0f}% LL:{ll:.0f}% -> SLEEP")
             return
-    print(f"BTC 1H TREND: {btc_trend} -> EFFECTIVE: {effective_trend} HH:{hh:.0f}% LL:{ll:.0f}%")
     btc_trend = effective_trend
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
@@ -295,6 +294,7 @@ def scan():
                     ACTIVE.pop(sym,None); save_a()
                 continue
             profit=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; COOLDOWN["daily_pnl"]+=profit; save_c(); tg(f"🟢 RUNNER {sym.replace('_USDT','')} +{profit:.2f}% @ {fmt(p)} [{label}] BTC:{btc_trend}"); ACTIVE.pop(sym,None); save_a()
+    if len(ACTIVE) >= MAX_ACTIVE: return
     print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} Q:{q} WR:{wr_q:.0f}% x{risk_mult} MIN:{min_score_threshold} daily:{COOLDOWN.get('daily_pnl',0):.2f}% active:{len(ACTIVE)} ---")
     if COOLDOWN.get("daily_pnl",0)<=DAILY_LOSS_LIMIT: return
     cands=[]; skipped={}
@@ -329,11 +329,11 @@ def scan():
                 if dist <= NEAR_THRESHOLD:
                     if struct["ll_type"]=="LL":
                         direction="SELL"; setup_type="PULLBACK @LH [MOTHER LL<=38%]"; retest_level=struct["last_high"]; label="LH"; broke_str=30
-            if not direction: skipped[sym]=f"no_strong_break {struct['hh_type']}/{struct['ll_type']} HH:{struct['broke_hh_strength']:.0f}% LL:{struct['broke_ll_strength']:.0f}%"; continue
-            if direction=="BUY" and btc_trend!="UP": skipped[sym]=f"btc_filter BUY need BTC UP got {btc_trend}"; continue
-            if direction=="SELL" and btc_trend!="DOWN": skipped[sym]=f"btc_filter SELL need BTC DOWN got {btc_trend}"; continue
-            if direction=="BUY" and btc_info["hh_str"]>0 and btc_info["hh_str"]<62: skipped[sym]=f"btc_weak HH {btc_info['hh_str']:.0f}% <62%"; continue
-            if direction=="SELL" and btc_info["ll_str"]>0 and btc_info["ll_str"]>38: skipped[sym]=f"btc_weak LL {btc_info['ll_str']:.0f}% >38%"; continue
+            if not direction: skipped[sym]=f"no_strong_break {struct['hh_type']}/{struct['ll_type']}"; continue
+            if direction=="BUY" and btc_trend!="UP": skipped[sym]=f"btc_filter BUY need UP got {btc_trend}"; continue
+            if direction=="SELL" and btc_trend!="DOWN": skipped[sym]=f"btc_filter SELL need DOWN got {btc_trend}"; continue
+            if direction=="BUY" and btc_info["hh_str"]>0 and btc_info["hh_str"]<62: skipped[sym]=f"btc_weak HH {btc_info['hh_str']:.0f}%"; continue
+            if direction=="SELL" and btc_info["ll_str"]>0 and btc_info["ll_str"]>38: skipped[sym]=f"btc_weak LL {btc_info['ll_str']:.0f}%"; continue
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]="gap_small"; continue
             in_ok,pct_15m,pct_label=check_pullback_15m(m15,box1h,direction)
