@@ -1,4 +1,4 @@
-name: Run Bot V168-FBS-COLOR-FIXED
+name: Run Bot V168-FBS-COLOR-FIXED-BTC
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -8,8 +8,8 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       - run: pip install requests pytz colorama
@@ -21,5 +21,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V168 FBS-COLOR-FIXED"
+          git diff --staged --quiet || git commit -m "update state V168 FBS-COLOR-FIXED-BTC"
           git push
