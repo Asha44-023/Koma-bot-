@@ -1,0 +1,17 @@
+{
+  "summary": {
+    "Q1": "89 trades, 46W-43L, WR 52% avg",
+    "Q2": "124 trades, 78W-46L, WR 63% avg",
+    "Q3": "156 trades, 59W-97L, WR 38% avg",
+    "Q4": "178 trades, 126W-52L, WR 71% avg"
+  },
+  "by_q": {
+    "Q1": 52,
+    "Q2": 63,
+    "Q3": 38,
+    "Q4": 71
+  },
+  "generated": "2026-01-15T00:00:00",
+  "total_trades": 547,
+  "note": "Q4 2x aggressive for $78k->$90k pump"
+}
