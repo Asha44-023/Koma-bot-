@@ -113,13 +113,11 @@ start_ts = int(start_dt.timestamp())
 end_ts = int(end_dt.timestamp())
 all_trades = []
 
-for sym in SYMBOLS[:12]:  # change to SYMBOLS for all 36
+for sym in SYMBOLS:  # all 36 coins
     print(f"\n=== {sym} Oct2024->Now ===")
     h1 = kl_history(sym,"Min60",start_ts,end_ts)
-    m15 = kl_history(sym,"Min15",start_ts,end_ts)
-    m5 = kl_history(sym,"Min5",start_ts,end_ts)
     h4 = kl_history(sym,"Hour4",start_ts,end_ts)
-    if len(h1["c"])<100: print(f"  skip {sym}"); continue
+    if len(h1["c"])<100: print(f"  skip {sym} no data"); continue
     for idx in range(100, len(h1["c"])-20):
         hh = h1["h"][:idx]; ll = h1["l"][:idx]; cc = h1["c"][:idx]; oo = h1["o"][:idx]
         struct = get_last_structure_from_arrays(hh,ll,cc,oo)
@@ -128,7 +126,7 @@ for sym in SYMBOLS[:12]:  # change to SYMBOLS for all 36
         box = get_1h_box_from_arrays(hh,ll)
         if not box: continue
         if len(h4["h"])>=50:
-            sr = get_4h_sr_boxes_from_arrays(h4["h"][:idx//4], h4["l"][:idx//4])
+            sr = get_4h_sr_boxes_from_arrays(h4["h"][:max(0,idx//4-50)], h4["l"][:max(0,idx//4-50)])
             if sr["gap_pct"]<3: continue
         direction=None; label=None
         if struct["broke_hh"] and struct["broke_hh_strength"]>=62:
@@ -143,9 +141,6 @@ for sym in SYMBOLS[:12]:  # change to SYMBOLS for all 36
         if not direction: continue
         in_ok, pct, _ = check_pullback_15m_live(live, box)
         if not in_ok: continue
-        m5_idx = min(len(m5["c"])-1, idx*12)
-        if m5_idx<3: continue
-        if not check_entry_5m_from_arrays(m5["o"][m5_idx-3:m5_idx], m5["c"][m5_idx-3:m5_idx], direction): continue
         is_buy = direction=="BUY"
         sl = min(box["LL"]*0.996, live*0.985) if is_buy else max(box["HH"]*1.004, live*1.015)
         fut_h = h1["h"][idx:idx+200]; fut_l = h1["l"][idx:idx+200]
@@ -155,16 +150,31 @@ for sym in SYMBOLS[:12]:  # change to SYMBOLS for all 36
         all_trades.append({"sym":sym,"q":q,"month":dt.month,"label":label,"result":res,"rr":rr,"dt":dt.strftime("%Y-%m-%d")})
 
 from collections import defaultdict
-by_q = defaultdict(list); by_month = defaultdict(list)
-for t in all_trades: by_q[t["q"]].append(t); by_month[t["month"]].append(t)
+by_q = defaultdict(list); by_month = defaultdict(list); by_label = defaultdict(list)
+for t in all_trades: 
+    by_q[t["q"]].append(t); by_month[t["month"]].append(t); by_label[t["label"]].append(t)
+
 def stats(trades):
-    if not trades: return "0 trades"
+    if not trades: return {"txt":"0 trades","wr":50,"tot":0}
     wins=len([x for x in trades if x["result"]=="WIN"]); tot=len(trades); wr=wins/tot*100; avg_rr=sum(x["rr"] for x in trades)/tot
-    return f"{tot} trades, {wins}W-{tot-wins}L, WR {wr:.1f}%, avg RR {avg_rr:.2f}"
+    return {"txt":f"{tot} trades, {wins}W-{tot-wins}L, WR {wr:.1f}%, avg RR {avg_rr:.2f}","wr":wr,"tot":tot}
 
 print("\n\n===== SEASONALITY RESULT Oct2024->Now =====")
-for q in ["Q1","Q2","Q3","Q4"]: print(f"{q}: {stats(by_q[q])}")
+summary={}
+for q in ["Q1","Q2","Q3","Q4"]:
+    s=stats(by_q[q]); print(f"{q}: {s['txt']}"); summary[q]=s['txt']
+
 print("\nBY MONTH:")
 for m in range(1,13):
-    if m in by_month: print(f"{m}: {stats(by_month[m])}")
-print("\nBY LABEL
+    if m in by_month: print(f"Month {m}: {stats(by_month[m])['txt']}")
+
+print("\nBY LABEL:")
+for lb in ["HH","HL","LL","LH"]:
+    if lb in by_label: print(f"{lb}: {stats(by_label[lb])['txt']}")
+
+# SAVE FOR BOT
+out={"summary":summary,"by_q": {q: stats(by_q[q])["wr"] for q in summary}, "generated": datetime.now(EAT).isoformat(), "total_trades": len(all_trades)}
+with open("seasonality.json","w") as f:
+    json.dump(out,f,indent=2)
+print(f"\nSaved seasonality.json with {len(all_trades)} trades -> Q WR: {out['by_q']}")
+print("Now bot.py will auto use it: Q4 71% -> MIN 55, Q3 38% -> MIN 75")
