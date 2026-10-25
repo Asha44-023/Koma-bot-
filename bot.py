@@ -42,7 +42,7 @@ def get_seasonality():
     return q, wr, mult, min_score
 
 session = requests.Session()
-TAG = "V174-BEST-HH-HL-LH-LL-BOTH"
+TAG = "V175-BEST-COIN-ONLY-BOTH"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -213,14 +213,14 @@ def get_elite_score(sym, label, pull_label, btc_trend, direction, coin_trend, br
     try: pb=float(str(pull_label).replace("%","").strip())
     except: pb=50
     s=50
-    # BEST WR: HL and LH are safest
+    # BEST WR: HL and LH are safest - COIN ONLY, NO BTC BONUS
     if label=="HL" and 15 <= pb <= 55: s+=25
     elif label=="LH" and 60 <= pb <= 105: s+=25
     elif label=="HH" and broke_strength>=62: s+=22
     elif label=="LL" and broke_strength<=38: s+=22
     else: s-=20
-    if btc_trend==direction: s+=15
-    if coin_trend==direction: s+=10
+    # COIN-ONLY: BTC bonus removed
+    if coin_trend==direction: s+=15
     if sym in ["FARTCOIN_USDT","WIF_USDT","PEPE_USDT","BONK_USDT","KOMA_USDT","SEI_USDT"]: s+=5
     return s
 
@@ -228,7 +228,7 @@ def scan():
     q, wr_q, risk_mult, min_score_threshold = get_seasonality(); today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
     btc_info = get_btc_filter(); btc_trend = btc_info["trend"]
-    print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}% Q:{q} WR:{wr_q:.0f}% BOTH HH/HL/LH/LL ---")
+    print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}% Q:{q} WR:{wr_q:.0f}% COIN-ONLY BOTH HH/HL/LH/LL ---")
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
@@ -259,7 +259,6 @@ def scan():
             if struct.get("weak_bull",0) > 0 and not struct["broke_hh"]: skipped[sym]=f"FBS_WEAK_BULL {struct['weak_bull']:.0f}% SKIP"; continue
             if struct.get("weak_bear",0) > 0 and not struct["broke_ll"]: skipped[sym]=f"FBS_WEAK_BEAR {struct['weak_bear']:.0f}% SKIP"; continue
             direction=None; label=None; broke_str=0
-            # BEST: HL/HH for BUY, LH/LL for SELL - BOTH ACTIVE
             if struct["ll_type"]=="HL":
                 dist = abs(live - struct["last_low"]) / live
                 if dist <= NEAR_THRESHOLD: direction="BUY"; label="HL"; broke_str=70
@@ -275,7 +274,6 @@ def scan():
                     dist = abs(live - struct["last_low"]) / live
                     if dist <= RETEST_THRESHOLD: direction="SELL"; label="LL"; broke_str=ll_strength
             if not direction: skipped[sym]=f"no_break {struct['hh_type']}/{struct['ll_type']}"; continue
-            # NO BTC BLOCK - BOTH BUY & SELL ALLOWED
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]="gap_small"; continue
             in_ok,pull_val,pull_label=check_pullback_15m(m15,box1h,direction)
