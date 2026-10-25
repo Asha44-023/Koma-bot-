@@ -1,5 +1,12 @@
 {
-  "closed": [],
+  "closed": [
+    {
+      "sym": "FLOKI_USDT",
+      "result": "LOSS",
+      "label": "HL",
+      "ts": 1792917816.1753314
+    }
+  ],
   "open": {
     "POPCAT_USDT": {
       "entry_time": 1792709218.662696,
@@ -22,11 +29,6 @@
       "label": "HL",
       "entry": 0.0004678,
       "ts": 1792852352.7085595
-    },
-    "FLOKI_USDT": {
-      "label": "HL",
-      "entry": 2.293e-05,
-      "ts": 1792862818.9565969
     }
   }
 }
