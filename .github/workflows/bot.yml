@@ -1,4 +1,4 @@
-name: Run Bot V174-BEST-BOTH
+name: Run Bot V175-COIN-ONLY-BOTH
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -20,5 +20,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V174-BEST-BOTH"
+          git diff --staged --quiet || git commit -m "update state V175-COIN-ONLY-BOTH"
           git push
