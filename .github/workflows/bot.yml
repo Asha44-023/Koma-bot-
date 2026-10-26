@@ -25,9 +25,10 @@ jobs:
       - run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          echo '{}' > active.json.tmp || true
-          # ensure active.json is valid json
-          python -c "import json; json.load(open('active.json'))" || echo '{}' > active.json
+          python -c "import json; json.load(open('active.json'))" 2>/dev/null || echo '{}' > active.json
+          [ -f sent_signals.json ] || echo '{}' > sent_signals.json
+          [ -f cooldown.json ] || echo '{"signals":{},"daily_pnl":0.0,"last_day":"2026-05-13"}' > cooldown.json
+          [ -f stats_v157.json ] || echo '{"closed":[],"open":{}}' > stats_v157.json
           git add -f active.json cooldown.json stats_v157.json seasonality.json sent_signals.json
           git diff --staged --quiet || git commit -m "update state V182-NO-BLUE $(date -u +%FT%TZ)"
-          for i in 1 2 3; do git pull --rebase --autostash && git push && break; git rebase --abort 2>/dev/null || true; git stash 2>/dev/null || true; git fetch origin main; git reset --hard origin/main; git stash pop 2>/dev/null || true; git add -f active.json cooldown.json stats_v157.json seasonality.json sent_signals.json; git diff --staged --quiet || git commit -m "update state V182-NO-BLUE retry $i $(date -u +%FT%TZ)" || true; sleep 3; done
+          for i in 1 2 3; do git pull --rebase --autostash && git push && break; git rebase --abort 2>/dev/null || true; git stash 2>/dev/null || true; git fetch origin main; git reset --hard origin/main; git stash pop 2>/dev/null || true; [ -f sent_signals.json ] || echo '{}' > sent_signals.json; git add -f active.json cooldown.json stats_v157.json seasonality.json sent_signals.json; git diff --staged --quiet || git commit -m "update state V182-NO-BLUE retry $i $(date -u +%FT%TZ)" || true; sleep 3; done
