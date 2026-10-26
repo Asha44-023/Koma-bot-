@@ -1,11 +1,11 @@
-name: Run Bot V175-COIN-ONLY-BOTH
+name: Run Bot V178-ADAPTIVE-MTF-NO-PB-BEST
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v175
+  group: koma-bot-v178
   cancel-in-progress: true
 
 jobs:
@@ -28,7 +28,7 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V175-COIN-ONLY-BOTH $(date -u +%FT%TZ)"
+          git diff --staged --quiet || git commit -m "update state V178-BEST $(date -u +%FT%TZ)"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "retry $i - fixing conflict"
@@ -38,6 +38,6 @@ jobs:
             git reset --hard origin/main
             git stash pop 2>/dev/null || true
             git add -f active.json cooldown.json stats_v157.json seasonality.json
-            git diff --staged --quiet || git commit -m "update state V175-COIN-ONLY-BOTH retry $i $(date -u +%FT%TZ)" || true
+            git diff --staged --quiet || git commit -m "update state V178-BEST retry $i $(date -u +%FT%TZ)" || true
             sleep 3
           done
