@@ -1,11 +1,11 @@
-name: Run Bot V178-ADAPTIVE-MTF-NO-PB-BEST
+name: Run Bot V180-BOTH-ADAPTIVE-ATR
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
 concurrency:
-  group: koma-bot-v178
+  group: koma-bot-v180
   cancel-in-progress: true
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install requests pytz colorama
+      - run: pip install requests pytz colorama numpy
       - run: python bot.py --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -28,7 +28,7 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V178-BEST $(date -u +%FT%TZ)"
+          git diff --staged --quiet || git commit -m "update state V180-BOTH-ADAPTIVE-ATR $(date -u +%FT%TZ)"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "retry $i - fixing conflict"
@@ -38,6 +38,6 @@ jobs:
             git reset --hard origin/main
             git stash pop 2>/dev/null || true
             git add -f active.json cooldown.json stats_v157.json seasonality.json
-            git diff --staged --quiet || git commit -m "update state V178-BEST retry $i $(date -u +%FT%TZ)" || true
+            git diff --staged --quiet || git commit -m "update state V180-BOTH-ADAPTIVE-ATR retry $i $(date -u +%FT%TZ)" || true
             sleep 3
           done
