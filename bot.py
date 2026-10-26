@@ -1,6 +1,7 @@
 import json, math, os, sys, time, tempfile, requests
 from datetime import datetime
 import pytz
+import numpy as np
 EAT = pytz.timezone("Africa/Nairobi")
 try:
     from colorama import init, Fore, Style
@@ -19,8 +20,8 @@ TELEGRAM_CHAT = os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE, COOLDOWN_FILE, STATS_FILE = "active.json", "cooldown.json", "stats_v157.json"
 DAILY_LOSS_LIMIT, MAX_ACTIVE = -8.0, 35
 TOP_N_PER_SCAN = 3
-NEAR_THRESHOLD = 0.05
-RETEST_THRESHOLD = 0.03
+ATR_PERIOD = 14
+ATR_MULT = 1.5
 RR_MIN = 0.7
 
 try:
@@ -42,7 +43,7 @@ def get_seasonality():
     return q, wr, mult, min_score
 
 session = requests.Session()
-TAG = "V178-ADAPTIVE-MTF-NO-PB-BEST"
+TAG = "V180-BOTH-ADAPTIVE-ATR"
 TP_CONFIG = {"PUMP": {"CLOSE": [40,30,15,15]}, "TREND": {"CLOSE": [30,30,20,20]}}
 PUMP_COINS = ["KOMA_USDT","GRASS_USDT","SAND_USDT","FARTCOIN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT"]
 def get_tp_config(sym): return (TP_CONFIG["PUMP"], "PUMP") if sym in PUMP_COINS else (TP_CONFIG["TREND"], "TREND")
@@ -98,6 +99,25 @@ def get_live_price(s):
         try: r=session.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={t}",timeout=5).json(); return float((r.get("data",r))["lastPrice"])
         except: pass
     return None
+
+def calc_atr_percent(d, live_price):
+    try:
+        h=d["h"]; l=d["l"]; c=d["c"]
+        if len(c)<ATR_PERIOD+5: return 0.05, 0
+        trs=[]
+        for i in range(1,len(c)):
+            tr = max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1]))
+            trs.append(tr)
+        atr = float(np.mean(trs[-ATR_PERIOD:]))
+        atr_pct = atr / live_price if live_price>0 else 0.05
+        return atr_pct, atr
+    except:
+        return 0.05, 0
+
+def get_adaptive_thresholds(atr_pct):
+    near = float(np.clip(atr_pct * ATR_MULT, 0.01, 0.20))  # 1% to 20%
+    retest = float(np.clip(near * 0.5, 0.008, 0.10))
+    return near, retest
 
 def get_last_structure(d, lookback=80):
     if not d or len(d["c"])<lookback: return None
@@ -158,8 +178,12 @@ def get_1h_box(d1h, trend_3m="RANGE", pct_3m=0):
     if rng/mid>1.5: return None
     return {"HH":HH,"LL":LL,"mid":mid,"rng":rng,"look":look}
 
-def check_entry_5m(d5, direction):
-    if not d5 or len(d5["c"])<3: return False; o,c=d5["o"][-1],d5["c"][-1]; o2=d5["o"][-2]; return (c>o and c>=o2) if direction=="BUY" else (c<o and c<=o2)
+def check_entry_5m(d5, direction, relaxed=False):
+    if not d5 or len(d5["c"])<3: return False
+    o,c=d5["o"][-1],d5["c"][-1]; o2=d5["o"][-2]
+    if relaxed:
+        return (c >= o*0.998) if direction=="BUY" else (c <= o*1.002)
+    return (c>o and c>=o2) if direction=="BUY" else (c<o and c<=o2)
 
 def valid_signal_data(d):
     try:
@@ -205,7 +229,7 @@ def get_next_liquidity_auto(d4, live, is_buy, depth=0):
         fp = 0.015 if depth==0 else 0.028 if depth==1 else 0.045 if depth==2 else 0.10
         return (live*(1+fp) if is_buy else live*(1-fp)), 0, True
 
-def get_elite_score(sym, label, pull_label, btc_trend, direction, coin_trend, broke_strength):
+def get_elite_score(sym, label, pull_label, btc_trend, direction, coin_trend, broke_strength, mtf_align=False):
     try: pb=float(str(pull_label).replace("%","").strip())
     except: pb=50
     s=50
@@ -215,6 +239,7 @@ def get_elite_score(sym, label, pull_label, btc_trend, direction, coin_trend, br
     elif label=="LL" and broke_strength<=38: s+=22
     else: s-=20
     if coin_trend==direction: s+=15
+    if mtf_align: s+=10
     if sym in ["FARTCOIN_USDT","WIF_USDT","PEPE_USDT","BONK_USDT","KOMA_USDT","SEI_USDT"]: s+=5
     return s
 
@@ -222,7 +247,7 @@ def scan():
     q, wr_q, risk_mult, min_score_threshold = get_seasonality(); today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
     btc_info = get_btc_filter(); btc_trend = btc_info["trend"]
-    print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}% Q:{q} WR:{wr_q:.0f}% ADAPTIVE NO-PB ---")
+    print(f"--- SCAN {TAG} {get_time()} BTC:{btc_trend} 3M:{btc_info.get('pct_3m',0):.1f}% Q:{q} WR:{wr_q:.0f}% BOTH-ADAPTIVE ---")
     for sym,data in list(ACTIVE.items()):
         if not valid_signal_data(data): ACTIVE.pop(sym,None); save_a(); continue
         p=get_live_price(sym)
@@ -251,51 +276,77 @@ def scan():
             struct=get_last_structure(h1,80)
             if not struct: skipped[sym]="no_structure"; continue
             live=get_live_price(sym) or h1["c"][-1]
+            atr_pct, atr_val = calc_atr_percent(h1, live)
+            NEAR_THRESHOLD, RETEST_THRESHOLD = get_adaptive_thresholds(atr_pct)
             box1h=get_1h_box(h1, trend_3m, pct_3m)
             if not box1h: skipped[sym]="no_1H_box"; continue
             if struct.get("weak_bull",0) > 0 and not struct["broke_hh"]: skipped[sym]=f"FBS_WEAK_BULL {struct['weak_bull']:.0f}% SKIP"; continue
             if struct.get("weak_bear",0) > 0 and not struct["broke_ll"]: skipped[sym]=f"FBS_WEAK_BEAR {struct['weak_bear']:.0f}% SKIP"; continue
-            direction=None; label=None; broke_str=0
+            direction=None; label=None; broke_str=0; is_predictive=False
+
+            # === PREDICTIVE BOTH SIDES WITH ADAPTIVE ===
+            # BUY HL dip
             if struct["ll_type"]=="HL":
-                dist = abs(live - struct["last_low"]) / live
-                if dist <= NEAR_THRESHOLD: direction="BUY"; label="HL"; broke_str=70
-            if not direction and struct["broke_hh"] and struct["broke_hh_strength"]>=62:
-                dist = abs(live - struct["last_high"]) / live
-                if dist <= RETEST_THRESHOLD: direction="BUY"; label="HH"; broke_str=struct["broke_hh_strength"]
+                dist = abs(live - struct["last_low"]) / struct["last_low"]
+                if dist <= NEAR_THRESHOLD:
+                    direction="BUY"; label="HL"; broke_str=70; is_predictive=True
+            # SELL LH rally
             if not direction and struct["hh_type"]=="LH":
-                dist = abs(live - struct["last_high"]) / live
-                if dist <= NEAR_THRESHOLD: direction="SELL"; label="LH"; broke_str=30
+                dist = abs(live - struct["last_high"]) / struct["last_high"]
+                if dist <= NEAR_THRESHOLD:
+                    direction="SELL"; label="LH"; broke_str=30; is_predictive=True
+            # BUY HH breakout retest
+            if not direction and struct["broke_hh"] and struct["broke_hh_strength"]>=62:
+                dist = abs(live - struct["last_high"]) / struct["last_high"]
+                if dist <= RETEST_THRESHOLD:
+                    direction="BUY"; label="HH"; broke_str=struct["broke_hh_strength"]; is_predictive=False
+            # SELL LL breakdown retest
             if not direction and struct["broke_ll"] and (struct["broke_ll_strength"]<=38 or struct["broke_ll_strength"]==0):
                 ll_strength = struct["broke_ll_strength"] if struct["broke_ll_strength"]!=0 else 25
                 if ll_strength<=38:
-                    dist = abs(live - struct["last_low"]) / live
-                    if dist <= RETEST_THRESHOLD: direction="SELL"; label="LL"; broke_str=ll_strength
-            if not direction: skipped[sym]=f"no_break {struct['hh_type']}/{struct['ll_type']}"; continue
-            if trend_3m=="UP" and direction=="SELL":
-                skipped[sym]=f"MTF_3M_UP_{pct_3m:.0f}%_skip_SELL"; continue
-            if trend_3m=="DOWN" and direction=="BUY":
-                skipped[sym]=f"MTF_3M_DOWN_{pct_3m:.0f}%_skip_BUY"; continue
+                    dist = abs(live - struct["last_low"]) / struct["last_low"]
+                    if dist <= RETEST_THRESHOLD:
+                        direction="SELL"; label="LL"; broke_str=ll_strength; is_predictive=False
+
+            if not direction: skipped[sym]=f"no_break {struct['hh_type']}/{struct['ll_type']} NEAR={NEAR_THRESHOLD*100:.1f}% ATR={atr_pct*100:.1f}%"; continue
+            
+            # NO MORE MTF BLOCK - both sides allowed
+            mtf_align = (trend_3m=="UP" and direction=="BUY") or (trend_3m=="DOWN" and direction=="SELL")
+
             sr4h=get_4h_sr_boxes(d4)
             if sr4h.get("gap_pct",0)<3: skipped[sym]="gap_small"; continue
-            pull_label="NO_PB"
-            if not check_entry_5m(m5,direction): skipped[sym]="no_5m_engulf"; continue
-            is_buy=direction=="BUY"; HH,LL=box1h["HH"],box1h["LL"]
-            sl=min(LL*0.996, live*0.985) if is_buy else max(HH*1.004, live*1.015)
+
+            # 5M: relaxed for predictive dip, strict for breakout
+            use_relaxed = is_predictive
+            if not check_entry_5m(m5,direction, relaxed=use_relaxed):
+                skipped[sym]=f"no_5m_{'relaxed' if use_relaxed else 'engulf'}"; continue
+
+            is_buy=direction=="BUY"
+            HH,LL=box1h["HH"],box1h["LL"]
+            # SL adaptive to ATR
+            sl=min(LL*0.996, live*(1-atr_pct*1.2)) if is_buy else max(HH*1.004, live*(1+atr_pct*1.2))
+            # extra safety: max 20% SL
+            if is_buy:
+                sl = max(sl, live*0.80)
+            else:
+                sl = min(sl, live*1.20)
+
             tp1, _, _ = get_next_liquidity_auto(d4, live, is_buy, 0); tp2, _, _ = get_next_liquidity_auto(d4, live, is_buy, 1); tp3, _, _ = get_next_liquidity_auto(d4, live, is_buy, 2); runner, _, _ = get_next_liquidity_auto(d4, live, is_buy, 3)
             risk=(live-sl)/live*100 if is_buy else (sl-live)/live*100; reward1=(tp1-live)/live*100 if is_buy else (live-tp1)/live*100; rr=reward1/risk if risk!=0 else 0
-            if rr<RR_MIN: skipped[sym]=f"rr_{rr:.2f}"; continue
-            score=get_elite_score(sym,label,pull_label,btc_trend,direction,struct["trend"],broke_str)
+            if rr<RR_MIN: skipped[sym]=f"rr_{rr:.2f} ATR_{atr_pct*100:.1f}%"; continue
+            score=get_elite_score(sym,label,f"ATR{atr_pct*100:.0f}%",btc_trend,direction,struct["trend"],broke_str, mtf_align)
             if score<min_score_threshold: skipped[sym]=f"score_{score}"; continue
-            cands.append((score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pull_label,broke_str,rr,coin_3m, box1h["look"]))
+            cands.append((score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,f"ATR{atr_pct*100:.1f}%",broke_str,rr,coin_3m, box1h["look"], NEAR_THRESHOLD, is_predictive))
         except Exception as e:
             import traceback; print(f"CRASH {sym}: {e}"); traceback.print_exc()
             skipped[sym]=f"ex_{e}"; continue
     cands=sorted(cands, key=lambda x: x[0], reverse=True)[:TOP_N_PER_SCAN]
-    for score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pull_label,broke_str,rr,coin_3m,look in cands:
+    for score,sym,direction,label,live,sl,tp1,tp2,tp3,runner,pull_label,broke_str,rr,coin_3m,look,near_th,is_pred in cands:
         is_buy=direction=="BUY"; tp_cfg, tp_type = get_tp_config(sym); ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":label,"score":score,"pct":pull_label,"rr":rr,"ts":time.time(),"tp_cfg":tp_cfg,"tp_type":tp_type}; save_a(); STATS["open"][sym]={"label":label,"entry":live,"ts":time.time()}; save_s()
-        col = GREEN if is_buy else RED; print(f"{col}NEW {sym} {direction} [{label} {broke_str:.0f}%] 3M:{coin_3m['pct_3m']:.0f}% LOOK:{look} SCORE {score}{RESET}")
-        tg(f"NEW {sym.replace('_USDT','')} {direction} [{label} {broke_str:.0f}%] @ {fmt(live)} SL {fmt(sl)} TP {fmt(tp1)}/{fmt(tp2)}/{fmt(tp3)} RUNNER {fmt(runner)} LOOK {look} SCORE {score} RR {rr:.2f} 3M:{coin_3m['trend_3m']} {coin_3m['pct_3m']:.0f}% Q:{q} WR:{wr_q:.0f}% BTC:{btc_trend}")
-    if not cands: print(f"{YELLOW}No cands, skips:{RESET}", list(skipped.items())[:12])
+        col = GREEN if is_buy else RED; pred_tag = "PREDICTIVE-DIP" if is_pred else "BREAKOUT"
+        print(f"{col}NEW {sym} {direction} [{label} {broke_str:.0f}% {pred_tag}] 3M:{coin_3m['pct_3m']:.0f}% NEAR:{near_th*100:.1f}% LOOK:{look} SCORE {score}{RESET}")
+        tg(f"NEW {sym.replace('_USDT','')} {direction} [{label} {broke_str:.0f}% {pred_tag}] @ {fmt(live)} SL {fmt(sl)} TP {fmt(tp1)}/{fmt(tp2)}/{fmt(tp3)} RUNNER {fmt(runner)} LOOK {look} NEAR {near_th*100:.1f}% {pull_label} SCORE {score} RR {rr:.2f} 3M:{coin_3m['trend_3m']} {coin_3m['pct_3m']:.0f}% Q:{q} WR:{wr_q:.0f}% BTC:{btc_trend}")
+    if not cands: print(f"{YELLOW}No cands, skips:{RESET}", list(skipped.items())[:15])
 
 if __name__=="__main__":
     if "--once" in sys.argv: scan()
