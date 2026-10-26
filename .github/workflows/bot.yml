@@ -1,10 +1,10 @@
-name: Run Bot V180-BOTH-ADAPTIVE-ATR-FINAL
+name: Run Bot V182-NO-BLUE-ONLY-BREAKOUT
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 concurrency:
-  group: koma-bot-v180
+  group: koma-bot-v182-no-blue
   cancel-in-progress: true
 jobs:
   run-bot:
@@ -26,8 +26,8 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           echo '{}' > active.json.tmp || true
-          # ensure active.json is valid json (fix TAO None)
+          # ensure active.json is valid json
           python -c "import json; json.load(open('active.json'))" || echo '{}' > active.json
-          git add -f active.json cooldown.json stats_v157.json seasonality.json
-          git diff --staged --quiet || git commit -m "update state V180-FINAL $(date -u +%FT%TZ)"
-          for i in 1 2 3; do git pull --rebase --autostash && git push && break; git rebase --abort 2>/dev/null || true; git stash 2>/dev/null || true; git fetch origin main; git reset --hard origin/main; git stash pop 2>/dev/null || true; git add -f active.json cooldown.json stats_v157.json seasonality.json; git diff --staged --quiet || git commit -m "update state V180-FINAL retry $i $(date -u +%FT%TZ)" || true; sleep 3; done
+          git add -f active.json cooldown.json stats_v157.json seasonality.json sent_signals.json
+          git diff --staged --quiet || git commit -m "update state V182-NO-BLUE $(date -u +%FT%TZ)"
+          for i in 1 2 3; do git pull --rebase --autostash && git push && break; git rebase --abort 2>/dev/null || true; git stash 2>/dev/null || true; git fetch origin main; git reset --hard origin/main; git stash pop 2>/dev/null || true; git add -f active.json cooldown.json stats_v157.json seasonality.json sent_signals.json; git diff --staged --quiet || git commit -m "update state V182-NO-BLUE retry $i $(date -u +%FT%TZ)" || true; sleep 3; done
