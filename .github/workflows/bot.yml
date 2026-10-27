@@ -1,4 +1,4 @@
-name: V189-ALL-U-V-M-W-CUP
+name: V190-BUY-SELL-FIXED
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -36,20 +36,15 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          
-          # Create files if missing (prevents git add error)
           [ -f active.json ] || echo '{}' > active.json
           [ -f cooldown.json ] || echo '{"daily_pnl":0,"last_day":"2025-01-01"}' > cooldown.json
           [ -f stats_v186.json ] || echo '{"closed":[],"open":{},"wins":0,"losses":0}' > stats_v186.json
           [ -f sent_signals.json ] || echo '{}' > sent_signals.json
-
           git add -f active.json cooldown.json stats_v186.json sent_signals.json || true
-          
           if git diff --staged --quiet; then
             echo "No changes to commit"
             exit 0
           fi
-          
-          git commit -m "update V189 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git commit -m "update V190 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git pull --rebase
           git push
