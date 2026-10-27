@@ -9,9 +9,6 @@ jobs:
     timeout-minutes: 14
     permissions:
       contents: write
-    concurrency:
-      group: bot
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
