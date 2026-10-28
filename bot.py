@@ -6,8 +6,8 @@ EAT = pytz.timezone("Africa/Nairobi")
 SYMBOLS=["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT","PEPE_USDT","BONK_USDT","WIF_USDT","FLOKI_USDT","DOGE_USDT","SHIB_USDT","MANA_USDT","AXS_USDT","APE_USDT","BOME_USDT","BRETT_USDT","MEW_USDT","PENGU_USDT","WLD_USDT","ARB_USDT","OP_USDT","SEI_USDT","ENA_USDT","PENDLE_USDT","MEME_USDT","TURBO_USDT","1000PEPE_USDT","1000BONK_USDT","1000SHIB_USDT","POPCAT_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN"); TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE="active.json","cooldown.json","stats_v192.json"
-MAX_ACTIVE=35; TOP_N_PER_SCAN=4; RR_MIN=1.2
-session=requests.Session(); TAG="V192-BUY-ONLY-FILTERED"
+MAX_ACTIVE=35; TOP_N_PER_SCAN=3; RR_MIN=1.2
+session=requests.Session(); TAG="V195-PURE-4H-MANIP-SAFE"
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -61,115 +61,29 @@ def get_live(s):
             if lp and float(lp)>0: return float(lp)
         except: pass
     return None
-def calc_atr(d):
+
+# YOUR RULE ONLY
+def detect_4H_MANIPULATION(d4):
     try:
-        h=d["h"]; l=d["l"]; c=d["c"]
-        trs=[max(h[i]-l[i],abs(h[i]-c[i-1]),abs(l[i]-c[i-1])) for i in range(1,len(c))]
-        return float(np.mean(trs[-14:]))
-    except: return 0
-def fbs_check(d, direction):
-    try:
-        o=d["o"]; h=d["h"]; l=d["l"]; c=d["c"]
-        po=o[-2]; ph=h[-2]; pl=l[-2]; pc=c[-2]; cc=c[-1]
-        rng=ph-pl
-        if rng<=0: return False,0
-        pct=(cc-pl)/rng*100
-        if direction=="BUY":
-            if not (pc>po): return False,pct
-            if cc < pl+rng*0.62: return False,pct
-            return True,pct
-        else:
-            if not (pc<po): return False,pct
-            if cc > pl+rng*0.42: return False,pct
-            return True,pct
-    except: return False,0
-def get_swings(d, lookback=60):
-    h=d["h"][-lookback:]; l=d["l"][-lookback:]; c=d["c"][-lookback:]
-    sh=[]; sl=[]
-    for i in range(5,len(h)-5):
-        if h[i]>=max(h[i-3:i]) and h[i]>=max(h[i+1:i+4]): sh.append((len(c)-lookback+i, h[i]))
-        if l[i]<=min(l[i-3:i]) and l[i]<=min(l[i+1:i+4]): sl.append((len(c)-lookback+i, l[i]))
-    return sh,sl,c,h,l
-def detect_V(d):
-    try:
-        c=d["c"]; l=d["l"]; o=d["o"]
-        if len(c)<12: return False
-        if c[-5] < c[-12] and c[-1] > o[-1] and c[-1] > c[-2]*1.008:
-            if c[-3]<o[-3] and c[-2]<o[-2]: return True
+        if len(d4["c"]) < 3: return False, "", 0, 0
+        prev_low = d4["l"][-2]; prev_high = d4["h"][-2]
+        curr_low = d4["l"][-1]; curr_high = d4["h"][-1]
+        curr_open = d4["o"][-1]; curr_close = d4["c"][-1]
+        # BUY: sweep below prev low, close back above prev low
+        if curr_low < prev_low * 0.9995 and curr_close > prev_low and curr_close > curr_open:
+            return True, "BUY", prev_low, curr_low
+        # SELL: sweep above prev high, close back below prev high
+        if curr_high > prev_high * 1.0005 and curr_close < prev_high and curr_close < curr_open:
+            return True, "SELL", prev_high, curr_high
     except: pass
-    return False
-def detect_W(d):
-    try:
-        c=d["c"]
-        if c[-1] < c[-15]*1.02 and c[-1] > min(c[-15:]):
-            sh,sl,_,_,_ = get_swings(d,50)
-            if len(sl)>=2:
-                last=sl[-1][1]; prev=sl[-2][1]
-                if abs(last-prev)/prev*100<=5.0 and last>=prev*0.97: return True
-    except: pass
-    return False
-def detect_M(d):
-    try:
-        c=d["c"]
-        if c[-1] > c[-15]*0.98 and c[-1] < max(c[-15:]):
-            sh,sl,_,_,_ = get_swings(d,50)
-            if len(sh)>=2:
-                last=sh[-1][1]; prev=sh[-2][1]
-                if abs(last-prev)/prev*100<=5.0 and last<=prev*1.03: return True
-    except: pass
-    return False
-def detect_U(d):
-    try:
-        l=d["l"][-12:]; c=d["c"][-12:]
-        if c[-1] > min(c[-12:])*1.03 and c[-1] > c[-6]:
-            if sum(1 for i in range(1,len(l)) if l[i]>=l[i-1]*0.999)>=7: return True
-    except: pass
-    return False
-def detect_CUP_HANDLE(d):
-    try:
-        c=d["c"]; h=d["h"]; l=d["l"]
-        if len(c)<30: return False
-        if c[-1] > c[-20]*1.03:
-            if sum(1 for i in range(20,30) if l[-i]>=l[-i-1]*0.998)>=5:
-                pull = (max(h[-10:])-min(l[-10:]))/max(h[-10:])*100
-                if 0.8<=pull<=4.0 and c[-1]>=h[-2]*0.999: return True
-    except: pass
-    return False
-def detect_FLAG(d):
-    try:
-        c=d["c"][-20:]; h=d["h"][-20:]; l=d["l"][-20:]
-        up=(c[-10]-c[-20])/c[-20]*100 if c[-20]>0 else 0
-        if up>=3:
-            rng=(max(h[-8:])-min(l[-8:]))/max(h[-8:])*100
-            if rng<=2.5: return True,"BULL"
-        down=(c[-10]-c[-20])/c[-20]*100
-        if down<=-3:
-            rng=(max(h[-8:])-min(l[-8:]))/min(l[-8:])*100
-            if rng<=2.5: return True,"BEAR"
-    except: pass
-    return False,""
-def detect_TRIANGLE(d):
-    try:
-        h=d["h"][-20:]; l=d["l"][-20:]
-        if max(h[-8:])<=max(h[-18:-8])*1.015 and min(l[-8:])>min(l[-18:-8])*1.005: return True,"ASC"
-        if min(l[-8:])>=min(l[-18:-8])*0.985 and max(h[-8:])<max(h[-18:-8])*0.995: return True,"DESC"
-    except: pass
-    return False,""
-def detect_SWEEP(d):
-    try:
-        l=d["l"]; c=d["c"]; h=d["h"]
-        if len(l)<25: return False,""
-        low=min(l[-20:-3])
-        if l[-2]<low*0.998 and c[-1]>low: return True,"LOW"
-        high=max(h[-20:-3])
-        if h[-2]>high*1.002 and c[-1]<high: return True,"HIGH"
-    except: pass
-    return False,""
+    return False, "", 0, 0
+
 def get_next_liq(d4,live,is_buy,depth):
     try:
         default=[0.015,0.028,0.045,0.10]; lp=default[depth] if depth<len(default) else 0.10+(depth-3)*0.06
         return live*(1+lp) if is_buy else live*(1-lp)
     except: return live*1.015 if is_buy else live*0.985
+
 def get_btc_trend():
     try:
         d=kl("BTC_USDT","Hour4")
@@ -179,6 +93,7 @@ def get_btc_trend():
         if c[-1] < c[-20]*0.985: return "DOWN"
         return "RANGE"
     except: return "RANGE"
+
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
@@ -190,82 +105,43 @@ def scan():
         entry,is_buy,sl=float(data["entry"]),bool(data["is_buy"]),float(data["sl"]); tp1,tp2,tp3=float(data["tp1"]),float(data["tp2"]),float(data["tp3"])
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; STATS["losses"]+=1; save_s()
-            tg(f"❌ SELL {sym.replace('_USDT','USDT')} {pnl:.1f}% SL {data.get('label','')}" if not is_buy else f"❌ BUY {sym.replace('_USDT','USDT')} {pnl:.1f}% SL {data.get('label','')}"); ACTIVE.pop(sym,None); save_a(); continue
-        if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)): data["tp1_hit"]=True; data["sl"]=entry; save_a(); tg(f"🟢 BUY {sym.replace('_USDT','USDT')} TP1 BE {data.get('label','')}" if is_buy else f"🔴 SELL {sym.replace('_USDT','USDT')} TP1 BE {data.get('label','')}")
-        if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)): data["tp2_hit"]=True; data["sl"]=tp1; save_a(); tg(f"🟢 BUY {sym.replace('_USDT','USDT')} TP2 {data.get('label','')}" if is_buy else f"🔴 SELL {sym.replace('_USDT','USDT')} TP2 {data.get('label','')}")
+            tg(f"❌ {sym.replace('_USDT','USDT')} {pnl:.1f}% SL hit 4H-MANIP"); ACTIVE.pop(sym,None); save_a(); continue
+        if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)): data["tp1_hit"]=True; data["sl"]=entry; save_a(); tg(f"🟢 {sym.replace('_USDT','USDT')} TP1 BE - 4H-MANIP")
+        if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)): data["tp2_hit"]=True; data["sl"]=tp1; save_a(); tg(f"🟢 {sym.replace('_USDT','USDT')} TP2 - 4H-MANIP")
         if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)): 
             data["tp3_hit"]=True; STATS["wins"]+=1; save_s()
-            tg(f"✅ BUY {sym.replace('_USDT','USDT')} TP3 {data.get('label','')} W{STATS['wins']} L{STATS['losses']}" if is_buy else f"✅ SELL {sym.replace('_USDT','USDT')} TP3 {data.get('label','')} W{STATS['wins']} L{STATS['losses']}"); save_a(); continue
+            tg(f"✅ {sym.replace('_USDT','USDT')} TP3 WIN W{STATS['wins']} L{STATS['losses']}"); save_a(); continue
     if len(ACTIVE)>=MAX_ACTIVE: return
-    cands=[]; skipped={}
+    cands=[]
     for sym in SYMBOLS:
         try:
-            if sym in ACTIVE: skipped[sym]="active"; continue
-            d1=kl(sym,"Day1"); time.sleep(0.3); d4=kl(sym,"Hour4"); time.sleep(0.3); h1=kl(sym,"Min60"); time.sleep(0.3); m15=kl(sym,"Min15"); time.sleep(0.3); m5=kl(sym,"Min5"); time.sleep(0.3)
-            if not d1 or not d4 or not h1 or not m15 or not m5: skipped[sym]="kl"; continue
-            live=get_live(sym) or h1["c"][-1]
-            atr=calc_atr(h1)
-            atr_pct=atr/live*100 if live>0 else 0
-            if atr_pct<0.25 or atr_pct>5.0: skipped[sym]=f"atr {atr_pct:.1f}"; continue
-            fbs_b_ok,fbs_b_pct=fbs_check(h1,"BUY"); fbs_s_ok,fbs_s_pct=fbs_check(h1,"SELL")
-            fbs_b15_ok,fbs_b15_pct=fbs_check(m15,"BUY"); fbs_s15_ok,fbs_s15_pct=fbs_check(m15,"SELL")
-            c4=d4["c"]; trend="UP" if c4[-1]>c4[-20]*1.02 else "DOWN" if c4[-1]<c4[-20]*0.98 else "RANGE"
-            patterns=[]
-            sh_d,sl_d,_,_,_=get_swings(d1,50)
-            if trend=="UP":
-                if len(sh_d)>=2 and len(sl_d)>=2:
-                    if sh_d[-1][1]>sh_d[-2][1] and sl_d[-1][1]>sl_d[-2][1]: patterns.append(("HH-HL","BUY",88,fbs_b_pct))
-                if len(sl_d)>=2 and sl_d[-1][1]>sl_d[-2][1]: patterns.append(("HL","BUY",72,fbs_b_pct))
-                if detect_W(h1): patterns.append(("W","BUY",85,fbs_b_pct))
-                if detect_V(h1): patterns.append(("V","BUY",80,fbs_b_pct))
-                if detect_U(h1): patterns.append(("U","BUY",70,fbs_b_pct))
-                if detect_CUP_HANDLE(h1): patterns.append(("CUP","BUY",90,fbs_b_pct))
-                flag_ok,flag_dir=detect_FLAG(h1)
-                if flag_ok and flag_dir=="BULL": patterns.append(("FLAG","BUY",75,fbs_b_pct))
-                tri_ok,tri_dir=detect_TRIANGLE(h1)
-                if tri_ok and tri_dir=="ASC": patterns.append(("TRI","BUY",70,fbs_b_pct))
-                sweep_ok,sweep_dir=detect_SWEEP(h1)
-                if sweep_ok and sweep_dir=="LOW": patterns.append(("SWEEP","BUY",80,fbs_b_pct))
-            if trend=="DOWN" and btc_trend=="DOWN":
-                if len(sh_d)>=2 and len(sl_d)>=2:
-                    if sh_d[-1][1]<sh_d[-2][1] and sl_d[-1][1]<sl_d[-2][1]: patterns.append(("LL-LH","SELL",88,fbs_s_pct))
-                if len(sh_d)>=2 and sh_d[-1][1]<sh_d[-2][1]: patterns.append(("LH","SELL",72,fbs_s_pct))
-                if detect_M(h1): patterns.append(("M","SELL",85,fbs_s_pct))
-                flag_ok,flag_dir=detect_FLAG(h1)
-                if flag_ok and flag_dir=="BEAR": patterns.append(("FLAG","SELL",75,fbs_s_pct))
-                tri_ok,tri_dir=detect_TRIANGLE(h1)
-                if tri_ok and tri_dir=="DESC": patterns.append(("TRI","SELL",70,fbs_s_pct))
-                sweep_ok,sweep_dir=detect_SWEEP(h1)
-                if sweep_ok and sweep_dir=="HIGH": patterns.append(("SWEEP","SELL",80,fbs_s_pct))
-            if not patterns: skipped[sym]=f"no pat BTC:{btc_trend} 4H:{trend}"; continue
-            best=sorted(patterns,key=lambda x:x[2],reverse=True)[0]
-            label,dir,score,fbs_pct=best
-            if dir=="BUY" and fbs_pct<60: skipped[sym]=f"BUY FBS {fbs_pct:.0f}%<60"; continue
-            if dir=="SELL" and fbs_pct>40: skipped[sym]=f"SELL FBS {fbs_pct:.0f}%>40 top"; continue
-            if score>=85:
-                if dir=="BUY" and not (fbs_b_ok or fbs_b15_ok): skipped[sym]=f"WEAK {label} BUY {fbs_pct:.0f}%<62%"; continue
-                if dir=="SELL" and not (fbs_s_ok or fbs_s15_ok): skipped[sym]=f"WEAK {label} SELL {fbs_pct:.0f}%>42%"; continue
-            if dir=="BUY" and m15["c"][-1]<m15["o"][-1]*0.999: skipped[sym]="15m down"; continue
-            if dir=="SELL" and m15["c"][-1]>m15["o"][-1]*1.001: skipped[sym]="15m up"; continue
-            is_buy=dir=="BUY"
-            sl_mult=2.0 if label in ("LL-LH","HH-HL","TRI","W") else 1.6
-            sl=live-atr*sl_mult if is_buy else live+atr*sl_mult
+            if sym in ACTIVE: continue
+            d4=kl(sym,"Hour4"); time.sleep(0.4)
+            if not d4: continue
+            live=get_live(sym) or d4["c"][-1]
+            manip_ok, manip_dir, manip_level, manip_extreme = detect_4H_MANIPULATION(d4)
+            if not manip_ok: continue
+            # SAFE MODE - FOLLOW BTC
+            if manip_dir == "BUY" and btc_trend == "DOWN": 
+                print(f"SKIP {sym} 4H-MANIP BUY blocked BTC:{btc_trend}")
+                continue
+            if manip_dir == "SELL" and btc_trend != "DOWN":
+                print(f"SKIP {sym} 4H-MANIP SELL blocked BTC:{btc_trend}")
+                continue
+            is_buy = manip_dir == "BUY"
+            sl = manip_extreme * 0.998 if is_buy else manip_extreme * 1.002
             tp1=get_next_liq(d4,live,is_buy,0); tp2=get_next_liq(d4,live,is_buy,1); tp3=get_next_liq(d4,live,is_buy,2); runner=get_next_liq(d4,live,is_buy,3)
             risk=abs(live-sl)/live*100; reward=abs(tp1-live)/live*100; rr=reward/risk if risk>0 else 0
-            if rr<RR_MIN: skipped[sym]=f"rr {rr:.1f}"; continue
-            cands.append((score,sym,dir,label,live,sl,tp1,tp2,tp3,runner,rr,trend,fbs_pct,patterns))
+            if rr < 1.0: continue
+            cands.append((95,sym,manip_dir,live,sl,tp1,tp2,tp3,runner,rr,manip_extreme,manip_level))
         except Exception as e:
-            skipped[sym]=f"ex {e}"; continue
+            print(f"EX {sym} {e}"); continue
     cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
-    for score,sym,dir,label,live,sl,tp1,tp2,tp3,runner,rr,trend,fbs_pct,all_pats in cands:
+    for score,sym,dir,live,sl,tp1,tp2,tp3,runner,rr,manip_ex,manip_level in cands:
         is_buy=dir=="BUY"
-        ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":label,"score":score,"rr":rr,"ts":time.time()}; save_a()
-        fbs_disp = int(min(100,max(0,fbs_pct)))
-        same_dir_labels = [p[0] for p in all_pats if p[1]==dir]
-        all_str = ",".join(same_dir_labels[:4])
-        emoji="🟢" if is_buy else "🔴"
-        side="BUY" if is_buy else "SELL"
-        tg(f"{emoji} {side} {sym.replace('_USDT','USDT')} | {label} | {score}\nEntry {fmt(live)} SL {fmt(sl)}\nTP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} Runner {fmt(runner)}\nRR {rr:.1f} 4H {trend} FBS {fbs_disp}% {all_str} W{STATS['wins']} L{STATS['losses']}")
+        ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":"4H-MANIP","score":score,"rr":rr,"ts":time.time()}; save_a()
+        emoji="🟢" if is_buy else "🔴"; side="BUY" if is_buy else "SELL"
+        tg(f"{emoji} {side} {sym.replace('_USDT','USDT')} | PURE 4H-MANIP | 95\nSweep {fmt(manip_ex)} Prev {fmt(manip_level)} BTC:{btc_trend}\nEntry {fmt(live)} SL {fmt(sl)}\nTP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} Runner {fmt(runner)}\nRR {rr:.1f} W{STATS['wins']} L{STATS['losses']}")
 
 if __name__=="__main__":
     if "--once" in sys.argv: scan()
