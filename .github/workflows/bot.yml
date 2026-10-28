@@ -1,38 +1,27 @@
-name: V190-BUY-SELL-FIXED
+name: run-bot
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 14
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install deps
-        run: pip install requests pytz colorama numpy
-      - name: Run bot
-        run: python bot.py --once
+      - run: pip install requests pytz numpy
+      - run: python bot.py --once
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-      - name: Save state
-        if: always()
-        run: |
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          git fetch origin main
-          [ -f active.json ] || echo '{}' > active.json
-          [ -f cooldown.json ] || echo '{"daily_pnl":0,"last_day":"2025-01-01"}' > cooldown.json
-          [ -f stats_v186.json ] || echo '{"closed":[],"open":{},"wins":0,"losses":0}' > stats_v186.json
-          [ -f sent_signals.json ] || echo '{}' > sent_signals.json
-          git add -f active.json cooldown.json stats_v186.json sent_signals.json || true
-          git commit -m "V190 $(date -u)" || true
-          git push -f
+          git add active.json cooldown.json stats_v192.json || true
+          git commit -m "auto save V192" || true
+          git push || true
