@@ -1,26 +1,32 @@
-name: run-bot
+name: Scan 5 Coins 30M
+
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
+
 jobs:
-  run:
+  scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - run: pip install requests pytz numpy
-      - run: python bot.py --once
+      - name: Install deps
+        run: pip install requests pytz
+      - name: Run bot once
         env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      - run: |
-          git config user.name "bot"
-          git config user.email "bot@bot.com"
-          git add active.json cooldown.json stats_v192.json || true
-          git commit -m "auto save V198.1-100X-HH-HL-PIN" || true
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TG_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
+        run: python bot.py --once
+      - name: Save state
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@bot.com"
+          git add active.json cooldown.json stats_v199.json || true
+          git commit -m "update state" || true
           git push || true
