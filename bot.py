@@ -5,9 +5,9 @@ import numpy as np
 EAT = pytz.timezone("Africa/Nairobi")
 SYMBOLS=["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT","PEPE_USDT","BONK_USDT","WIF_USDT","FLOKI_USDT","DOGE_USDT","SHIB_USDT","MANA_USDT","AXS_USDT","APE_USDT","BOME_USDT","BRETT_USDT","MEW_USDT","PENGU_USDT","WLD_USDT","ARB_USDT","OP_USDT","SEI_USDT","ENA_USDT","PENDLE_USDT","MEME_USDT","TURBO_USDT","1000PEPE_USDT","1000BONK_USDT","1000SHIB_USDT","POPCAT_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN"); TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
-ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE="active.json","cooldown.json","stats_v186.json"
+ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE="active.json","cooldown.json","stats_v192.json"
 MAX_ACTIVE=35; TOP_N_PER_SCAN=4; RR_MIN=1.2
-session=requests.Session(); TAG="V191-BUY-SELL-FIXED"
+session=requests.Session(); TAG="V192-BUY-ONLY-FILTERED"
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -80,7 +80,7 @@ def fbs_check(d, direction):
             return True,pct
         else:
             if not (pc<po): return False,pct
-            if cc > pl+rng*0.42: return False,pct # TIGHTENED from 0.38 to 0.42
+            if cc > pl+rng*0.42: return False,pct
             return True,pct
     except: return False,0
 def get_swings(d, lookback=60):
@@ -170,7 +170,6 @@ def get_next_liq(d4,live,is_buy,depth):
         default=[0.015,0.028,0.045,0.10]; lp=default[depth] if depth<len(default) else 0.10+(depth-3)*0.06
         return live*(1+lp) if is_buy else live*(1-lp)
     except: return live*1.015 if is_buy else live*0.985
-
 def get_btc_trend():
     try:
         d=kl("BTC_USDT","Hour4")
@@ -180,7 +179,6 @@ def get_btc_trend():
         if c[-1] < c[-20]*0.985: return "DOWN"
         return "RANGE"
     except: return "RANGE"
-
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
@@ -211,16 +209,10 @@ def scan():
             if atr_pct<0.25 or atr_pct>5.0: skipped[sym]=f"atr {atr_pct:.1f}"; continue
             fbs_b_ok,fbs_b_pct=fbs_check(h1,"BUY"); fbs_s_ok,fbs_s_pct=fbs_check(h1,"SELL")
             fbs_b15_ok,fbs_b15_pct=fbs_check(m15,"BUY"); fbs_s15_ok,fbs_s15_pct=fbs_check(m15,"SELL")
-            # V191 FILTER: Block SELL if FBS > 60% (bottom)
-            if fbs_s_pct>60: 
-                # don't take SELL at bottom
-                pass
-            
             c4=d4["c"]; trend="UP" if c4[-1]>c4[-20]*1.02 else "DOWN" if c4[-1]<c4[-20]*0.98 else "RANGE"
             patterns=[]
             sh_d,sl_d,_,_,_=get_swings(d1,50)
-            # BUY: UP or RANGE
-            if trend!="DOWN":
+            if trend=="UP":
                 if len(sh_d)>=2 and len(sl_d)>=2:
                     if sh_d[-1][1]>sh_d[-2][1] and sl_d[-1][1]>sl_d[-2][1]: patterns.append(("HH-HL","BUY",88,fbs_b_pct))
                 if len(sl_d)>=2 and sl_d[-1][1]>sl_d[-2][1]: patterns.append(("HL","BUY",72,fbs_b_pct))
@@ -234,8 +226,7 @@ def scan():
                 if tri_ok and tri_dir=="ASC": patterns.append(("TRI","BUY",70,fbs_b_pct))
                 sweep_ok,sweep_dir=detect_SWEEP(h1)
                 if sweep_ok and sweep_dir=="LOW": patterns.append(("SWEEP","BUY",80,fbs_b_pct))
-            # V191: SELL ONLY IF DOWN and BTC not UP
-            if trend=="DOWN" and btc_trend!="UP":
+            if trend=="DOWN" and btc_trend=="DOWN":
                 if len(sh_d)>=2 and len(sl_d)>=2:
                     if sh_d[-1][1]<sh_d[-2][1] and sl_d[-1][1]<sl_d[-2][1]: patterns.append(("LL-LH","SELL",88,fbs_s_pct))
                 if len(sh_d)>=2 and sh_d[-1][1]<sh_d[-2][1]: patterns.append(("LH","SELL",72,fbs_s_pct))
@@ -246,25 +237,18 @@ def scan():
                 if tri_ok and tri_dir=="DESC": patterns.append(("TRI","SELL",70,fbs_s_pct))
                 sweep_ok,sweep_dir=detect_SWEEP(h1)
                 if sweep_ok and sweep_dir=="HIGH": patterns.append(("SWEEP","SELL",80,fbs_s_pct))
-
-            if not patterns: skipped[sym]="no pat"; continue
+            if not patterns: skipped[sym]=f"no pat BTC:{btc_trend} 4H:{trend}"; continue
             best=sorted(patterns,key=lambda x:x[2],reverse=True)[0]
             label,dir,score,fbs_pct=best
-
-            # V191: HARD FBS BLOCK
-            if dir=="SELL" and fbs_pct>60: skipped[sym]=f"SELL bottom FBS {fbs_pct:.0f}%>60"; continue
-            if dir=="BUY" and fbs_pct<40: skipped[sym]=f"BUY top FBS {fbs_pct:.0f}%<40"; continue
-
+            if dir=="BUY" and fbs_pct<60: skipped[sym]=f"BUY FBS {fbs_pct:.0f}%<60"; continue
+            if dir=="SELL" and fbs_pct>40: skipped[sym]=f"SELL FBS {fbs_pct:.0f}%>40 top"; continue
             if score>=85:
                 if dir=="BUY" and not (fbs_b_ok or fbs_b15_ok): skipped[sym]=f"WEAK {label} BUY {fbs_pct:.0f}%<62%"; continue
                 if dir=="SELL" and not (fbs_s_ok or fbs_s15_ok): skipped[sym]=f"WEAK {label} SELL {fbs_pct:.0f}%>42%"; continue
-            if trend=="RANGE" and score<75: skipped[sym]=f"RANGE {label}"; continue
             if dir=="BUY" and m15["c"][-1]<m15["o"][-1]*0.999: skipped[sym]="15m down"; continue
             if dir=="SELL" and m15["c"][-1]>m15["o"][-1]*1.001: skipped[sym]="15m up"; continue
-
             is_buy=dir=="BUY"
-            # V191: BIGGER SL to avoid hunt
-            sl_mult=1.8 if label in ("LL-LH","HH-HL") else 1.5
+            sl_mult=2.0 if label in ("LL-LH","HH-HL","TRI","W") else 1.6
             sl=live-atr*sl_mult if is_buy else live+atr*sl_mult
             tp1=get_next_liq(d4,live,is_buy,0); tp2=get_next_liq(d4,live,is_buy,1); tp3=get_next_liq(d4,live,is_buy,2); runner=get_next_liq(d4,live,is_buy,3)
             risk=abs(live-sl)/live*100; reward=abs(tp1-live)/live*100; rr=reward/risk if risk>0 else 0
@@ -272,7 +256,6 @@ def scan():
             cands.append((score,sym,dir,label,live,sl,tp1,tp2,tp3,runner,rr,trend,fbs_pct,patterns))
         except Exception as e:
             skipped[sym]=f"ex {e}"; continue
-
     cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
     for score,sym,dir,label,live,sl,tp1,tp2,tp3,runner,rr,trend,fbs_pct,all_pats in cands:
         is_buy=dir=="BUY"
