@@ -7,7 +7,7 @@ SYMBOLS=["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN"); TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE="active.json","cooldown.json","stats_v192.json"
 MAX_ACTIVE=35; TOP_N_PER_SCAN=3
-session=requests.Session(); TAG="V195-FINAL-PURE-4H-MANIP"
+session=requests.Session(); TAG="V195-FINAL-PURE-4H-MANIP-NOCHOP"
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -73,6 +73,19 @@ def detect_4H_MANIPULATION(d4):
             return True, "SELL", prev_high, curr_high
     except: pass
     return False, "", 0, 0
+
+def is_choppy_4H(d4):
+    try:
+        c=d4["c"][-10:]; h=d4["h"][-10:]; l=d4["l"][-10:]
+        avg_range = sum((h[i]-l[i])/c[i] for i in range(10))/10
+        if avg_range < 0.008: return True
+        max_h=max(h); min_l=min(l)
+        if max_h-min_l==0: return True
+        pos=(c[-1]-min_l)/(max_h-min_l)
+        if 0.35 < pos < 0.65 and avg_range < 0.015: return True
+        return False
+    except: return False
+
 def get_next_liq(d4,live,is_buy,depth):
     try:
         default=[0.015,0.028,0.045,0.10]; lp=default[depth] if depth<len(default) else 0.10+(depth-3)*0.06
@@ -111,11 +124,15 @@ def scan():
             if sym in ACTIVE: continue
             d4=kl(sym,"Hour4"); time.sleep(0.4)
             if not d4: continue
+            # === NEW: CHOPPY FILTER - YOUR REQUEST ===
+            if is_choppy_4H(d4):
+                print(f"SKIP {sym} CHOPPY 4H")
+                continue
             manip_ok, manip_dir, manip_level, manip_extreme = detect_4H_MANIPULATION(d4)
             if not manip_ok: continue
             if manip_dir == "BUY" and btc_trend == "DOWN": continue
             if manip_dir == "SELL" and btc_trend != "DOWN": continue
-            live = get_live(sym) or d4["c"][-1]  # ENTRY = NEXT 4H OPEN LIVE
+            live = get_live(sym) or d4["c"][-1]
             is_buy = manip_dir == "BUY"
             sl = manip_extreme * 0.998 if is_buy else manip_extreme * 1.002
             tp1=get_next_liq(d4,live,is_buy,0); tp2=get_next_liq(d4,live,is_buy,1); tp3=get_next_liq(d4,live,is_buy,2); runner=get_next_liq(d4,live,is_buy,3)
