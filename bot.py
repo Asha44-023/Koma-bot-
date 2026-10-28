@@ -1,13 +1,12 @@
 import json, os, sys, time, tempfile, requests
 from datetime import datetime
 import pytz
-import numpy as np
 EAT = pytz.timezone("Africa/Nairobi")
-SYMBOLS=["KOMA_USDT","TAO_USDT","GRASS_USDT","SAND_USDT","JASMY_USDT","SENT_USDT","FARTCOIN_USDT","MUBARAK_USDT","VELVET_USDT","LAB_USDT","PEPE_USDT","BONK_USDT","WIF_USDT","FLOKI_USDT","DOGE_USDT","SHIB_USDT","MANA_USDT","AXS_USDT","APE_USDT","BOME_USDT","BRETT_USDT","MEW_USDT","PENGU_USDT","WLD_USDT","ARB_USDT","OP_USDT","SEI_USDT","ENA_USDT","PENDLE_USDT","MEME_USDT","TURBO_USDT","1000PEPE_USDT","1000BONK_USDT","1000SHIB_USDT","POPCAT_USDT"]
+SYMBOLS=["KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","PEPE_USDT","BONK_USDT","WIF_USDT","FLOKI_USDT","DOGE_USDT","SHIB_USDT","POPCAT_USDT","PENGU_USDT","WLD_USDT","BOME_USDT","BRETT_USDT","TURBO_USDT","MEME_USDT","1000PEPE_USDT","1000BONK_USDT","1000SHIB_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN"); TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE="active.json","cooldown.json","stats_v192.json"
-MAX_ACTIVE=35; TOP_N_PER_SCAN=3
-session=requests.Session(); TAG="V195-FINAL-PURE-4H-MANIP-NOCHOP"
+MAX_ACTIVE=10; TOP_N_PER_SCAN=2
+session=requests.Session(); TAG="V198.1-100X-HH-HL-PIN"
 
 def get_time(): return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today(): return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -61,15 +60,22 @@ def get_live(s):
             if lp and float(lp)>0: return float(lp)
         except: pass
     return None
+
 def detect_4H_MANIPULATION(d4):
     try:
-        if len(d4["c"]) < 3: return False, "", 0, 0
-        prev_low = d4["l"][-2]; prev_high = d4["h"][-2]
-        curr_low = d4["l"][-1]; curr_high = d4["h"][-1]
-        curr_open = d4["o"][-1]; curr_close = d4["c"][-1]
-        if curr_low < prev_low * 0.9995 and curr_close > prev_low and curr_close > curr_open:
+        if len(d4["c"]) < 25: return False, "", 0, 0
+        c=d4["c"]; h=d4["h"]; l=d4["l"]; o=d4["o"]
+        uptrend = h[-1] > h[-5] and h[-5] > h[-10] and l[-1] > l[-5] and l[-5] > l[-10]
+        downtrend = h[-1] < h[-5] and h[-5] < h[-10] and l[-1] < l[-5] and l[-5] < l[-10]
+        prev_high=h[-2]; prev_low=l[-2]
+        curr_high=h[-1]; curr_low=l[-1]
+        curr_open=o[-1]; curr_close=c[-1]
+        body=abs(curr_close-curr_open) or 0.00001
+        lower_wick=min(curr_open,curr_close)-curr_low
+        upper_wick=curr_high-max(curr_open,curr_close)
+        if uptrend and curr_low < prev_low and lower_wick > body*2 and curr_close > prev_low:
             return True, "BUY", prev_low, curr_low
-        if curr_high > prev_high * 1.0005 and curr_close < prev_high and curr_close < curr_open:
+        if downtrend and curr_high > prev_high and upper_wick > body*2 and curr_close < prev_high:
             return True, "SELL", prev_high, curr_high
     except: pass
     return False, "", 0, 0
@@ -77,14 +83,34 @@ def detect_4H_MANIPULATION(d4):
 def is_choppy_4H(d4):
     try:
         c=d4["c"][-10:]; h=d4["h"][-10:]; l=d4["l"][-10:]
-        avg_range = sum((h[i]-l[i])/c[i] for i in range(10))/10
-        if avg_range < 0.008: return True
-        max_h=max(h); min_l=min(l)
-        if max_h-min_l==0: return True
-        pos=(c[-1]-min_l)/(max_h-min_l)
-        if 0.35 < pos < 0.65 and avg_range < 0.015: return True
+        avg_range=sum((h[i]-l[i])/c[i] for i in range(10))/10
+        if avg_range<0.008: return True
         return False
     except: return False
+
+def get_15m_refined_entry(sym, direction):
+    try:
+        d15=kl(sym,"Min15")
+        if not d15 or len(d15["c"])<20: return None,None,"no 15m"
+        c=d15["c"]; h=d15["h"]; l=d15["l"]
+        live=c[-1]; last_low=min(l[-10:]); last_high=max(h[-10:])
+        avg_range=sum((h[-10+i]-l[-10+i])/c[-10+i] for i in range(10))/10
+        is_tight=avg_range<0.006
+        if direction=="BUY":
+            choch=c[-1]>max(h[-6:-1])
+            if is_tight or choch or live>last_low*1.002:
+                sl=min(l[-3:])*0.998
+                if 0.001<abs(live-sl)/live<0.012:
+                    return live,sl,f"HH+Pin 15m tight={is_tight} CHoCH={choch}"
+        else:
+            choch=c[-1]<min(l[-6:-1])
+            if is_tight or choch or live<last_high*0.998:
+                sl=max(h[-3:])*1.002
+                if 0.001<abs(sl-live)/live<0.012:
+                    return live,sl,f"LL+Pin 15m tight={is_tight} CHoCH={choch}"
+        return None,None,"no 15m pattern"
+    except Exception as e:
+        return None,None,f"15m err {e}"
 
 def get_next_liq(d4,live,is_buy,depth):
     try:
@@ -96,10 +122,11 @@ def get_btc_trend():
         d=kl("BTC_USDT","Hour4")
         if not d: return "RANGE"
         c=d["c"]
-        if c[-1] > c[-20]*1.015: return "UP"
-        if c[-1] < c[-20]*0.985: return "DOWN"
+        if c[-1]>c[-20]*1.015: return "UP"
+        if c[-1]<c[-20]*0.985: return "DOWN"
         return "RANGE"
     except: return "RANGE"
+
 def scan():
     today=get_today()
     if COOLDOWN.get("last_day")!=today: COOLDOWN["daily_pnl"]=0.0; COOLDOWN["last_day"]=today; save_c()
@@ -111,7 +138,7 @@ def scan():
         entry,is_buy,sl=float(data["entry"]),bool(data["is_buy"]),float(data["sl"]); tp1,tp2,tp3=float(data["tp1"]),float(data["tp2"]),float(data["tp3"])
         if (is_buy and p<=sl) or (not is_buy and p>=sl):
             pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100; STATS["losses"]+=1; save_s()
-            tg(f"❌ {sym.replace('_USDT','USDT')} {pnl:.1f}% SL 4H-MANIP"); ACTIVE.pop(sym,None); save_a(); continue
+            tg(f"❌ {sym.replace('_USDT','USDT')} {pnl:.1f}% SL {TAG}"); ACTIVE.pop(sym,None); save_a(); continue
         if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)): data["tp1_hit"]=True; data["sl"]=entry; save_a(); tg(f"🟢 {sym.replace('_USDT','USDT')} TP1 BE")
         if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)): data["tp2_hit"]=True; data["sl"]=tp1; save_a(); tg(f"🟢 {sym.replace('_USDT','USDT')} TP2")
         if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)): 
@@ -122,31 +149,30 @@ def scan():
     for sym in SYMBOLS:
         try:
             if sym in ACTIVE: continue
-            d4=kl(sym,"Hour4"); time.sleep(0.4)
+            d4=kl(sym,"Hour4"); time.sleep(0.3)
             if not d4: continue
-            # === NEW: CHOPPY FILTER - YOUR REQUEST ===
-            if is_choppy_4H(d4):
-                print(f"SKIP {sym} CHOPPY 4H")
-                continue
+            if is_choppy_4H(d4): continue
             manip_ok, manip_dir, manip_level, manip_extreme = detect_4H_MANIPULATION(d4)
             if not manip_ok: continue
-            if manip_dir == "BUY" and btc_trend == "DOWN": continue
-            if manip_dir == "SELL" and btc_trend != "DOWN": continue
-            live = get_live(sym) or d4["c"][-1]
-            is_buy = manip_dir == "BUY"
-            sl = manip_extreme * 0.998 if is_buy else manip_extreme * 1.002
+            if manip_dir=="BUY" and btc_trend=="DOWN": continue
+            if manip_dir=="SELL" and btc_trend!="DOWN": continue
+            entry_15m, sl_15m, reason_15m = get_15m_refined_entry(sym, manip_dir)
+            if not entry_15m: print(f"WAIT {sym} {manip_dir} no 15m"); continue
+            live=entry_15m; is_buy=manip_dir=="BUY"; sl=sl_15m
             tp1=get_next_liq(d4,live,is_buy,0); tp2=get_next_liq(d4,live,is_buy,1); tp3=get_next_liq(d4,live,is_buy,2); runner=get_next_liq(d4,live,is_buy,3)
             risk=abs(live-sl)/live*100; reward=abs(tp1-live)/live*100; rr=reward/risk if risk>0 else 0
-            if rr < 1.0: continue
-            cands.append((95,sym,manip_dir,live,sl,tp1,tp2,tp3,runner,rr,manip_extreme,manip_level))
+            if rr<2.0: continue
+            print(f"READY {sym} {manip_dir} {reason_15m} RR{rr:.1f}")
+            cands.append((95,sym,manip_dir,live,sl,tp1,tp2,tp3,runner,rr,manip_extreme,manip_level,reason_15m))
         except Exception as e:
             print(f"EX {sym} {e}"); continue
     cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
-    for score,sym,dir,live,sl,tp1,tp2,tp3,runner,rr,manip_ex,manip_level in cands:
+    for score,sym,dir,live,sl,tp1,tp2,tp3,runner,rr,manip_ex,manip_level,reason15 in cands:
         is_buy=dir=="BUY"
-        ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":"4H-MANIP","score":score,"rr":rr,"ts":time.time()}; save_a()
+        ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"runner":runner,"is_buy":is_buy,"label":TAG,"score":score,"rr":rr,"ts":time.time()}; save_a()
         emoji="🟢" if is_buy else "🔴"; side="BUY" if is_buy else "SELL"
-        tg(f"{emoji} {side} {sym.replace('_USDT','USDT')} | {TAG} | 95\nSweep {fmt(manip_ex)} Prev {fmt(manip_level)} BTC:{btc_trend}\nEntry NEXT-4H-OPEN {fmt(live)} SL {fmt(sl)}\nTP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} Runner {fmt(runner)}\nRR {rr:.1f} W{STATS['wins']} L{STATS['losses']}")
+        tg(f"{emoji} {side} {sym.replace('_USDT','USDT')} | {TAG}\n4H {dir} Sweep {fmt(manip_ex)} Prev {fmt(manip_level)} BTC:{btc_trend}\n{reason15}\nEntry {fmt(live)} SL {fmt(sl)}\nTP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)}\nRR {rr:.1f} W{STATS['wins']} L{STATS['losses']}")
+
 if __name__=="__main__":
     if "--once" in sys.argv: scan()
     else:
