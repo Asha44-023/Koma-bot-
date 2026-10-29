@@ -1,35 +1,40 @@
 name: Scan 5 Coins 30M
-
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0,30 * * * *'
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: scan-5coins
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
         with:
-          python-version: '3.10'
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install deps
         run: pip install requests pytz
       - name: Run bot once
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TG_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
       - name: Save state
         run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@bot.com"
-          git pull --rebase || true
+          git config user.name "koma-bot"
+          git config user.email "bot@koma.local"
           git add active.json cooldown.json stats_v199.json || true
-          git commit -m "auto $(date -u)" || true
-          git push || true
+          git diff --cached --quiet && exit 0
+          git commit -m "state $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git pull --rebase --autostash || true
+          git push
