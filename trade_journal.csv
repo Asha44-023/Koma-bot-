@@ -1,0 +1,3 @@
+date,time,coin,type,direction,score,checks,entry,sl,tp1,rr,btc_trend,reason,result,pnl,missing
+2026-10-29,2026-10-29 12:33 EAT,GRASS_USDT,SWEEP_FAKE,BUY,3,3/5,0.652,,,,RANGE,"FAKE LOW Sweep 0.650700 < Yest L 0.670000 | 3/5 [sweep,wick,BTC:RANGE OK] MISSING: [no close_back inside,MISSING BOS-5min]",WAIT,,"no close_back inside,MISSING BOS-5min"
+2026-10-29,2026-10-29 12:33 EAT,PEPE_USDT,SWEEP_FAKE,SELL,3,3/5,5.0371e-06,,,,RANGE,"FAKE HIGH Sweep 0.00000507 > Yest H 0.00000462 | 3/5 [sweep,wick,BTC:RANGE OK] MISSING: [no close_back inside,MISSING BOS-5min]",WAIT,,"no close_back inside,MISSING BOS-5min"
