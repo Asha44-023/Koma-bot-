@@ -30,5 +30,37 @@
     "reason": "FAKE LOW 0.579200 < YL 0.675900 4/5 PHASE WEEKLY_DUMP_ENDING",
     "ts": 1793354486.261296,
     "runner_days": 0
+  },
+  "SENT_USDT": {
+    "entry": 0.01863,
+    "sl": 0.017252,
+    "tp1": 0.02185,
+    "tp2": 0.02401,
+    "tp3": 0.024372,
+    "is_buy": true,
+    "label": "V200.1-FIX-3PCT-DUMP-WICK-3of5",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 2.3367198838896943,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.018180 < YL 0.021170 3/5 PHASE WEEKLY_DUMP_ENDING",
+    "ts": 1793369060.7416189,
+    "runner_days": 0
+  },
+  "SIREN_USDT": {
+    "entry": 0.02235,
+    "sl": 0.01938,
+    "tp1": 0.023530000000000002,
+    "tp2": 0.0256858,
+    "tp3": 0.037143,
+    "is_buy": true,
+    "label": "V200.1-FIX-3PCT-DUMP-WICK-3of5",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 0.397306397306399,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.022350 < YL 0.023630 3/5 PHASE WEEKLY_DUMP_ENDING",
+    "ts": 1793369061.1322553,
+    "runner_days": 0
   }
 }
