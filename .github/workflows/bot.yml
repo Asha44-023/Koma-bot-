@@ -1,8 +1,8 @@
-name: Scan 5 Coins 30M
+name: Scan 5 Coins 15M
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 * * * *'  # every 15 min
   workflow_dispatch:
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot once
+      - name: Run bot once V199.7 CLEAN
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -40,13 +40,11 @@ jobs:
           git config user.name "koma-bot"
           git config user.email "bot@koma.local"
           git add active.json cooldown.json stats_v199.json trade_journal.csv || true
-          # Only commit if something changed
           if git diff --cached --quiet; then
             echo "No state change"
             exit 0
           fi
-          git commit -m "state $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
-          # Pull with rebase once, then push with retry to avoid 429
+          git commit -m "V199.7 CLEAN ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "Push failed, retry $i in 30s"
