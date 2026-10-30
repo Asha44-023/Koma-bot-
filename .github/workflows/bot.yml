@@ -2,7 +2,7 @@ name: Scan 5 Coins 15M
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # every 15 min
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot once V200 BOTH HOLD WEEKS
+      - name: Run bot once V200.1 FIX 3PCT DUMP
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -44,7 +44,7 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200 BOTH BUY SELL WEEKS MONTHS ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.1 FIX 3PCT DUMP WICK 3of5 ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "Push failed, retry $i in 30s"
