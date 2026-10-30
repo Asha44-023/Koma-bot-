@@ -8,7 +8,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE,JOURNAL_FILE="active.json","cooldown.json","stats_v199.json","trade_journal.csv"
 MAX_ACTIVE=6;TOP_N_PER_SCAN=2
 session=requests.Session()
-TAG="V199.7-CLEAN-GREEN-RED-4of5-WEEKLY-MONTHLY"
+TAG="V200-BOTH-BUY-SELL-WEEKS-MONTHS-HOLD"
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -90,7 +90,7 @@ def get_coin_cycle_levels(d1):
   w_high=max(d1["h"][-7:]);w_low=min(d1["l"][-7:]);m_high=max(d1["h"][-30:]);m_low=min(d1["l"][-30:]);w_mid=(w_high+w_low)/2;m_mid=(m_high+m_low)/2
   return w_high,w_low,m_high,m_low,w_mid,m_mid
  except:return None
-def detect_5check(d1,d15,d5,live,btc_trend):
+def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
  try:
   if not d1 or len(d1["c"])<3:return False,"","","",0,0,0,"0/5",0,"no data"
   y_high,y_low,y_mid,y_range=get_daily_levels(d1)
@@ -107,47 +107,49 @@ def detect_5check(d1,d15,d5,live,btc_trend):
   if d15 and len(d15["c"])>10:
    if c15[-1]<min(d15["l"][-10:-5]):bos_bear=True
    if c15[-1]>max(d15["h"][-10:-5]):bos_bull=True
+  btc_ok_for_buy = (btc_trend!="DOWN") or ("DUMP_ENDING" in btc_phase)
+  btc_ok_for_sell = (btc_trend!="UP") or ("PUMP" in btc_phase or "DUMP_ENDING" in btc_phase)
   if sweep_down:
-   checks=0;reasons=[];missing=[]
-   if sweep_down:checks+=1;reasons.append("sweep")
-   if close_back_above:checks+=1;reasons.append("close_back")
+   checks=0;missing=[]
+   if sweep_down:checks+=1
+   if close_back_above:checks+=1
    else:missing.append("no close_back")
-   if wick_down:checks+=1;reasons.append("wick")
+   if wick_down:checks+=1
    else:missing.append("no wick")
-   if bos_bull:checks+=1;reasons.append("BOS")
+   if bos_bull:checks+=1
    else:missing.append("no BOS")
-   if btc_trend!="DOWN":checks+=1;reasons.append(f"BTC:{btc_trend}")
-   else:missing.append(f"BTC DOWN")
-   reason=f"FAKE LOW {fmt(last_l)} < YL {fmt(y_low)} {checks}/5"
+   if btc_ok_for_buy:checks+=1
+   else:missing.append("BTC DOWN")
+   reason=f"FAKE LOW {fmt(last_l)} < YL {fmt(y_low)} {checks}/5 PHASE {btc_phase}"
    return checks>=4,"BUY","SWEEP_FAKE",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   if sweep_up:
-   checks=0;reasons=[];missing=[]
-   if sweep_up:checks+=1;reasons.append("sweep")
-   if close_back_below:checks+=1;reasons.append("close_back")
+   checks=0;missing=[]
+   if sweep_up:checks+=1
+   if close_back_below:checks+=1
    else:missing.append("no close_back")
-   if wick_up:checks+=1;reasons.append("wick")
+   if wick_up:checks+=1
    else:missing.append("no wick")
-   if bos_bear:checks+=1;reasons.append("BOS")
+   if bos_bear:checks+=1
    else:missing.append("no BOS")
-   if btc_trend!="UP":checks+=1;reasons.append(f"BTC:{btc_trend}")
-   else:missing.append(f"BTC UP")
-   reason=f"FAKE HIGH {fmt(last_h)} > YH {fmt(y_high)} {checks}/5"
+   if btc_ok_for_sell:checks+=1
+   else:missing.append("BTC UP")
+   reason=f"FAKE HIGH {fmt(last_h)} > YH {fmt(y_high)} {checks}/5 PHASE {btc_phase}"
    return checks>=4,"SELL","SWEEP_FAKE",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   two_below=c15[-1]<y_low and c15[-2]<y_low
   if two_below and live<y_low*1.002 and live>y_low*0.97:
-   checks=3;reasons=["2 closes below","breakdown -3%"];missing=[]
-   if btc_trend=="DOWN" or btc_trend=="RANGE":checks+=1;reasons.append(f"BTC {btc_trend}")
+   checks=3;missing=[]
+   if btc_trend=="DOWN" or btc_trend=="RANGE" or "DUMP_ENDING" in btc_phase:checks+=1
    else:missing.append("BTC not DOWN")
-   if bos_bear:checks+=1;reasons.append("BOS")
+   if bos_bear:checks+=1
    else:missing.append("no BOS")
    reason=f"BREAKDOWN {fmt(y_low)} -> {fmt(live)} -3% {checks}/5"
    return checks>=4,"SELL","BREAKDOWN",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   two_above=c15[-1]>y_high and c15[-2]>y_high
   if two_above and live>y_high*0.998 and live<y_high*1.03:
-   checks=3;reasons=["2 closes above","breakout +3%"];missing=[]
-   if btc_trend=="UP" or btc_trend=="RANGE":checks+=1;reasons.append(f"BTC {btc_trend}")
+   checks=3;missing=[]
+   if btc_trend=="UP" or btc_trend=="RANGE" or "DUMP_ENDING" in btc_phase:checks+=1
    else:missing.append("BTC not UP")
-   if bos_bull:checks+=1;reasons.append("BOS")
+   if bos_bull:checks+=1
    else:missing.append("no BOS")
    reason=f"BREAKOUT {fmt(y_high)} -> {fmt(live)} +3% {checks}/5"
    return checks>=4,"BUY","BREAKOUT",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
@@ -173,10 +175,20 @@ def scan():
   entry,is_buy,sl=float(data["entry"]),bool(data["is_buy"]),float(data["sl"]);tp1,tp2,tp3=float(data["tp1"]),float(data["tp2"]),float(data["tp3"])
   if (is_buy and p<=sl) or (not is_buy and p>=sl):
    pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100;STATS["losses"]+=1;save_s()
-   tg(f"❌ {sym.replace('_USDT','USDT')} {pnl:.1f}% SL");ACTIVE.pop(sym,None);save_a();continue
-  if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)):data["tp1_hit"]=True;data["sl"]=entry;save_a();tg(f"🟢 {sym.replace('_USDT','USDT')} TP1 WEEKLY HIT")
-  if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)):data["tp2_hit"]=True;data["sl"]=tp1;save_a();tg(f"🟢 {sym.replace('_USDT','USDT')} TP2 WEEKLY HIGH/LOW HIT")
-  if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):data["tp3_hit"]=True;STATS["wins"]+=1;save_s();tg(f"✅ {sym.replace('_USDT','USDT')} TP3 MONTHLY WIN");ACTIVE.pop(sym,None);save_a();continue
+   tg(f"❌ {sym.replace('_USDT','USDT')} SL {pnl:.1f}% MONTHLY STOP");ACTIVE.pop(sym,None);save_a();continue
+  if not data.get("tp1_hit") and ((is_buy and p>=tp1) or (not is_buy and p<=tp1)):
+   data["tp1_hit"]=True;data["sl"]=entry;save_a();tg(f"🟢 {sym.replace('_USDT','USDT')} TP1 WEEKLY MID HIT - 25% - SL to BE - HOLD WEEKS")
+  if not data.get("tp2_hit") and ((is_buy and p>=tp2) or (not is_buy and p<=tp2)):
+   data["tp2_hit"]=True;data["sl"]=tp1;save_a();tg(f"🟢 {sym.replace('_USDT','USDT')} TP2 WEEKLY H/L HIT - 50% - SL to TP1 - HOLD MONTHLY")
+  if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
+   data["tp3_hit"]=True;data["sl"]=tp2;save_a()
+   tg(f"✅ {sym.replace('_USDT','USDT')} TP3 MONTHLY WIN {fmt(p)} - 25% RUNNER TRAILS TO TP2 - HOLD FOR MONTHS")
+   # Don't close yet - keep runner for months, trail SL
+   if data.get("runner_days",0)>30: # after 30 days close runner
+    STATS["wins"]+=1;save_s();ACTIVE.pop(sym,None);save_a()
+   continue
+  # increment runner days
+  if data.get("tp2_hit"): data["runner_days"]=data.get("runner_days",0)+0.5;save_a()
  if len(ACTIVE)>=MAX_ACTIVE:print(f"MAX ACTIVE {len(ACTIVE)}");return
  cands=[]
  for sym in SYMBOLS:
@@ -186,7 +198,7 @@ def scan():
    if not d1 or not d15:continue
    live=get_live(sym)
    if not live:continue
-   ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend)
+   ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase)
    if not ok:
     if checks_str!="0/5":print(f"⚪ WAIT {sym} {checks_str} {missing} | {reason}")
     continue
@@ -194,24 +206,25 @@ def scan():
    if not cycle:continue
    w_high,w_low,m_high,m_low,w_mid,m_mid=cycle
    if direction=="BUY":
-    sl=min(d15["l"][-3:])*0.998 if sig_type=="SWEEP_FAKE" else y_h*0.996
+    sl=m_low*0.95 if m_low>0 else min(d15["l"][-10:])*0.97
     tp1=w_mid;tp2=w_high*0.98;tp3=m_high*0.90
     emoji="🟢";color_code="\033[92m"
    else:
-    sl=max(d15["h"][-3:])*1.002 if sig_type=="SWEEP_FAKE" else y_l*1.004
+    sl=m_high*1.05 if m_high>0 else max(d15["h"][-10:])*1.03
     tp1=w_mid;tp2=w_low*1.02;tp3=m_low*1.10 if m_low>0 else w_low*0.90
     emoji="🔴";color_code="\033[91m"
-   risk=abs(live-sl)/live*100;reward=abs(tp1-live)/live*100;rr=reward/risk if risk>0 else 0
-   if rr<0.8:print(f"{emoji} {sym} RR {rr:.1f} too low skip");continue
-   print(f"{color_code}{emoji} {direction} {sym} @ {fmt(live)} {checks_str} W-H {fmt(w_high)} W-L {fmt(w_low)} M-H {fmt(m_high)} M-L {fmt(m_low)} | SL {fmt(sl)} TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)}\033[0m")
+   risk=abs(live-sl)/live*100
+   if risk>15:print(f"{emoji} {sym} SL monthly wide {risk:.1f}% skip");continue
+   reward=abs(tp1-live)/live*100;rr=reward/risk if risk>0 else 0
+   print(f"{color_code}{emoji} {direction} {sym} @ {fmt(live)} {checks_str} W-H {fmt(w_high)} W-L {fmt(w_low)} M-H {fmt(m_high)} M-L {fmt(m_low)} | SL MONTHLY {fmt(sl)} TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR {rr:.1f}\033[0m")
    cands.append((checks_score,sym,direction,sig_type,live,sl,tp1,tp2,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str))
   except Exception as e:print(f"EX {sym} {e}");continue
  cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
  for score,sym,dir,sig_type,live,sl,tp1,tp2,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str in cands:
   is_buy=dir=="BUY";emoji="🟢" if is_buy else "🔴"
-  ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_buy":is_buy,"label":TAG,"type":sig_type,"score":score,"rr":rr,"checks":checks_str,"reason":reason,"ts":time.time()};save_a()
+  ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_buy":is_buy,"label":TAG,"type":sig_type,"score":score,"rr":rr,"checks":checks_str,"reason":reason,"ts":time.time(),"runner_days":0};save_a()
   journal_log({"date":today,"time":get_time(),"coin":sym,"type":sig_type,"direction":dir,"score":score,"checks":checks_str,"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"rr":f"{rr:.1f}","btc_trend":f"{btc_trend}/{btc_phase}","reason":reason,"result":"OPEN","pnl":"","missing":""})
-  tg(f"{emoji} {dir} {sym.replace('_USDT','USDT')} | {TAG}\n{reason}\nEntry {fmt(live)} SL {fmt(sl)}\nTP1 {fmt(tp1)} W-MID\nTP2 {fmt(tp2)} W-H/L\nTP3 {fmt(tp3)} M-H/L\nRR {rr:.1f}")
+  tg(f"{emoji} {dir} {sym.replace('_USDT','USDT')} | {TAG}\n{reason}\nEntry {fmt(live)} SL MONTHLY {fmt(sl)}\nTP1 {fmt(tp1)} W-MID (2-5d)\nTP2 {fmt(tp2)} W-H/L (1-2w)\nTP3 {fmt(tp3)} M-H/L (2-8w)\nRR {rr:.1f} - HOLD WEEKS/MONTHS")
 if __name__=="__main__":
  if "--once" in sys.argv:scan()
  else:
