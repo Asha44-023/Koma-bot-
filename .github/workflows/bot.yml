@@ -1,4 +1,4 @@
-name: Scan 5 Coins 15M
+name: Scan 7 Coins 15M Monday Fixed
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-5coins
+      group: scan-7coins-monday
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot once V200.1 FIX 3PCT DUMP
+      - name: Run bot once V200.3 MONDAY LAB VELVET
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -44,7 +44,7 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.1 FIX 3PCT DUMP WICK 3of5 ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.3 MONDAY FIX LAB VELVET ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "Push failed, retry $i in 30s"
