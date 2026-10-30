@@ -1,14 +1,14 @@
 import json,os,sys,time,tempfile,requests,csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
-SYMBOLS=["KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","PEPE_USDT"]
+SYMBOLS=["KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","PEPE_USDT","LAB_USDT","VELVET_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE,JOURNAL_FILE="active.json","cooldown.json","stats_v199.json","trade_journal.csv"
 MAX_ACTIVE=6;TOP_N_PER_SCAN=2
 session=requests.Session()
-TAG="V200.1-FIX-3PCT-DUMP-WICK-3of5"
+TAG="V200.3-MONDAY-WEEK-LAB-VELVET"
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -84,12 +84,28 @@ def get_weekly_phase():
   if month_change<-10:return "MONTHLY_DUMP_ENDING",month_change
   return "RANGE",week_change
  except:return "RANGE",0
+
+# === MONDAY FIX: True last week's Mon-Sun high/low ===
 def get_coin_cycle_levels(d1):
  try:
-  if not d1 or len(d1["c"])<30:return None
-  w_high=max(d1["h"][-7:]);w_low=min(d1["l"][-7:]);m_high=max(d1["h"][-30:]);m_low=min(d1["l"][-30:]);w_mid=(w_high+w_low)/2;m_mid=(m_high+m_low)/2
+  if not d1 or len(d1["c"])<35:return None
+  # weekday 0=Mon
+  wd = datetime.now(EAT).weekday()
+  days_to_last_sunday = wd + 1 # Mon=1, Tue=2... Sun=7? Actually Sun=6 -> 7
+  # end = -days_to_last_sunday, start = end-7
+  end = -days_to_last_sunday
+  start = end - 7
+  # Safety
+  if abs(start) > len(d1["h"]): 
+      # fallback to old rolling
+      w_high=max(d1["h"][-7:]);w_low=min(d1["l"][-7:])
+  else:
+      w_high=max(d1["h"][start:end]) if end !=0 else max(d1["h"][start:])
+      w_low=min(d1["l"][start:end]) if end !=0 else min(d1["l"][start:])
+  m_high=max(d1["h"][-30:]);m_low=min(d1["l"][-30:]);w_mid=(w_high+w_low)/2;m_mid=(m_high+m_low)/2
   return w_high,w_low,m_high,m_low,w_mid,m_mid
  except:return None
+
 def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
  try:
   if not d1 or len(d1["c"])<3:return False,"","","",0,0,0,"0/5",0,"no data"
@@ -213,7 +229,7 @@ def scan():
    risk=abs(live-sl)/live*100
    if risk>15:print(f"{emoji} {sym} SL monthly wide {risk:.1f}% skip");continue
    reward=abs(tp1-live)/live*100;rr=reward/risk if risk>0 else 0
-   print(f"{color_code}{emoji} {direction} {sym} @ {fmt(live)} {checks_str} W-H {fmt(w_high)} W-L {fmt(w_low)} M-H {fmt(m_high)} M-L {fmt(m_low)} | SL MONTHLY {fmt(sl)} TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR {rr:.1f}\033[0m")
+   print(f"{color_code}{emoji} {direction} {sym} @ {fmt(live)} LAST-WK H {fmt(w_high)} L {fmt(w_low)} M-H {fmt(m_high)} M-L {fmt(m_low)} | SL {fmt(sl)} TP1 {fmt(tp1)} TP2 {fmt(tp2)} TP3 {fmt(tp3)} RR {rr:.1f}\033[0m")
    cands.append((checks_score,sym,direction,sig_type,live,sl,tp1,tp2,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str))
   except Exception as e:print(f"EX {sym} {e}");continue
  cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
@@ -221,7 +237,7 @@ def scan():
   is_buy=dir=="BUY";emoji="🟢" if is_buy else "🔴"
   ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_buy":is_buy,"label":TAG,"type":sig_type,"score":score,"rr":rr,"checks":checks_str,"reason":reason,"ts":time.time(),"runner_days":0};save_a()
   journal_log({"date":today,"time":get_time(),"coin":sym,"type":sig_type,"direction":dir,"score":score,"checks":checks_str,"entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"rr":f"{rr:.1f}","btc_trend":f"{btc_trend}/{btc_phase}","reason":reason,"result":"OPEN","pnl":"","missing":""})
-  tg(f"{emoji} {dir} {sym.replace('_USDT','USDT')} | {TAG}\n{reason}\nEntry {fmt(live)} SL MONTHLY {fmt(sl)}\nTP1 {fmt(tp1)} W-MID (2-5d)\nTP2 {fmt(tp2)} W-H/L (1-2w)\nTP3 {fmt(tp3)} M-H/L (2-8w)\nRR {rr:.1f} - HOLD WEEKS/MONTHS")
+  tg(f"{emoji} {dir} {sym.replace('_USDT','USDT')} | {TAG}\n{reason}\nLAST WEEK H {fmt(w_high)} L {fmt(w_low)} FIXED MON-SUN\nEntry {fmt(live)} SL MONTHLY {fmt(sl)}\nTP1 {fmt(tp1)} W-MID\nTP2 {fmt(tp2)} W-H/L\nTP3 {fmt(tp3)} M-H/L\nRR {rr:.1f} - HOLD WEEKS/MONTHS")
 if __name__=="__main__":
  if "--once" in sys.argv:scan()
  else:
