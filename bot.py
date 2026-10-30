@@ -8,7 +8,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE,JOURNAL_FILE="active.json","cooldown.json","stats_v199.json","trade_journal.csv"
 MAX_ACTIVE=6;TOP_N_PER_SCAN=2
 session=requests.Session()
-TAG="V200-BOTH-BUY-SELL-WEEKS-MONTHS-HOLD"
+TAG="V200.1-FIX-3PCT-DUMP-WICK-3of5"
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -79,9 +79,9 @@ def get_weekly_phase():
   if not d1 or len(d1["c"])<30:return "RANGE",0
   c=d1["c"];week_change=(c[-1]-c[-8])/c[-8]*100 if c[-8]!=0 else 0
   month_change=(c[-1]-c[-22])/c[-22]*100 if c[-22]!=0 else 0
-  if week_change<-5:return "WEEKLY_DUMP_ENDING",week_change
-  if week_change>5:return "WEEKLY_PUMP",week_change
-  if month_change<-15:return "MONTHLY_DUMP_ENDING",month_change
+  if week_change<-3:return "WEEKLY_DUMP_ENDING",week_change
+  if week_change>3:return "WEEKLY_PUMP",week_change
+  if month_change<-10:return "MONTHLY_DUMP_ENDING",month_change
   return "RANGE",week_change
  except:return "RANGE",0
 def get_coin_cycle_levels(d1):
@@ -102,13 +102,12 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
   upper_wick=h15[-1]-max(o15[-1],c15[-1]);lower_wick=min(o15[-1],c15[-1])-l15[-1]
   sweep_up=last_h>y_high;sweep_down=last_l<y_low
   close_back_below=last_c<y_high;close_back_above=last_c>y_low
-  wick_up=upper_wick>body*0.5;wick_down=lower_wick>body*0.5
+  wick_up=upper_wick>body*0.2;wick_down=lower_wick>body*0.2
   bos_bear=False;bos_bull=False
   if d15 and len(d15["c"])>10:
    if c15[-1]<min(d15["l"][-10:-5]):bos_bear=True
    if c15[-1]>max(d15["h"][-10:-5]):bos_bull=True
-  btc_ok_for_buy = (btc_trend!="DOWN") or ("DUMP_ENDING" in btc_phase)
-  btc_ok_for_sell = (btc_trend!="UP") or ("PUMP" in btc_phase or "DUMP_ENDING" in btc_phase)
+  btc_ok_for_buy=True;btc_ok_for_sell=True
   if sweep_down:
    checks=0;missing=[]
    if sweep_down:checks+=1
@@ -121,7 +120,7 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
    if btc_ok_for_buy:checks+=1
    else:missing.append("BTC DOWN")
    reason=f"FAKE LOW {fmt(last_l)} < YL {fmt(y_low)} {checks}/5 PHASE {btc_phase}"
-   return checks>=4,"BUY","SWEEP_FAKE",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
+   return checks>=3,"BUY","SWEEP_FAKE",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   if sweep_up:
    checks=0;missing=[]
    if sweep_up:checks+=1
@@ -134,7 +133,7 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
    if btc_ok_for_sell:checks+=1
    else:missing.append("BTC UP")
    reason=f"FAKE HIGH {fmt(last_h)} > YH {fmt(y_high)} {checks}/5 PHASE {btc_phase}"
-   return checks>=4,"SELL","SWEEP_FAKE",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
+   return checks>=3,"SELL","SWEEP_FAKE",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   two_below=c15[-1]<y_low and c15[-2]<y_low
   if two_below and live<y_low*1.002 and live>y_low*0.97:
    checks=3;missing=[]
@@ -143,7 +142,7 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
    if bos_bear:checks+=1
    else:missing.append("no BOS")
    reason=f"BREAKDOWN {fmt(y_low)} -> {fmt(live)} -3% {checks}/5"
-   return checks>=4,"SELL","BREAKDOWN",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
+   return checks>=3,"SELL","BREAKDOWN",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   two_above=c15[-1]>y_high and c15[-2]>y_high
   if two_above and live>y_high*0.998 and live<y_high*1.03:
    checks=3;missing=[]
@@ -152,7 +151,7 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase):
    if bos_bull:checks+=1
    else:missing.append("no BOS")
    reason=f"BREAKOUT {fmt(y_high)} -> {fmt(live)} +3% {checks}/5"
-   return checks>=4,"BUY","BREAKOUT",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
+   return checks>=3,"BUY","BREAKOUT",reason,y_high,y_low,y_mid,f"{checks}/5",checks,",".join(missing)
   return False,"","","",y_high,y_low,y_mid,"0/5",0,"no setup"
  except Exception as e:return False,"",f"ERR {e}","",0,0,0,"0/5",0,str(e)
 def get_btc_trend():
@@ -183,11 +182,9 @@ def scan():
   if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
    data["tp3_hit"]=True;data["sl"]=tp2;save_a()
    tg(f"✅ {sym.replace('_USDT','USDT')} TP3 MONTHLY WIN {fmt(p)} - 25% RUNNER TRAILS TO TP2 - HOLD FOR MONTHS")
-   # Don't close yet - keep runner for months, trail SL
-   if data.get("runner_days",0)>30: # after 30 days close runner
+   if data.get("runner_days",0)>30:
     STATS["wins"]+=1;save_s();ACTIVE.pop(sym,None);save_a()
    continue
-  # increment runner days
   if data.get("tp2_hit"): data["runner_days"]=data.get("runner_days",0)+0.5;save_a()
  if len(ACTIVE)>=MAX_ACTIVE:print(f"MAX ACTIVE {len(ACTIVE)}");return
  cands=[]
