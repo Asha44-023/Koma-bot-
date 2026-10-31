@@ -1,4 +1,4 @@
-name: Scan 7 Coins 15M Monday Fixed
+name: Scan 7 Coins 15M V200.6 Crash Alert
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-7coins-monday
+      group: scan-7coins-v200-6
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot once V200.3 MONDAY LAB VELVET
+      - name: Run bot once V200.6 FINAL CRASH ALERT - FLIP + BREAKOUT
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -44,7 +44,7 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.3 MONDAY FIX LAB VELVET ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.6 CRASH ALERT FLIP/BREAKOUT ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "Push failed, retry $i in 30s"
