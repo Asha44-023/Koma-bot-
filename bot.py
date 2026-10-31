@@ -223,24 +223,24 @@ def scan():
   if not data.get("tp1_body_hit") and ((is_buy and p>=tp1_body) or (not is_buy and p<=tp1_body)):
    data["tp1_body_hit"]=True;data["sl"]=entry;save_a()
    if is_buy:
-       tg(f"🔴 SELL TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/3.5\n🟢 BUY TO HERE was {fmt(entry)} -> NOW SELL\nACTION: SELL 70% LONG + FLIP TO SHORT 30% at {fmt(tp1_body)}\n🔴 FLIP TO: SHORT -> TARGET {fmt(data.get('rebuy',0))}\nNext SELL: TP1 WICK {fmt(tp1_wick)} in ~1 day\nBTC {fmt(btc_price)}")
+       tg(f"🔴 SELL TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/3.5\n🟢 BUY TO HERE was {fmt(entry)} -> NOW SELL\nACTION: SELL 70% LONG + FLIP TO SHORT 30% at {fmt(tp1_body)}\n🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(data.get('rebuy',0))} IN 2 DAYS\nFLIP TO: SHORT -> RE-BUY AT {fmt(data.get('rebuy',0))}\nNext SELL: TP1 WICK {fmt(tp1_wick)} in ~1 day\nBTC {fmt(btc_price)}")
    else:
-       tg(f"🟢 BUY TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/3.5\n🔴 SELL TO HERE was {fmt(entry)}\nACTION: BUY 70% SHORT + FLIP TO LONG 30% at {fmt(tp1_body)}\n🟢 FLIP TO: LONG\nNext: TP1 WICK {fmt(tp1_wick)}\nBTC {fmt(btc_price)}")
+       tg(f"🟢 BUY TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/3.5\n🔴 SELL TO HERE was {fmt(entry)}\nACTION: BUY 70% SHORT + FLIP TO LONG 30% at {fmt(tp1_body)}\n🟢 BUY FROM {fmt(tp1_body)} UP TO {fmt(data.get('rebuy',0))}\nFLIP TO: LONG\nNext: TP1 WICK {fmt(tp1_wick)}\nBTC {fmt(btc_price)}")
   if not data.get("tp1_wick_hit") and ((is_buy and p>=tp1_wick) or (not is_buy and p<=tp1_wick)):
    data["tp1_wick_hit"]=True;data["sl"]=tp1_body;save_a()
    if is_buy:
-       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)} +6% over body\n🔴 SELL TO HERE: CLOSE 30% RUNNER + FULL FLIP TO SHORT -> TARGET RE-BUY {fmt(data.get('rebuy',0))}\nFLIP TO: SHORT\nBTC phase {btc_phase} {fmt(btc_price)}")
+       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)} +6% over body\n🔴 SELL TO HERE: CLOSE 30% RUNNER + FULL FLIP TO SHORT -> TARGET RE-BUY {fmt(data.get('rebuy',0))} DOWN FROM {fmt(tp1_wick)}\nFLIP TO: SHORT FOR 2 DAYS\nBTC phase {btc_phase} {fmt(btc_price)}")
    else:
-       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)}\n🟢 BUY TO HERE: CLOSE 30% RUNNER + FULL FLIP TO LONG -> TARGET {fmt(tp2_body)}\nFLIP TO: LONG\nBTC phase {btc_phase}")
+       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)}\n🟢 BUY TO HERE: CLOSE 30% RUNNER + FULL FLIP TO LONG -> TARGET {fmt(tp2_body)} UP FROM {fmt(tp1_wick)}\nFLIP TO: LONG\nBTC phase {btc_phase}")
   if not data.get("tp2_body_hit") and ((is_buy and p>=tp2_body) or (not is_buy and p<=tp2_body)):
    data["tp2_body_hit"]=True;data["sl"]=tp1_body;save_a()
-   tg(f"🟢 HOLD TO BREAKOUT: {sym.replace('_USDT','USDT')} TP2 BODY HIT {fmt(p)} Day {days_held:.1f}/8\nACTION: SELL 50% + SL TO TP1\n🟢 HOLD FOR BREAKOUT {fmt(tp3)} - FLIP PAUSES AFTER BREAKOUT")
+   tg(f"🟢 HOLD TO BREAKOUT: {sym.replace('_USDT','USDT')} TP2 BODY HIT {fmt(p)} Day {days_held:.1f}/8\nACTION: SELL 50% + SL TO TP1\n🟢 HOLD FROM {fmt(tp2_body)} TO {fmt(tp3)} - FLIP PAUSES AFTER BREAKOUT")
   if not data.get("tp2_wick_hit") and ((is_buy and p>=tp2_wick) or (not is_buy and p<=tp2_wick)):
    data["tp2_wick_hit"]=True;save_a()
-   tg(f"🔥 {sym.replace('_USDT','USDT')} TP2 WICK SURPASS {fmt(p)} - PREV WEEK WICK BROKEN\n🟢 HOLD TO BREAKOUT - CLOSE 80% + FLIP SHORT IF BTC REJECTS at {fmt(btc_price)} - ELSE HOLD TO TP3")
+   tg(f"🔥 {sym.replace('_USDT','USDT')} TP2 WICK SURPASS {fmt(p)} - PREV WEEK WICK BROKEN\n🟢 HOLD FROM {fmt(tp2_body)} TO {fmt(tp3)} - CLOSE 80% + FLIP SHORT IF BTC REJECTS at {fmt(btc_price)} - ELSE HOLD TO TP3")
   if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
    data["tp3_hit"]=True;data["sl"]=tp2_body;save_a()
-   tg(f"✅ {sym.replace('_USDT','USDT')} TP3 MONTHLY WIN {fmt(p)} Day {days_held:.1f}/11\n🚀 STOP FLIPPING - HOLD RUNNER FOR MONTHS to 115K/BTC\n🔴 NO MORE SELL FLIPS till crash")
+   tg(f"✅ {sym.replace('_USDT','USDT')} TP3 MONTHLY WIN {fmt(p)} Day {days_held:.1f}/11 - STOP FLIPPING, HOLD RUNNER FOR MONTHS to 115K/BTC\n🔴 NO MORE SELL FLIPS till crash")
    if data.get("runner_days",0)>30:
     STATS["wins"]+=1;save_s();ACTIVE.pop(sym,None);save_a()
    continue
@@ -298,18 +298,27 @@ def scan():
           f"{reason}\n"
           f"LAST WEEK H {fmt(w_high)} Body {fmt(w_body_high)} L {fmt(w_low)} Body {fmt(w_body_low)} FIXED MON-SUN\n"
           f"\n"
-          f"🟢 BUY TO HERE:\n"
-          f"Entry {fmt(live)} | SL MONTHLY {fmt(sl)}\n"
+          f"🟢 BUY FROM HERE:\n"
+          f"BUY AT {fmt(live)} | SL {fmt(sl)}\n"
+          f"HOLD {3.5} DAYS TO {fmt(tp1_body)} ~ {holds['tp1_body'].strftime('%b %d')}\n"
           f"\n"
-          f"🔴 SELL TO HERE (FLIP ZONE):\n"
-          f"TP1 BODY {fmt(tp1_body)} (70% SELL + FLIP TO SHORT) ~ {holds['tp1_body'].strftime('%b %d')} Day 3.5\n"
-          f"TP1 WICK {fmt(tp1_wick)} (30% runner close + full flip SHORT) ~ {holds['tp1_wick'].strftime('%b %d')}\n"
+          f"🔴 SELL FROM HERE TO HERE:\n"
+          f"SELL FROM {fmt(tp1_body)} DOWN TO {fmt(w_low)}\n"
+          f"→ SELL 70% AT {fmt(tp1_body)} = PROFIT\n"
+          f"→ FLIP TO SHORT 30% AT {fmt(tp1_body)}\n"
+          f"→ COVER SHORT + RE-BUY LONG AT {fmt(w_low)} IN ~2 DAYS (Nov 05-06)\n"
           f"\n"
-          f"🟢 HOLD TO BREAKOUT - STOP FLIPPING:\n"
-          f"TP2 BODY {fmt(tp2_body)} ~ {holds['tp2_body'].strftime('%b %d')} Day 8\n"
-          f"TP3 {fmt(tp3)} BREAKOUT ~ {holds['breakout'].strftime('%b %d')} Day 11\n"
+          f"🔴 SECOND SELL FROM HERE TO HERE:\n"
+          f"SELL FROM {fmt(tp1_body)} UP TO {fmt(tp1_wick)}\n"
+          f"→ SELL 30% RUNNER AT {fmt(tp1_wick)} ~ {holds['tp1_wick'].strftime('%b %d')} Day 4.5\n"
+          f"→ FULL FLIP TO SHORT AT {fmt(tp1_wick)} DOWN TO {fmt(w_low)}\n"
           f"\n"
-          f"BTC {fmt(btc_price)} >76K? {btc_allows_longs} RR {rr:.1f}"
+          f"🟢 HOLD LONG:\n"
+          f"FROM {fmt(w_low)} TO {fmt(tp3)}\n"
+          f"→ HOLD TO {fmt(tp2_body)} ~ {holds['tp2_body'].strftime('%b %d')} Day 8\n"
+          f"→ HOLD TO {fmt(tp3)} BREAKOUT ~ {holds['breakout'].strftime('%b %d')} Day 11 STOP FLIPPING\n"
+          f"\n"
+          f"RR {rr:.1f} BTC {fmt(btc_price)}"
       )
   else:
       tg(
@@ -317,12 +326,13 @@ def scan():
           f"{reason}\n"
           f"LAST WEEK H {fmt(w_high)} Body {fmt(w_body_high)} L {fmt(w_low)} Body {fmt(w_body_low)}\n"
           f"\n"
-          f"🔴 SELL TO HERE:\n"
-          f"Entry {fmt(live)} | SL {fmt(sl)}\n"
+          f"🔴 SELL FROM HERE:\n"
+          f"SELL AT {fmt(live)} | SL {fmt(sl)}\n"
           f"\n"
-          f"🟢 BUY TO HERE (FLIP ZONE):\n"
-          f"TP1 BODY {fmt(tp1_body)} (70% BUY + FLIP TO LONG) ~ {holds['tp1_body'].strftime('%b %d')}\n"
-          f"TP1 WICK {fmt(tp1_wick)} (30% + full flip LONG) ~ {holds['tp1_wick'].strftime('%b %d')}\n"
+          f"🟢 BUY FROM HERE TO HERE:\n"
+          f"BUY FROM {fmt(tp1_body)} UP TO {fmt(w_high)}\n"
+          f"→ BUY 70% AT {fmt(tp1_body)} = PROFIT + FLIP TO LONG\n"
+          f"→ COVER + RE-SELL AT {fmt(w_high)} IN ~2 DAYS\n"
           f"\n"
           f"RR {rr:.1f}"
       )
