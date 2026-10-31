@@ -62,5 +62,21 @@
     "reason": "FAKE LOW 0.018990 < YL 0.021170 3/5 PHASE WEEKLY_DUMP_ENDING",
     "ts": 1793401443.2197917,
     "runner_days": 0
+  },
+  "VELVET_USDT": {
+    "entry": 0.05328,
+    "sl": 0.0479845,
+    "tp1": 0.062775,
+    "tp2": 0.0689822,
+    "tp3": 0.08613,
+    "is_buy": true,
+    "label": "V200.3-MONDAY-WEEK-LAB-VELVET",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 1.7930318194693597,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.053150 < YL 0.054440 3/5 PHASE WEEKLY_DUMP_ENDING",
+    "ts": 1793413112.2966847,
+    "runner_days": 0
   }
 }
