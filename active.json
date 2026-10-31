@@ -1,1 +1,58 @@
-{}
+{
+  "GRASS_USDT": {
+    "entry": 0.584,
+    "sl": 0.524875,
+    "tp1": 0.6756,
+    "tp1_body": 0.6756,
+    "tp1_wick": 0.741948,
+    "tp2": 0.72125,
+    "tp2_body": 0.72125,
+    "tp2_wick": 0.7710440000000001,
+    "tp3": 0.801,
+    "is_buy": true,
+    "label": "V200.7-BREAKDOWN",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 1.5492600422832985,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.583300 < YL 0.583500 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000",
+    "ts": 1793420229.2078574,
+    "runner_days": 0,
+    "rebuy": 0.5536,
+    "holds": {
+      "tp1_body": "2026-11-03",
+      "tp1_wick": "2026-11-04",
+      "tp2_body": "2026-11-08",
+      "tp2_wick": "2026-11-09",
+      "breakout": "2026-11-11"
+    }
+  },
+  "SENT_USDT": {
+    "entry": 0.01874,
+    "sl": 0.0166155,
+    "tp1": 0.02226,
+    "tp1_body": 0.02226,
+    "tp1_wick": 0.024990000000000002,
+    "tp2": 0.022285,
+    "tp2_body": 0.022285,
+    "tp2_wick": 0.025970000000000003,
+    "tp3": 0.024372,
+    "is_buy": true,
+    "label": "V200.7-BREAKDOWN",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 1.6568604377500573,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.018690 < YL 0.019200 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000",
+    "ts": 1793420229.8299105,
+    "runner_days": 0,
+    "rebuy": 0.02083,
+    "holds": {
+      "tp1_body": "2026-11-03",
+      "tp1_wick": "2026-11-04",
+      "tp2_body": "2026-11-08",
+      "tp2_wick": "2026-11-09",
+      "breakout": "2026-11-11"
+    }
+  }
+}
