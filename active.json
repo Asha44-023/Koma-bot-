@@ -247,5 +247,88 @@
     "d3_hold": 4.5561732999268605,
     "d_flip": 0.9404615849332665,
     "beta": 2.6
+  },
+  "BTC_USDT": {
+    "entry": 77493.8,
+    "sl": 75220.05,
+    "tp1": 82214.99669914492,
+    "tp1_body": 82214.99669914492,
+    "tp1_wick": 87147.89650109362,
+    "tp2": 85066.13762961871,
+    "tp2_body": 85066.13762961871,
+    "tp2_wick": 91871.42863998821,
+    "tp3": 97826.0582740615,
+    "is_buy": true,
+    "label": "V200.7-ALIGNED-AFAR",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 2.076392171146747,
+    "checks": "3/5",
+    "reason": "FAKE LOW 77404.4000 < YL 77875.1000 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000 AFAR DESCENDING 90D",
+    "ts": 1793457806.270204,
+    "runner_days": 0,
+    "rebuy": 79737.7,
+    "afar": {
+      "major_high": 84868.0,
+      "major_high_2": 84312.0,
+      "major_low": 79179.0,
+      "major_low_2": 79737.7,
+      "highs": [
+        {
+          "price": 84868.0,
+          "days_ago": 9,
+          "idx": 80
+        },
+        {
+          "price": 84312.0,
+          "days_ago": 18,
+          "idx": 71
+        },
+        {
+          "price": 87216.3,
+          "days_ago": 28,
+          "idx": 61
+        },
+        {
+          "price": 87378.8,
+          "days_ago": 39,
+          "idx": 50
+        }
+      ],
+      "lows": [
+        {
+          "price": 79179.0,
+          "days_ago": 6,
+          "idx": 83
+        },
+        {
+          "price": 79737.7,
+          "days_ago": 15,
+          "idx": 74
+        },
+        {
+          "price": 80350.0,
+          "days_ago": 22,
+          "idx": 67
+        },
+        {
+          "price": 82502.4,
+          "days_ago": 32,
+          "idx": 57
+        }
+      ],
+      "mid": 82023.5,
+      "days_high": 9,
+      "days_low": 6,
+      "shape": "DESCENDING 90D",
+      "atr": 2004.6785714285704,
+      "hl_seq": "32d HL \u2192 22d HL LH \u2192 "
+    },
+    "atr": 2004.6785714285704,
+    "d1_hold": 2.355089123230616,
+    "d2_hold": 3.7773325547259775,
+    "d3_hold": 10.14240315821422,
+    "d_flip": 1.2357575595670454,
+    "beta": 1.0
   }
 }
