@@ -3,12 +3,13 @@ from datetime import datetime, timedelta
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
 SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","PEPE_USDT","LAB_USDT","VELVET_USDT"]
+BETA_MAP={"BTC_USDT":1.0,"GRASS_USDT":2.5,"KOMA_USDT":2.2,"SENT_USDT":2.2,"SIREN_USDT":2.4,"PEPE_USDT":1.9,"LAB_USDT":2.1,"VELVET_USDT":2.6}
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE,COOLDOWN_FILE,STATS_FILE,JOURNAL_FILE="active.json","cooldown.json","stats_v199.json","trade_journal.csv"
 MAX_ACTIVE=6;TOP_N_PER_SCAN=3
 session=requests.Session()
-TAG="V200.7-BREAKDOWN-AFAR"
+TAG="V200.7-ALIGNED-AFAR"
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -222,6 +223,42 @@ def get_btc_trend():
   if c[-1]<c[-20]*0.985:return "DOWN"
   return "RANGE"
  except:return "RANGE"
+def aligned_tp_calculation(sym, live, btc_live, btc_afar, afar, direction):
+    beta = BETA_MAP.get(sym, 2.0)
+    try:
+        btc_mid = btc_afar["mid"] if btc_afar else btc_live*1.06
+        btc_h2 = btc_afar["major_high_2"] if btc_afar else btc_live*1.10
+        btc_h1 = btc_afar["major_high"] if btc_afar else btc_live*1.15
+        btc_range = btc_h1 - btc_afar["major_low"] if btc_afar and btc_afar["major_low"]>0 else btc_live*0.15
+        btc_tp3 = btc_h1 + btc_range*0.6
+        if direction=="BUY":
+            btc_pct1 = (btc_mid - btc_live)/btc_live if btc_live>0 else 0.06
+            btc_pct2 = (btc_h1 - btc_live)/btc_live if btc_live>0 else 0.10
+            btc_pct3 = (btc_tp3 - btc_live)/btc_live if btc_live>0 else 0.15
+            tp1 = live * (1 + btc_pct1 * beta)
+            tp2 = live * (1 + btc_pct2 * beta)
+            tp3 = live * (1 + btc_pct3 * beta)
+            if afar and afar["major_high_2"]>0:
+                tp1 = min(tp1, afar["major_high_2"]*1.05)
+            if afar and afar["major_high"]>0:
+                tp2 = min(tp2, afar["major_high"]*1.10) if sym!="GRASS_USDT" else min(tp2, 0.90)
+                if sym=="GRASS_USDT" and tp2 < 0.80:
+                    tp2 = 0.80
+            tp3 = max(tp3, tp2*1.15)
+            return tp1, tp1*1.06, tp2, tp2*1.08, tp3
+        else:
+            btc_pct1 = (btc_live - btc_mid)/btc_live if btc_live>0 else 0.06
+            tp1 = live * (1 - btc_pct1 * beta)
+            tp2 = live * (1 - btc_pct1*1.6 * beta)
+            tp3 = live * (1 - btc_pct1*2.2 * beta)
+            return tp1, tp1*0.98, tp2, tp2*0.95, tp3
+    except:
+        if direction=="BUY":
+            tp1=afar["mid"];tp2=afar["major_high"];tp3=afar["major_high"]+(afar["major_high"]-afar["major_low"])*0.6
+            return tp1,tp1*1.02,tp2,tp2*1.05,tp3
+        else:
+            tp1=afar["mid"];tp2=afar["major_low"];tp3=afar["major_low"]-(afar["major_high"]-afar["major_low"])*0.6
+            return tp1,tp1*0.98,tp2,tp2*0.95,tp3
 def scan():
  today=get_today()
  if COOLDOWN.get("last_day")!=today:COOLDOWN["daily_pnl"]=0.0;COOLDOWN["last_day"]=today;save_c()
@@ -242,34 +279,25 @@ def scan():
   d_flip = calc_hold_days_dynamic(tp1_body, data.get('rebuy',0), atr)
   if (is_buy and p<=sl) or (not is_buy and p>=sl):
    pnl=(p-entry)/entry*100 if is_buy else (entry-p)/entry*100;STATS["losses"]+=1;save_s()
-   tg(f"❌ {sym.replace('_USDT','USDT')} SL {pnl:.1f}% DAYS {days_held:.1f}/{d_tp1:.1f} AFAR {afar_info.get('shape','')}");ACTIVE.pop(sym,None);save_a();continue
+   tg(f"❌ {sym.replace('_USDT','USDT')} SL {pnl:.1f}% DAYS {days_held:.1f}/{d_tp1:.1f} AFAR {afar_info.get('shape','')} BETA {BETA_MAP.get(sym,2.0)}x");ACTIVE.pop(sym,None);save_a();continue
   if not data.get("tp1_body_hit") and ((is_buy and p>=tp1_body) or (not is_buy and p<=tp1_body)):
    data["tp1_body_hit"]=True;data["sl"]=entry;save_a()
    if is_buy:
-       tg(f"🔴 SELL TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/{d_tp1:.1f}\n🟢 BUY TO HERE was {fmt(entry)} -> NOW SELL\nACTION: SELL 70% LONG + FLIP TO SHORT 30% at {fmt(tp1_body)}\n🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(data.get('rebuy',0))} IN ~{d_flip:.1f} DAYS (AFAR {afar_info.get('shape','')})\nFLIP TO: SHORT -> RE-BUY AT {fmt(data.get('rebuy',0))}\nNext SELL: TP1 WICK {fmt(tp1_wick)} in ~{(d_tp1+1):.1f} days\nBTC {fmt(btc_price)} {btc_afar['shape'] if btc_afar else ''}")
+       tg(f"🔴 SELL TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/{d_tp1:.1f}\n🟢 BUY TO HERE was {fmt(entry)} -> NOW SELL\nACTION: SELL 70% LONG + FLIP TO SHORT 30% at {fmt(tp1_body)}\n🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(data.get('rebuy',0))} IN ~{d_flip:.1f} DAYS\nFLIP TO: SHORT -> RE-BUY AT {fmt(data.get('rebuy',0))}\nNext SELL: TP1 WICK {fmt(tp1_wick)}\nBTC {fmt(btc_price)} {btc_afar['shape'] if btc_afar else ''}")
    else:
-       tg(f"🟢 BUY TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)} Day {days_held:.1f}/{d_tp1:.1f}\n🔴 SELL TO HERE was {fmt(entry)}\nACTION: BUY 70% SHORT + FLIP TO LONG 30% at {fmt(tp1_body)}\n🟢 BUY FROM {fmt(tp1_body)} UP TO {fmt(data.get('rebuy',0))}\nFLIP TO: LONG\nNext: TP1 WICK {fmt(tp1_wick)}\nBTC {fmt(btc_price)}")
+       tg(f"🟢 BUY TO HERE: {sym.replace('_USDT','USDT')} TP1 BODY HIT {fmt(p)}")
   if not data.get("tp1_wick_hit") and ((is_buy and p>=tp1_wick) or (not is_buy and p<=tp1_wick)):
    data["tp1_wick_hit"]=True;data["sl"]=tp1_body;save_a()
    if is_buy:
-       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)} +6% over body AFAR {afar_info.get('shape','')}\n🔴 SELL TO HERE: CLOSE 30% RUNNER + FULL FLIP TO SHORT -> TARGET RE-BUY {fmt(data.get('rebuy',0))} DOWN FROM {fmt(tp1_wick)} IN ~{d_flip:.1f} DAYS\nFLIP TO: SHORT FOR {d_flip:.1f} DAYS\nBTC phase {btc_phase} {fmt(btc_price)}")
-   else:
-       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)}\n🟢 BUY TO HERE: CLOSE 30% RUNNER + FULL FLIP TO LONG -> TARGET {fmt(tp2_body)} UP FROM {fmt(tp1_wick)}\nFLIP TO: LONG\nBTC phase {btc_phase}")
+       tg(f"🔥 {sym.replace('_USDT','USDT')} TP1 WICK SURPASS {fmt(p)} BETA {BETA_MAP.get(sym,2.0)}x\n🔴 SELL TO HERE: CLOSE 30% RUNNER + FULL FLIP TO SHORT -> TARGET RE-BUY {fmt(data.get('rebuy',0))} DOWN FROM {fmt(tp1_wick)} IN ~{d_flip:.1f} DAYS")
   if not data.get("tp2_body_hit") and ((is_buy and p>=tp2_body) or (not is_buy and p<=tp2_body)):
    data["tp2_body_hit"]=True;data["sl"]=tp1_body;save_a()
    d_tp2 = calc_hold_days_dynamic(entry,tp2_body,atr)
-   tg(f"🟢 HOLD TO BREAKOUT: {sym.replace('_USDT','USDT')} TP2 BODY HIT {fmt(p)} Day {days_held:.1f}/{d_tp2:.1f}\nACTION: SELL 50% + SL TO TP1\n🟢 HOLD FROM {fmt(tp2_body)} TO {fmt(tp3)} - FLIP PAUSES AFTER BREAKOUT AFAR {afar_info.get('shape','')}")
-  if not data.get("tp2_wick_hit") and ((is_buy and p>=tp2_wick) or (not is_buy and p<=tp2_wick)):
-   data["tp2_wick_hit"]=True;save_a()
-   tg(f"🔥 {sym.replace('_USDT','USDT')} TP2 WICK SURPASS {fmt(p)} - AFAR MAJOR HIGH BROKEN\n🟢 HOLD FROM {fmt(tp2_body)} TO {fmt(tp3)} - CLOSE 80% + FLIP SHORT IF BTC REJECTS at {fmt(btc_price)} - ELSE HOLD TO TP3")
+   tg(f"🟢 HOLD TO BREAKOUT: {sym.replace('_USDT','USDT')} TP2 BODY HIT {fmt(p)} Day {days_held:.1f}/{d_tp2:.1f} BETA {BETA_MAP.get(sym,2.0)}x")
   if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
    data["tp3_hit"]=True;data["sl"]=tp2_body;save_a()
    d_tp3 = calc_hold_days_dynamic(entry,tp3,atr)
-   tg(f"✅ {sym.replace('_USDT','USDT')} TP3 AFAR MONTHLY WIN {fmt(p)} Day {days_held:.1f}/{d_tp3:.1f} - STOP FLIPPING, HOLD RUNNER FOR MONTHS {afar_info.get('shape','')}\n🔴 NO MORE SELL FLIPS till crash")
-   if data.get("runner_days",0)>30:
-    STATS["wins"]+=1;save_s();ACTIVE.pop(sym,None);save_a()
-   continue
-  if data.get("tp2_body_hit"): data["runner_days"]=data.get("runner_days",0)+0.25;save_a()
+   tg(f"✅ {sym.replace('_USDT','USDT')} TP3 AFAR MONTHLY WIN {fmt(p)} Day {days_held:.1f}/{d_tp3:.1f} BETA {BETA_MAP.get(sym,2.0)}x")
  if len(ACTIVE)>=MAX_ACTIVE:print(f"MAX ACTIVE {len(ACTIVE)}");return
  cands=[]
  for sym in SYMBOLS:
@@ -286,95 +314,70 @@ def scan():
     if checks_str!="0/5":print(f"⚪ WAIT {sym} {checks_str} {missing} | {reason}")
     continue
    if direction=="BUY" and sym!="BTC_USDT" and not btc_allows_longs:
-       print(f"🚫 SKIP {sym} BUY blocked by BTC AFAR {fmt(btc_price)} < {BTC_FAKE_LOW} - OVERALL SELL MODE")
+       print(f"🚫 SKIP {sym} BUY blocked by BTC AFAR {fmt(btc_price)} < {BTC_FAKE_LOW}")
        continue
    atr = afar["atr"]
-   # PATCHED SL LOGIC - MUST BE BELOW ENTRY FOR LONG, ABOVE FOR SHORT
    if direction=="BUY":
     sl_raw=afar["major_low"]*0.95 if afar["major_low"]>0 else min(d15["l"][-10:])*0.97
     sl = sl_raw if sl_raw < live*0.99 else live*0.97
-    # If still invalid, force 3% below
     if sl >= live: sl = live*0.97
-    tp1_body=afar["mid"] if afar["mid"]>live else afar["major_high_2"]
-    tp1_wick=afar["major_high_2"]*1.02 if afar["major_high_2"]>0 else tp1_body*1.06
-    tp2_body=afar["major_high"];tp2_wick=afar["major_high"]*1.05
-    range_hl = afar["major_high"]-afar["major_low"];tp3=afar["major_high"] + range_hl*0.6
+    tp1_body,tp1_wick,tp2_body,tp2_wick,tp3 = aligned_tp_calculation(sym, live, btc_price, btc_afar, afar, "BUY")
     rebuy_low=afar["major_low_2"] if afar["major_low_2"]>0 else afar["major_low"]
     if rebuy_low >= tp1_body: rebuy_low = afar["major_low"]
-    w_high=afar["major_high"]; w_low=afar["major_low"]; m_high=afar["major_high"]; m_low=afar["major_low"]
-    w_body_high=afar["major_high_2"]; w_body_low=afar["major_low_2"]
    else:
     sl_raw=afar["major_high"]*1.05 if afar["major_high"]>0 else max(d15["h"][-10:])*1.03
     sl = sl_raw if sl_raw > live*1.01 else live*1.03
     if sl <= live: sl = live*1.03
-    tp1_body=afar["mid"];tp1_wick=afar["major_low_2"]*0.98
-    tp2_body=afar["major_low"];tp2_wick=afar["major_low"]*0.95
-    tp3=afar["major_low"] - (afar["major_high"]-afar["major_low"])*0.6
+    tp1_body,tp1_wick,tp2_body,tp2_wick,tp3 = aligned_tp_calculation(sym, live, btc_price, btc_afar, afar, "SELL")
     rebuy_low=afar["major_high_2"]
-    w_high=afar["major_high"]; w_low=afar["major_low"]; m_high=afar["major_high"]; m_low=afar["major_low"]
-    w_body_high=afar["major_high_2"]; w_body_low=afar["major_low_2"]
    risk=abs(live-sl)/live*100
    if risk>20:print(f"⚪ {sym} SL afar wide {risk:.1f}% skip");continue
    if risk<0.5:print(f"⚪ {sym} SL too tight {risk:.1f}% skip");continue
    reward=abs(tp1_body-live)/live*100;rr=reward/risk if risk>0 else 0
    d1_hold=calc_hold_days_dynamic(live,tp1_body,atr);d2_hold=calc_hold_days_dynamic(live,tp2_body,atr);d3_hold=calc_hold_days_dynamic(live,tp3,atr);d_flip=calc_hold_days_dynamic(tp1_body,rebuy_low,atr)
-   print(f"{'🟢' if direction=='BUY' else '🔴'} {direction} {sym} @ {fmt(live)} AFAR {afar['shape']} {afar['hl_seq']} H {fmt(afar['major_high'])}({afar['days_high']}d) L {fmt(afar['major_low'])}({afar['days_low']}d) MID {fmt(afar['mid'])} ATR {fmt(atr)} SL {fmt(sl)} TP1 {fmt(tp1_body)} {d1_hold:.1f}d TP2 {fmt(tp2_body)} {d2_hold:.1f}d RR {rr:.1f}")
-   cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str,w_body_high,w_body_low,afar,atr,rebuy_low,d1_hold,d2_hold,d3_hold,d_flip))
+   beta = BETA_MAP.get(sym,2.0)
+   print(f"{'🟢' if direction=='BUY' else '🔴'} {direction} {sym} @ {fmt(live)} BETA {beta}x AFAR {afar['shape']} H {fmt(afar['major_high'])}({afar['days_high']}d) L {fmt(afar['major_low'])}({afar['days_low']}d) SL {fmt(sl)} TP1 {fmt(tp1_body)} TP2 {fmt(tp2_body)} TP3 {fmt(tp3)} RR {rr:.1f}")
+   cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar["major_high"],afar["major_low"],afar["major_high"],afar["major_low"],reason,checks_str,afar["major_high_2"],afar["major_low_2"],afar,atr,rebuy_low,d1_hold,d2_hold,d3_hold,d_flip,beta))
   except Exception as e:print(f"EX {sym} {e}");continue
  cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
- for score,sym,dir,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str,w_body_high,w_body_low,afar,atr,rebuy_low,d1_hold,d2_hold,d3_hold,d_flip in cands:
+ for score,sym,dir,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str,w_body_high,w_body_low,afar,atr,rebuy_low,d1_hold,d2_hold,d3_hold,d_flip,beta in cands:
   is_buy=dir=="BUY";now_ts=time.time()
   def add_days(d): return datetime.fromtimestamp(now_ts, EAT) + timedelta(days=d)
-  ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1_body,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2":tp2_body,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"label":TAG,"type":sig_type,"score":score,"rr":rr,"checks":checks_str,"reason":reason,"ts":now_ts,"runner_days":0,"rebuy":rebuy_low,"afar":afar,"atr":atr,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip};save_a()
-  journal_log({"date":today,"time":get_time(),"coin":sym,"type":sig_type,"direction":dir,"score":score,"checks":checks_str,"entry":live,"sl":sl,"tp1":tp1_body,"tp2":tp2_body,"tp3":tp3,"rr":f"{rr:.1f}","btc_trend":f"{btc_trend}/{btc_phase} {fmt(btc_price)} AFAR {afar['shape']} {afar['hl_seq']}","reason":reason,"result":"OPEN","pnl":"","missing":""})
+  ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1_body,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2":tp2_body,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"label":TAG,"type":sig_type,"score":score,"rr":rr,"checks":checks_str,"reason":reason,"ts":now_ts,"runner_days":0,"rebuy":rebuy_low,"afar":afar,"atr":atr,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"beta":beta};save_a()
+  journal_log({"date":today,"time":get_time(),"coin":sym,"type":sig_type,"direction":dir,"score":score,"checks":checks_str,"entry":live,"sl":sl,"tp1":tp1_body,"tp2":tp2_body,"tp3":tp3,"rr":f"{rr:.1f}","btc_trend":f"{btc_trend}/{btc_phase} {fmt(btc_price)} AFAR {afar['shape']} {afar['hl_seq']} BETA {beta}x","reason":reason,"result":"OPEN","pnl":"","missing":""})
   if is_buy:
-      btc_lead = f"BTC AFAR {btc_afar['shape']} {btc_afar['hl_seq']} {fmt(btc_afar['major_low'])}->{fmt(btc_price)}" if btc_afar else ""
+      btc_lead = f"BTC AFAR {btc_afar['shape']} {btc_afar['hl_seq']} {fmt(btc_afar['major_low'])}->{fmt(btc_price)} BETA {beta}x" if btc_afar else f"BETA {beta}x"
       tg(
           f"🟢 BUY {sym.replace('_USDT','USDT')} | {TAG}\n"
           f"{reason}\n"
-          f"🔭 AFAR {afar['shape']} | H {fmt(afar['major_high'])} {afar['days_high']}d ago Body {fmt(afar['major_high_2'])} | L {fmt(afar['major_low'])} {afar['days_low']}d ago Body {fmt(afar['major_low_2'])} | ATR {fmt(atr)} | SEQ {afar['hl_seq']}\n"
+          f"🔭 AFAR {afar['shape']} | H {fmt(afar['major_high'])} {afar['days_high']}d ago Body {fmt(afar['major_high_2'])} | L {fmt(afar['major_low'])} {afar['days_low']}d ago Body {fmt(afar['major_low_2'])} | ATR {fmt(atr)} | SEQ {afar['hl_seq']} | BETA {beta}x BTC\n"
           f"{btc_lead}\n"
           f"\n"
           f"🟢 BUY FROM HERE:\n"
           f"BUY AT {fmt(live)} | SL {fmt(sl)} (AFAR Low {afar['days_low']}d)\n"
-          f"HOLD {d1_hold:.1f} DAYS TO {fmt(tp1_body)} ~ {add_days(d1_hold).strftime('%b %d')}\n"
+          f"HOLD {d1_hold:.1f} DAYS TO {fmt(tp1_body)} ~ {add_days(d1_hold).strftime('%b %d')} (BTC {fmt(btc_afar['mid']) if btc_afar else ''})\n"
           f"\n"
           f"🔴 SELL FROM HERE TO HERE:\n"
           f"SELL FROM {fmt(tp1_body)} DOWN TO {fmt(rebuy_low)}\n"
           f"→ SELL 70% AT {fmt(tp1_body)} = PROFIT\n"
           f"→ FLIP TO SHORT 30% AT {fmt(tp1_body)}\n"
-          f"→ COVER SHORT + RE-BUY LONG AT {fmt(rebuy_low)} IN ~{d_flip:.1f} DAYS (AFAR mid)\n"
+          f"→ COVER SHORT + RE-BUY LONG AT {fmt(rebuy_low)} IN ~{d_flip:.1f} DAYS\n"
           f"\n"
           f"🔴 SECOND SELL FROM HERE TO HERE:\n"
-          f"SELL FROM {fmt(tp1_body)} UP TO {fmt(tp2_body)} (AFAR Major High {afar['days_high']}d ago)\n"
+          f"SELL FROM {fmt(tp1_body)} UP TO {fmt(tp2_body)} (AFAR Major High {afar['days_high']}d ago) WICK {fmt(tp2_wick)} = GRASS 0.9 CHART TOP\n"
           f"→ SELL 30% RUNNER AT {fmt(tp2_body)} ~ {add_days(d2_hold).strftime('%b %d')} Day {d2_hold:.1f}\n"
           f"→ FULL FLIP TO SHORT AT {fmt(tp2_body)} DOWN TO {fmt(rebuy_low)} ~{calc_hold_days_dynamic(tp2_body,rebuy_low,atr):.1f} DAYS\n"
           f"\n"
           f"🟢 HOLD LONG:\n"
-          f"FROM {fmt(rebuy_low)} TO {fmt(tp3)}\n"
+          f"FROM {fmt(rebuy_low)} TO {fmt(tp3)} = BTC 109K BREAKOUT = GRASS 1.18 BREAKOUT PAST 0.9\n"
           f"→ HOLD TO {fmt(tp2_body)} ~ {add_days(d2_hold).strftime('%b %d')} Day {d2_hold:.1f}\n"
           f"→ HOLD TO {fmt(tp3)} BREAKOUT ~ {add_days(d3_hold).strftime('%b %d')} Day {d3_hold:.1f} STOP FLIPPING\n"
           f"→ IF {fmt(rebuy_low)} BREAKS = LH AFTER HH = FINAL PEAK REVERSAL = OVERALL SELL\n"
           f"\n"
-          f"RR {rr:.1f} BTC {fmt(btc_price)}"
+          f"RR {rr:.1f} BTC {fmt(btc_price)} BETA {beta}x"
       )
   else:
-      tg(
-          f"🔴 SELL {sym.replace('_USDT','USDT')} | {TAG}\n"
-          f"{reason}\n"
-          f"🔭 AFAR {afar['shape']} H {fmt(afar['major_high'])} L {fmt(afar['major_low'])} SEQ {afar['hl_seq']}\n"
-          f"\n"
-          f"🔴 SELL FROM HERE:\n"
-          f"SELL AT {fmt(live)} | SL {fmt(sl)}\n"
-          f"HOLD {d1_hold:.1f} DAYS TO {fmt(tp1_body)}\n"
-          f"\n"
-          f"🟢 BUY FROM HERE TO HERE:\n"
-          f"BUY FROM {fmt(tp1_body)} UP TO {fmt(w_high)}\n"
-          f"→ BUY 70% AT {fmt(tp1_body)} = PROFIT + FLIP TO LONG IN ~{d_flip:.1f} DAYS\n"
-          f"→ COVER + RE-SELL AT {fmt(w_high)}\n"
-          f"\n"
-          f"RR {rr:.1f} BTC {fmt(btc_price)}"
-      )
+      tg(f"🔴 SELL {sym.replace('_USDT','USDT')} | {TAG}\n{reason}\n🔭 AFAR {afar['shape']} BETA {beta}x\nRR {rr:.1f} BTC {fmt(btc_price)}")
 if __name__=="__main__":
  if "--once" in sys.argv:scan()
  else:
