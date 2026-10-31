@@ -1,1 +1,248 @@
-{}
+{
+  "BTC_USDT": {
+    "entry": 77266.2,
+    "sl": 75220.05,
+    "tp1": 82023.5,
+    "tp1_body": 82023.5,
+    "tp1_wick": 85998.24,
+    "tp2": 84868.0,
+    "tp2_body": 84868.0,
+    "tp2_wick": 89111.40000000001,
+    "tp3": 88281.4,
+    "is_buy": true,
+    "label": "V200.7-BREAKDOWN-AFAR",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 2.325000610903412,
+    "checks": "3/5",
+    "reason": "FAKE LOW 77061.2000 < YL 77875.1000 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000 AFAR DESCENDING 90D",
+    "ts": 1793423280.6051846,
+    "runner_days": 0,
+    "rebuy": 79737.7,
+    "afar": {
+      "major_high": 84868.0,
+      "major_high_2": 84312.0,
+      "major_low": 79179.0,
+      "major_low_2": 79737.7,
+      "highs": [
+        {
+          "price": 84868.0,
+          "days_ago": 9,
+          "idx": 80
+        },
+        {
+          "price": 84312.0,
+          "days_ago": 18,
+          "idx": 71
+        },
+        {
+          "price": 87216.3,
+          "days_ago": 28,
+          "idx": 61
+        },
+        {
+          "price": 87378.8,
+          "days_ago": 39,
+          "idx": 50
+        }
+      ],
+      "lows": [
+        {
+          "price": 79179.0,
+          "days_ago": 6,
+          "idx": 83
+        },
+        {
+          "price": 79737.7,
+          "days_ago": 15,
+          "idx": 74
+        },
+        {
+          "price": 80350.0,
+          "days_ago": 22,
+          "idx": 67
+        },
+        {
+          "price": 82502.4,
+          "days_ago": 32,
+          "idx": 57
+        }
+      ],
+      "mid": 82023.5,
+      "days_high": 9,
+      "days_low": 6,
+      "shape": "DESCENDING 90D",
+      "atr": 2004.6785714285704,
+      "hl_seq": "32d HL \u2192 22d HL LH \u2192 "
+    },
+    "atr": 2004.6785714285704,
+    "d1_hold": 2.3730986442429343,
+    "d2_hold": 3.79202935989026,
+    "d3_hold": 5.494746218667048,
+    "d_flip": 1.1402326700040997
+  },
+  "GRASS_USDT": {
+    "entry": 0.5802,
+    "sl": 0.562794,
+    "tp1": 0.66795,
+    "tp1_body": 0.66795,
+    "tp1_wick": 0.9078,
+    "tp2": 0.7274,
+    "tp2_body": 0.7274,
+    "tp2_wick": 0.7637700000000001,
+    "tp3": 0.79874,
+    "is_buy": true,
+    "label": "V200.7-BREAKDOWN-AFAR",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 5.041365046535668,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.576300 < YL 0.583500 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000 AFAR TRIANGLE COILING 90D",
+    "ts": 1793423281.1190596,
+    "runner_days": 0,
+    "rebuy": 0.5536,
+    "afar": {
+      "major_high": 0.7274,
+      "major_high_2": 0.89,
+      "major_low": 0.6085,
+      "major_low_2": 0.5536,
+      "highs": [
+        {
+          "price": 0.7274,
+          "days_ago": 9,
+          "idx": 80
+        },
+        {
+          "price": 0.89,
+          "days_ago": 18,
+          "idx": 71
+        },
+        {
+          "price": 0.7958,
+          "days_ago": 26,
+          "idx": 63
+        },
+        {
+          "price": 0.8178,
+          "days_ago": 31,
+          "idx": 58
+        }
+      ],
+      "lows": [
+        {
+          "price": 0.6085,
+          "days_ago": 6,
+          "idx": 83
+        },
+        {
+          "price": 0.5536,
+          "days_ago": 12,
+          "idx": 77
+        },
+        {
+          "price": 0.5652,
+          "days_ago": 22,
+          "idx": 67
+        },
+        {
+          "price": 0.3015,
+          "days_ago": 45,
+          "idx": 44
+        }
+      ],
+      "mid": 0.66795,
+      "days_high": 9,
+      "days_low": 6,
+      "shape": "TRIANGLE COILING 90D",
+      "atr": 0.07429285714285716,
+      "hl_seq": "LL \u2192 LH \u2192 "
+    },
+    "atr": 0.07429285714285716,
+    "d1_hold": 1.1811364291895006,
+    "d2_hold": 1.981347947312758,
+    "d3_hold": 2.941601769060666,
+    "d_flip": 1.5391789251033559
+  },
+  "SENT_USDT": {
+    "entry": 0.01866,
+    "sl": 0.0181002,
+    "tp1": 0.02139,
+    "tp1_body": 0.02139,
+    "tp1_wick": 0.024990000000000002,
+    "tp2": 0.02327,
+    "tp2_body": 0.02327,
+    "tp2_wick": 0.0244335,
+    "tp3": 0.025526,
+    "is_buy": true,
+    "label": "V200.7-BREAKDOWN-AFAR",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 4.876741693461957,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.018560 < YL 0.019200 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000 AFAR DESCENDING 90D",
+    "ts": 1793423281.2980447,
+    "runner_days": 0,
+    "rebuy": 0.01816,
+    "afar": {
+      "major_high": 0.02327,
+      "major_high_2": 0.0245,
+      "major_low": 0.01951,
+      "major_low_2": 0.01816,
+      "highs": [
+        {
+          "price": 0.02327,
+          "days_ago": 3,
+          "idx": 86
+        },
+        {
+          "price": 0.0245,
+          "days_ago": 7,
+          "idx": 82
+        },
+        {
+          "price": 0.0237,
+          "days_ago": 11,
+          "idx": 78
+        },
+        {
+          "price": 0.02708,
+          "days_ago": 22,
+          "idx": 67
+        }
+      ],
+      "lows": [
+        {
+          "price": 0.01951,
+          "days_ago": 5,
+          "idx": 84
+        },
+        {
+          "price": 0.01816,
+          "days_ago": 15,
+          "idx": 74
+        },
+        {
+          "price": 0.01935,
+          "days_ago": 20,
+          "idx": 69
+        },
+        {
+          "price": 0.02031,
+          "days_ago": 28,
+          "idx": 61
+        }
+      ],
+      "mid": 0.02139,
+      "days_high": 3,
+      "days_low": 5,
+      "shape": "DESCENDING 90D",
+      "atr": 0.0019457142857142856,
+      "hl_seq": "28d HL \u2192 20d HL LH \u2192 "
+    },
+    "atr": 0.0019457142857142856,
+    "d1_hold": 1.4030837004405285,
+    "d2_hold": 2.3693098384728337,
+    "d3_hold": 3.528781204111601,
+    "d_flip": 1.6600587371512483
+  }
+}
