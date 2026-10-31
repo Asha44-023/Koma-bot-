@@ -100,7 +100,6 @@ def get_afar_levels(d1, lookback=90):
         major_high_2 = highs[1]["price"] if len(highs)>1 else major_high
         major_low = lows[0]["price"] if lows else min(l)
         major_low_2 = lows[1]["price"] if len(lows)>1 else major_low
-        # HL/HH/LH/LL sequence
         seq = ""
         try:
             if len(lows_recent)>=2:
@@ -157,16 +156,14 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar):
   if d15 and len(d15["c"])>10:
    if c15[-1]<min(d15["l"][-10:-5]):bos_bear=True
    if c15[-1]>max(d15["h"][-10:-5]):bos_bull=True
-  # ANTI-WICK CONTINUATION: Don't buy at HH wick, wait for HL after HH
   is_hh_top = False
   if afar and afar["highs"]:
       last_pivot_high = afar["highs"][0]["price"]
       if live > last_pivot_high*0.99 and live < last_pivot_high*1.03:
-          # At HH top - check if pulled back to HL zone
           if c15[-1] < last_pivot_high*0.98:
-              is_hh_top=False # pulled back, ok to buy HL
+              is_hh_top=False
           else:
-              is_hh_top=True # still at HH wick, skip
+              is_hh_top=True
   btc_ok_for_buy=True;btc_ok_for_sell=True
   if sweep_down and not is_hh_top:
    checks=0;missing=[]
@@ -230,7 +227,7 @@ def scan():
  if COOLDOWN.get("last_day")!=today:COOLDOWN["daily_pnl"]=0.0;COOLDOWN["last_day"]=today;save_c()
  btc_trend=get_btc_trend();btc_phase,btc_week_pct,btc_price,btc_d1,btc_afar=get_weekly_phase()
  print(f"\n--- {TAG} {get_time()} BTC:{btc_trend} {btc_phase} {btc_week_pct:.1f}% {fmt(btc_price)} AFAR:{btc_afar['shape'] if btc_afar else 'N/A'} ---")
- BTC_FAKE_LOW=74000 # AFAR LOW, not fixed 76K
+ BTC_FAKE_LOW=74000
  btc_allows_longs = btc_price > BTC_FAKE_LOW
  if not btc_allows_longs:print(f"⚠️ BTC {fmt(btc_price)} < AFAR LOW {BTC_FAKE_LOW} -> BLOCKING ALL ALT LONGS - OVERALL SELL")
  for sym,data in list(ACTIVE.items()):
@@ -292,35 +289,41 @@ def scan():
        print(f"🚫 SKIP {sym} BUY blocked by BTC AFAR {fmt(btc_price)} < {BTC_FAKE_LOW} - OVERALL SELL MODE")
        continue
    atr = afar["atr"]
+   # PATCHED SL LOGIC - MUST BE BELOW ENTRY FOR LONG, ABOVE FOR SHORT
    if direction=="BUY":
-    sl=afar["major_low"]*0.95 if afar["major_low"]>0 else min(d15["l"][-10:])*0.97
+    sl_raw=afar["major_low"]*0.95 if afar["major_low"]>0 else min(d15["l"][-10:])*0.97
+    sl = sl_raw if sl_raw < live*0.99 else live*0.97
+    # If still invalid, force 3% below
+    if sl >= live: sl = live*0.97
     tp1_body=afar["mid"] if afar["mid"]>live else afar["major_high_2"]
     tp1_wick=afar["major_high_2"]*1.02 if afar["major_high_2"]>0 else tp1_body*1.06
     tp2_body=afar["major_high"];tp2_wick=afar["major_high"]*1.05
     range_hl = afar["major_high"]-afar["major_low"];tp3=afar["major_high"] + range_hl*0.6
     rebuy_low=afar["major_low_2"] if afar["major_low_2"]>0 else afar["major_low"]
+    if rebuy_low >= tp1_body: rebuy_low = afar["major_low"]
     w_high=afar["major_high"]; w_low=afar["major_low"]; m_high=afar["major_high"]; m_low=afar["major_low"]
     w_body_high=afar["major_high_2"]; w_body_low=afar["major_low_2"]
-    emoji="🟢";color_code="\033[92m"
    else:
-    sl=afar["major_high"]*1.05 if afar["major_high"]>0 else max(d15["h"][-10:])*1.03
+    sl_raw=afar["major_high"]*1.05 if afar["major_high"]>0 else max(d15["h"][-10:])*1.03
+    sl = sl_raw if sl_raw > live*1.01 else live*1.03
+    if sl <= live: sl = live*1.03
     tp1_body=afar["mid"];tp1_wick=afar["major_low_2"]*0.98
     tp2_body=afar["major_low"];tp2_wick=afar["major_low"]*0.95
     tp3=afar["major_low"] - (afar["major_high"]-afar["major_low"])*0.6
     rebuy_low=afar["major_high_2"]
     w_high=afar["major_high"]; w_low=afar["major_low"]; m_high=afar["major_high"]; m_low=afar["major_low"]
     w_body_high=afar["major_high_2"]; w_body_low=afar["major_low_2"]
-    emoji="🔴";color_code="\033[91m"
    risk=abs(live-sl)/live*100
-   if risk>20:print(f"{emoji} {sym} SL afar wide {risk:.1f}% skip");continue
+   if risk>20:print(f"⚪ {sym} SL afar wide {risk:.1f}% skip");continue
+   if risk<0.5:print(f"⚪ {sym} SL too tight {risk:.1f}% skip");continue
    reward=abs(tp1_body-live)/live*100;rr=reward/risk if risk>0 else 0
    d1_hold=calc_hold_days_dynamic(live,tp1_body,atr);d2_hold=calc_hold_days_dynamic(live,tp2_body,atr);d3_hold=calc_hold_days_dynamic(live,tp3,atr);d_flip=calc_hold_days_dynamic(tp1_body,rebuy_low,atr)
-   print(f"{color_code}{emoji} {direction} {sym} @ {fmt(live)} AFAR {afar['shape']} {afar['hl_seq']} H {fmt(afar['major_high'])}({afar['days_high']}d) L {fmt(afar['major_low'])}({afar['days_low']}d) MID {fmt(afar['mid'])} ATR {fmt(atr)} SL {fmt(sl)} TP1 {fmt(tp1_body)} {d1_hold:.1f}d TP2 {fmt(tp2_body)} {d2_hold:.1f}d RR {rr:.1f}\033[0m")
+   print(f"{'🟢' if direction=='BUY' else '🔴'} {direction} {sym} @ {fmt(live)} AFAR {afar['shape']} {afar['hl_seq']} H {fmt(afar['major_high'])}({afar['days_high']}d) L {fmt(afar['major_low'])}({afar['days_low']}d) MID {fmt(afar['mid'])} ATR {fmt(atr)} SL {fmt(sl)} TP1 {fmt(tp1_body)} {d1_hold:.1f}d TP2 {fmt(tp2_body)} {d2_hold:.1f}d RR {rr:.1f}")
    cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str,w_body_high,w_body_low,afar,atr,rebuy_low,d1_hold,d2_hold,d3_hold,d_flip))
   except Exception as e:print(f"EX {sym} {e}");continue
  cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
  for score,sym,dir,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,w_high,w_low,m_high,m_low,reason,checks_str,w_body_high,w_body_low,afar,atr,rebuy_low,d1_hold,d2_hold,d3_hold,d_flip in cands:
-  is_buy=dir=="BUY";emoji="🟢" if is_buy else "🔴";now_ts=time.time()
+  is_buy=dir=="BUY";now_ts=time.time()
   def add_days(d): return datetime.fromtimestamp(now_ts, EAT) + timedelta(days=d)
   ACTIVE[sym]={"entry":live,"sl":sl,"tp1":tp1_body,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2":tp2_body,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"label":TAG,"type":sig_type,"score":score,"rr":rr,"checks":checks_str,"reason":reason,"ts":now_ts,"runner_days":0,"rebuy":rebuy_low,"afar":afar,"atr":atr,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip};save_a()
   journal_log({"date":today,"time":get_time(),"coin":sym,"type":sig_type,"direction":dir,"score":score,"checks":checks_str,"entry":live,"sl":sl,"tp1":tp1_body,"tp2":tp2_body,"tp3":tp3,"rr":f"{rr:.1f}","btc_trend":f"{btc_trend}/{btc_phase} {fmt(btc_price)} AFAR {afar['shape']} {afar['hl_seq']}","reason":reason,"result":"OPEN","pnl":"","missing":""})
