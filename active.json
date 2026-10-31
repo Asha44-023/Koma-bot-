@@ -1,1 +1,30 @@
-{}
+{
+  "VELVET_USDT": {
+    "entry": 0.05276,
+    "sl": 0.0479845,
+    "tp1": 0.0584,
+    "tp1_body": 0.0584,
+    "tp1_wick": 0.0717978,
+    "tp2": 0.073105,
+    "tp2_body": 0.073105,
+    "tp2_wick": 0.0746134,
+    "tp3": 0.08613,
+    "is_buy": true,
+    "label": "V200.6-CRASH-ALERT",
+    "type": "SWEEP_FAKE",
+    "score": 3,
+    "rr": 1.1810281645900946,
+    "checks": "3/5",
+    "reason": "FAKE LOW 0.052640 < YL 0.054440 3/5 PHASE WEEKLY_DUMP_ENDING BTC 77313.3000",
+    "ts": 1793418336.8602424,
+    "runner_days": 0,
+    "rebuy": 0.05516,
+    "holds": {
+      "tp1_body": "2026-11-03",
+      "tp1_wick": "2026-11-04",
+      "tp2_body": "2026-11-08",
+      "tp2_wick": "2026-11-09",
+      "breakout": "2026-11-11"
+    }
+  }
+}
