@@ -1,4 +1,4 @@
-name: Scan 8 Coins 15M V200.7 ALIGNED AFAR
+name: Scan 8 Coins 15M V200.7 BEST ROUNDED
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-8coins-v200-7-aligned-afar
+      group: scan-8coins-v200-7-best-rounded
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot V200.7 ALIGNED AFAR - FINAL
+      - name: Run bot V200.7 BEST ROUNDED - FINAL
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -44,7 +44,7 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.7-ALIGNED-AFAR ROUNDED DAYS ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.7-BEST-ROUNDED FINAL ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           for i in 1 2 3; do
             git pull --rebase --autostash && git push && break
             echo "Push failed, retry $i in 30s"
