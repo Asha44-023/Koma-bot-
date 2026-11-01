@@ -7,9 +7,9 @@ BETA_MAP={"BTC_USDT":1.0,"GRASS_USDT":2.5,"KOMA_USDT":2.2,"SENT_USDT":2.2,"SIREN
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
-MAX_ACTIVE=6;TOP_N_PER_SCAN=3
+MAX_ACTIVE=10;TOP_N_PER_SCAN=8
 session=requests.Session()
-TAG="V201.1-GREEN-RED-LIVE-FIXED"
+TAG="V200.7-ALIGNED-AFAR"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -68,24 +68,34 @@ def calc_atr(d1,period=14):
   for i in range(1,len(c)):tr.append(max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1])))
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
+
+# === V200.7 CORE FIX ===
 def get_afar_levels(d1, lookback=90):
  try:
   if not d1 or len(d1["h"]) < lookback: lookback = len(d1["h"])-5
   h=d1["h"][-lookback:]; l=d1["l"][-lookback:]
   highs=[]; lows=[]
   for i in range(3, len(h)-3):
-   if h[i] > max(h[i-3:i]) and h[i] > max(h[i+1:i+4]): highs.append({"price": h[i], "days_ago": len(h)-1 - i})
-   if l[i] < min(l[i-3:i]) and l[i] < min(l[i+1:i+4]): lows.append({"price": l[i], "days_ago": len(l)-1 - i})
+   if h[i] > max(h[i-3:i]) and h[i] > max(h[i+1:i+4]): highs.append({"price": h[i], "days_ago": len(h)-1 - i, "body": h[i]*0.98})
+   if l[i] < min(l[i-3:i]) and l[i] < min(l[i+1:i+4]): lows.append({"price": l[i], "days_ago": len(l)-1 - i, "body": l[i]*1.02})
   highs=sorted(highs, key=lambda x: x["days_ago"])[:4]; lows=sorted(lows, key=lambda x: x["days_ago"])[:4]
+  # Recent 20 bars for V200.7 SL (6d low)
+  h_recent=d1["h"][-20:]; l_recent=d1["l"][-20:]
+  recent_high = max(h_recent)
+  recent_low = min(l_recent)
+  # find days ago for recent
+  recent_low_days = 20 - l_recent.index(recent_low) -1
+  recent_high_days = 20 - h_recent.index(recent_high) -1
   mh=max(h); ml=min(l)
   major_high=highs[0]["price"] if highs else mh; major_high_2=highs[1]["price"] if len(highs)>1 else mh
   major_low=lows[0]["price"] if lows else ml; major_low_2=lows[1]["price"] if len(lows)>1 else ml
-  return {"major_high": major_high, "major_high_2": major_high_2, "major_low": major_low, "major_low_2": major_low_2, "mid": (major_high+major_low)/2, "shape": "RANGE", "atr": calc_atr(d1)}
+  return {"major_high": major_high, "major_high_2": major_high_2, "major_low": major_low, "major_low_2": major_low_2, "recent_high": recent_high, "recent_low": recent_low, "recent_low_days": recent_low_days, "recent_high_days": recent_high_days, "highs": highs, "lows": lows, "mid": (major_high+major_low)/2, "shape": "RANGE", "atr": calc_atr(d1)}
  except:return None
+
 def calc_hold_days_dynamic(entry, target, atr):
  if atr==0 or atr is None: atr = abs(entry-target)/3.5 if target else entry*0.03
  dist=abs(target-entry); days=dist/atr if atr>0 else 3.5
- return int(max(1, min(round(days), 30)))
+ return int(max(1, min(round(days,1), 30)))
 def get_daily_levels(d1): return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2,float(d1["h"][-2])-float(d1["l"][-2])
 def get_weekly_phase():
  try:
@@ -98,7 +108,7 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar):
   y_high,y_low,y_mid,y_range=get_daily_levels(d1)
   h15=d15["h"];l15=d15["l"];c15=d15["c"]
   last_h=max(h15[-5:]);last_l=min(l15[-5:])
-  if last_l<y_low: return True,"BUY","SWEEP_FAKE",f"FAKE LOW {fmt(last_l)}",y_high,y_low,y_mid,"4/5",4,""
+  if last_l<y_low: return True,"BUY","SWEEP_FAKE",f"FAKE LOW {fmt(last_l)} < YL {fmt(y_low)}",y_high,y_low,y_mid,"4/5",4,""
   if last_h>y_high: return True,"SELL","SWEEP_FAKE",f"FAKE HIGH {fmt(last_h)}",y_high,y_low,y_mid,"4/5",4,""
   if c15[-1]>y_high and c15[-2]>y_high: return True,"BUY","BREAKOUT",f"BREAKOUT {fmt(y_high)}->{fmt(live)}",y_high,y_low,y_mid,"4/5",4,""
   return False,"","","",y_high,y_low,y_mid,"0/5",0,"no setup"
@@ -128,7 +138,6 @@ def aligned_tp_calculation(sym, live, btc_live, btc_afar, afar, direction):
   tp3=max(tp3, tp2*1.15)
   return tp1,tp1*1.06,tp2,tp2*1.08,tp3
  else:
-  # FIXED SELL - always below live
   btc_pct1=abs((btc_live-btc_mid)/btc_live) if btc_live>0 else 0.06
   btc_pct1=max(btc_pct1,0.04)
   tp1=live*(1-btc_pct1*beta)
@@ -168,18 +177,25 @@ def scan():
    ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar)
    if not ok:continue
    atr=afar["atr"]
+   # === V200.7 SL FIX - USE RECENT LOW NOT MAJOR LOW ===
    if direction=="BUY":
-    sl_raw=afar["major_low"]*0.95; sl=sl_raw if sl_raw < live*0.99 else live*0.97
+    sl_raw=afar["recent_low"]*0.97  # V200.7 - AFAR Low 6d
+    sl=sl_raw if sl_raw < live*0.99 else live*0.97
     tp1_body,tp1_wick,tp2_body,tp2_wick,tp3=aligned_tp_calculation(sym, live, btc_price, btc_afar, afar, "BUY")
-    rebuy_low=afar["major_low_2"] if afar["major_low_2"]>0 else afar["major_low"]; rebuy2=afar["major_low"]*0.98
+    rebuy_low=afar["recent_low"]; rebuy2=afar["major_low"]*0.98
    else:
-    sl_raw=afar["major_high"]*1.05; sl=sl_raw if sl_raw > live*1.01 else live*1.03
+    sl_raw=afar["recent_high"]*1.03
+    sl=sl_raw if sl_raw > live*1.01 else live*1.03
     tp1_body,tp1_wick,tp2_body,tp2_wick,tp3=aligned_tp_calculation(sym, live, btc_price, btc_afar, afar, "SELL")
-    rebuy_low=afar["major_high_2"]; rebuy2=afar["major_high"]
+    rebuy_low=afar["recent_high"]; rebuy2=afar["major_high"]
    risk=abs(live-sl)/live*100
-   if risk>20 or risk<0.5:continue
+   if risk>10 or risk<0.5:continue  # V200.7 filter 10% not 20%
    reward=abs(tp1_body-live)/live*100;rr=reward/risk if risk>0 else 0
-   d1_hold=int(calc_hold_days_dynamic(live,tp1_body,atr));d2_hold=int(calc_hold_days_dynamic(live,tp2_body,atr));d3_hold=int(calc_hold_days_dynamic(live,tp3,atr));d_flip=int(calc_hold_days_dynamic(tp1_body,rebuy_low,atr));d_flip2=int(calc_hold_days_dynamic(tp2_body,rebuy2,atr))
+   d1_hold=round(abs(tp1_body-live)/atr,1) if atr>0 else 1.2
+   d2_hold=round(abs(tp2_body-live)/atr,1) if atr>0 else 2.5
+   d3_hold=round(abs(tp3-live)/atr,1) if atr>0 else 4.5
+   d_flip=round(abs(tp1_body-rebuy_low)/atr,1) if atr>0 else 1
+   d_flip2=round(abs(tp2_body-rebuy2)/atr,1) if atr>0 else 2
    cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,BETA_MAP.get(sym,2.0),reason,checks_str))
   except Exception as e:print(f"EX {sym} {e}");continue
  cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
@@ -188,28 +204,15 @@ def scan():
    entry=live;is_buy=dir=="BUY"
    ACTIVE[sym]={"entry":entry,"sl":sl,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"ts":time.time(),"rr":rr,"afar":{"shape":afar["shape"]},"atr":atr,"rebuy":rebuy_low,"rebuy2":rebuy2,"beta":beta,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"d_flip2":d_flip2}
    save_a()
-   if is_buy:
-    msg=(f"🟢 BUY TO HERE: {sym} {dir} {sig_type} LIVE {fmt(live)}\n"
-         f"🟢 BUY AT {fmt(entry)}\n"
-         f"✅ Take profit at {fmt(tp1_body)} HOLD {d1_hold} DAYS\n"
-         f"🔴 SELL FROM {fmt(tp1_body)} TO {fmt(rebuy_low)} IN {d_flip} DAYS\n"
-         f"🟢 BUY BACK AT {fmt(rebuy_low)} TO {fmt(tp2_body)} HOLD {d2_hold} DAYS\n"
-         f"✅ Take profit at {fmt(tp2_body)}\n"
-         f"🔴 SELL FROM {fmt(tp2_body)} TO {fmt(rebuy2)} IN {d_flip2} DAYS\n"
-         f"🟢 BUY BACK AT {fmt(rebuy2)} TO FINAL {fmt(tp3)} HOLD {d3_hold} DAYS\n"
-         f"🏁 FINAL CLOSE AT {fmt(tp3)}\n"
-         f"SL {fmt(sl)} RR {rr:.1f} {checks_str}")
-   else:
-    msg=(f"🔴 SELL TO HERE: {sym} {dir} {sig_type} LIVE {fmt(live)}\n"
-         f"🔴 SELL AT {fmt(entry)}\n"
-         f"✅ Take profit at {fmt(tp1_body)} HOLD {d1_hold} DAYS\n"
-         f"🟢 BUY FROM {fmt(tp1_body)} TO {fmt(rebuy_low)} IN {d_flip} DAYS\n"
-         f"🔴 SELL BACK AT {fmt(rebuy_low)} TO {fmt(tp2_body)} HOLD {d2_hold} DAYS\n"
-         f"✅ Take profit at {fmt(tp2_body)}\n"
-         f"🟢 BUY FROM {fmt(tp2_body)} TO {fmt(rebuy2)} IN {d_flip2} DAYS\n"
-         f"🔴 SELL BACK AT {fmt(rebuy2)} TO FINAL {fmt(tp3)} HOLD {d3_hold} DAYS\n"
-         f"🏁 FINAL CLOSE AT {fmt(tp3)}\n"
-         f"SL {fmt(sl)} RR {rr:.1f} {checks_str}")
+   # Restore V200.7 detailed format
+   btc_str=f"{fmt(btc_price)}"
+   msg=(f"🟢 BUY {sym} | {TAG}\n"
+        f"{reason} {checks_str} PHASE {btc_phase} BTC {btc_str} AFAR {afar['shape']} 90D\n"
+        f"🔭 AFAR {afar['shape']} 90D | H {fmt(afar['major_high'])} {afar.get('recent_high_days',9)}d ago | L {fmt(afar['recent_low'])} {afar.get('recent_low_days',6)}d ago | ATR {afar['atr']:.6f} | BETA {beta}x BTC\n"
+        f"🟢 BUY FROM HERE:\nBUY AT {fmt(entry)} | SL {fmt(sl)} (AFAR Low {afar.get('recent_low_days',6)}d)\n"
+        f"HOLD {d1_hold} DAYS TO {fmt(tp1_body)}\n"
+        f"🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(rebuy_low)}\n"
+        f"🔴 SECOND SELL TO {fmt(tp2_body)} (Major High) -> FINAL {fmt(tp3)}\nRR {rr:.1f}")
    tg(msg); print(msg)
   except Exception as e:print(f"SAVE EX {e}");continue
 
