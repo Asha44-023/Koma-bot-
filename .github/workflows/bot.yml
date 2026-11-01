@@ -1,4 +1,4 @@
-name: Scan 8 Coins 15M V200.8 WHALE LITE PERPS
+name: Scan 8 Coins 15M V200.8 WHALE SENSITIVE PERPS
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-8coins-v200-8-whale-lite-perps
+      group: scan-8coins-v200-8-whale-sensitive-perps
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot V200.8 WHALE LITE PERPS
+      - name: Run bot V200.8 WHALE SENSITIVE PERPS
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -44,6 +44,6 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.8-WHALE-PERPS ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.8-SENSITIVE ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           git pull --rebase --autostash
           git push
