@@ -9,7 +9,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 MAX_ACTIVE=10;TOP_N_PER_SCAN=8
 session=requests.Session()
-TAG="V200.8-WHALE-SENSITIVE-PERPS"
+TAG="V200.9-SAFE-CONFLUENCE"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -59,15 +59,17 @@ def detect_wick_grab(d):
         if not d or len(d["c"])<2: return None
         o,h,l,c = d["o"][-1], d["h"][-1], d["l"][-1], d["c"][-1]
         body = abs(c - o)
-        if body==0: body = c*0.0003
+        if body < c*0.00025: body = c*0.00025
         lower = min(o,c) - l
         upper = h - max(o,c)
         lower_pct = lower / c if c else 0
         upper_pct = upper / c if c else 0
-        threshold = 0.0012 if c>1000 else 0.0035
-        if lower > body*1.6 and lower_pct > threshold:
+        # BALANCED - not too sensitive
+        threshold = 0.0015 if c>1000 else 0.0030
+        mult = 1.8
+        if lower > body*mult and lower_pct > threshold:
             return {"type":"GRAB_DOWN","wick":lower,"pct":lower_pct*100,"body":body,"note":f"Lower wick {lower_pct*100:.3f}% x{lower/body:.1f}"}
-        if upper > body*1.6 and upper_pct > threshold:
+        if upper > body*mult and upper_pct > threshold:
             return {"type":"GRAB_UP","wick":upper,"pct":upper_pct*100,"body":body,"note":f"Upper wick {upper_pct*100:.3f}% x{upper/body:.1f}"}
         return None
     except: return None
@@ -80,7 +82,7 @@ def get_mexc_perps_wall(symbol):
         bids = data.get("bids", [])[:20]
         asks = data.get("asks", [])[:20]
         if not bids or not asks:
-            return {"bias":"UNKNOWN","note":"no perps book"}
+            return {"bias":"UNKNOWN","note":"no perps book","imbalance":0}
         bid_vol = sum(float(b[1]) for b in bids)
         ask_vol = sum(float(a[1]) for a in asks)
         biggest_bid_qty = max(float(b[1]) for b in bids)
@@ -190,26 +192,41 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar, perps_wall,
   wall_bias = perps_wall.get("bias","")
   imbalance = perps_wall.get("imbalance",0)
   wick_type = wick_info["type"] if wick_info else None
+
+  # ===== SAFE CONFLUENCE LOGIC - NO BAD ENTRIES =====
+  # 5/5 = wick + fake level + whale wall same side
+  if wick_type=="GRAB_DOWN" and last_l<y_low and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and imbalance>20:
+      return True,"BUY","5/5 WHALE FAKE",f"GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))} < {fmt(y_low_r)} + {perps_wall['note']}",y_high,y_low,y_mid,"5/5 SAFE",5,""
+  if wick_type=="GRAB_UP" and last_h>y_high and wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] and imbalance<-20:
+      return True,"SELL","5/5 WHALE FAKE",f"GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))} > {fmt(y_high_r)} + {perps_wall['note']}",y_high,y_low,y_mid,"5/5 SAFE",5,""
+
+  # 4/5 = wick + wall same side (no fake needed)
+  if wick_type=="GRAB_DOWN" and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and imbalance>20:
+      return True,"BUY","4/5 WHALE GRAB",f"GRAB_DOWN {wick_info['note']} + {perps_wall['note']} => STRONG BUY",y_high,y_low,y_mid,"4/5 SAFE",4,""
+  if wick_type=="GRAB_UP" and wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] and imbalance<-20:
+      return True,"SELL","4/5 WHALE GRAB",f"GRAB_UP {wick_info['note']} + {perps_wall['note']} => STRONG SELL",y_high,y_low,y_mid,"4/5 SAFE",4,""
+
+  # 4/5 = wick + fake level (even if wall neutral)
   if wick_type=="GRAB_DOWN" and last_l<y_low:
-      return True,"BUY","PERPS_WHALe_FAKE",f"PERPS GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))} < YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"5/5 PERPS WHALE",5,""
+      return True,"BUY","4/5 FAKE GRAB",f"GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))} < {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"4/5 SAFE",4,""
   if wick_type=="GRAB_UP" and last_h>y_high:
-      return True,"SELL","PERPS_WHALe_FAKE",f"PERPS GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))} > YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"5/5 PERPS WHALE",5,""
-  if wick_type=="GRAB_DOWN":
-      if wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"]:
-          return True,"BUY","PERPS_GRAB",f"GRAB_DOWN {wick_info['note']} + {perps_wall['note']} => BUY REVERSAL",y_high,y_low,y_mid,"4/5 PERPS",4,""
-      return True,"BUY","GRAB",f"GRAB_DOWN {wick_info['note']} | {perps_wall['note']} => Wait BUY",y_high,y_low,y_mid,"3/5",3,""
-  if wick_type=="GRAB_UP":
-      if wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"]:
-          return True,"SELL","PERPS_GRAB",f"GRAB_UP {wick_info['note']} + {perps_wall['note']} => SELL REVERSAL",y_high,y_low,y_mid,"4/5 PERPS",4,""
-      return True,"SELL","GRAB",f"GRAB_UP {wick_info['note']} | {perps_wall['note']} => Wait SELL",y_high,y_low,y_mid,"3/5",3,""
-  if wall_bias=="BID_HEAVY" and last_l<y_low*1.005:
-      return True,"BUY","PERPS_IMBAL",f"BID HEAVY {imbalance:+.1f}% + near YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5 IMBAL",3,""
-  if wall_bias=="ASK_HEAVY" and last_h>y_high*0.995:
-      return True,"SELL","PERPS_IMBAL",f"ASK HEAVY {imbalance:+.1f}% + near YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5 IMBAL",3,""
-  if last_l<y_low: return True,"BUY","SWEEP_FAKE",f"FAKE LOW {fmt(round_level(last_l))} < YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
-  if last_h>y_high: return True,"SELL","SWEEP_FAKE",f"FAKE HIGH {fmt(round_level(last_h))} > YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
-  if c15[-1]>y_high and c15[-2]>y_high: return True,"BUY","BREAKOUT",f"BREAKOUT {fmt(y_high_r)}->{fmt(round_level(live))} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
-  return False,"","","",y_high,y_low,y_mid,"0/5",0,"no setup"
+      return True,"SELL","4/5 FAKE GRAB",f"GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))} > {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"4/5 SAFE",4,""
+
+  # BLOCK bad entries: wick alone without wall or fake = SKIP
+  if wick_type in ["GRAB_DOWN","GRAB_UP"]:
+      return False,"","","",y_high,y_low,y_mid,"0/5 BLOCKED - wick alone",0,"needs wall>20% or fake"
+
+  # 3/5 = wall + near YH/YL (no wick needed but needs proximity)
+  if wall_bias=="BID_HEAVY" and imbalance>25 and last_l<y_low*1.005:
+      return True,"BUY","3/5 WALL",f"BID HEAVY {imbalance:+.1f}% + near YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
+  if wall_bias=="ASK_HEAVY" and imbalance<-25 and last_h>y_high*0.995:
+      return True,"SELL","3/5 WALL",f"ASK HEAVY {imbalance:+.1f}% + near YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
+
+  # 3/5 = fake alone (classic)
+  if last_l<y_low*0.998: return True,"BUY","3/5 FAKE",f"FAKE LOW {fmt(round_level(last_l))} < YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
+  if last_h>y_high*1.002: return True,"SELL","3/5 FAKE",f"FAKE HIGH {fmt(round_level(last_h))} > YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
+
+  return False,"","","",y_high,y_low,y_mid,"0/5",0,"no confluence"
  except Exception as e:return False,"",f"ERR {e}","",0,0,0,"0/5",0,str(e)
 
 def get_btc_trend():
@@ -290,7 +307,7 @@ def scan():
    ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar, wall, wick)
    if not ok: 
        if wick or wall["bias"]!="NEUTRAL":
-           print(f"PERPS WATCH {sym} WICK:{wick} WALL:{wall}")
+           print(f"PERPS WATCH {sym} WICK:{wick['note'] if wick else None} WALL:{wall['note']} REASON:{missing}")
        continue
    atr=afar["atr"]
    if direction=="BUY":
@@ -323,7 +340,7 @@ def scan():
    entry=live;is_buy=dir=="BUY"
    ACTIVE[sym]={"entry":entry,"sl":sl,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"ts":time.time(),"rr":rr,"afar":{"shape":afar["shape"],"month_line":afar["month_line"],"hl_seq":afar["hl_seq"]},"atr":atr,"rebuy":rebuy_low,"rebuy2":rebuy2,"beta":beta,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"d_flip2":d_flip2,"whale":wall,"wick":wick}
    save_a()
-   whale_emoji = "🐋" if "WHALE" in sig_type or "PERPS" in sig_type else "🐟"
+   whale_emoji = "🐋" if "WHALE" in sig_type else "🐟"
    msg=(f"{whale_emoji} {dir} {sym} | {TAG} | {sig_type}\n"
         f"{reason} {checks_str} PHASE {btc_phase} BTC {fmt(round_level(btc_price))}\n"
         f"📅 MONTH: {afar['month_line']}\n"
