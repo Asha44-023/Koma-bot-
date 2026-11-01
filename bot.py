@@ -9,7 +9,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 MAX_ACTIVE=10;TOP_N_PER_SCAN=8
 session=requests.Session()
-TAG="V200.8-WHALE-LITE-PERPS"
+TAG="V200.8-WHALE-SENSITIVE-PERPS"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -59,15 +59,15 @@ def detect_wick_grab(d):
         if not d or len(d["c"])<2: return None
         o,h,l,c = d["o"][-1], d["h"][-1], d["l"][-1], d["c"][-1]
         body = abs(c - o)
-        if body==0: body = c*0.0005
+        if body==0: body = c*0.0003
         lower = min(o,c) - l
         upper = h - max(o,c)
         lower_pct = lower / c if c else 0
         upper_pct = upper / c if c else 0
-        threshold = 0.002 if c>1000 else 0.006
-        if lower > body*2.0 and lower_pct > threshold:
+        threshold = 0.0012 if c>1000 else 0.0035
+        if lower > body*1.6 and lower_pct > threshold:
             return {"type":"GRAB_DOWN","wick":lower,"pct":lower_pct*100,"body":body,"note":f"Lower wick {lower_pct*100:.3f}% x{lower/body:.1f}"}
-        if upper > body*2.0 and upper_pct > threshold:
+        if upper > body*1.6 and upper_pct > threshold:
             return {"type":"GRAB_UP","wick":upper,"pct":upper_pct*100,"body":body,"note":f"Upper wick {upper_pct*100:.3f}% x{upper/body:.1f}"}
         return None
     except: return None
@@ -333,7 +333,7 @@ def scan():
         f"🟢 BUY FROM HERE:\nBUY AT {fmt(round_level(entry))} | SL {fmt(round_level(sl))}\n"
         f"HOLD {d1_hold:.0f} DAYS TO {fmt(tp1_body)} | WICK {fmt(tp1_wick)}\n"
         f"🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(rebuy_low)} IN {d_flip:.0f} DAYS\n"
-        f"RR {rr:.1f} | $20: $3 entry, SL {fmt(sl)}\n")
+        f"RR {rr:.1f} | Entry {fmt(round_level(entry))} SL {fmt(round_level(sl))} Size 10-15% capital\n")
    tg(msg); print(msg)
   except Exception as e:print(f"SAVE EX {e}");continue
 
