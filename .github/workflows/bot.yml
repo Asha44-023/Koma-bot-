@@ -1,4 +1,4 @@
-name: Scan 8 Coins 15M V200.7 BEST ROUNDED
+name: Scan 8 Coins 15M V200.8 WHALE LITE PERPS
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-8coins-v200-7-best-rounded
+      group: scan-8coins-v200-8-whale-lite-perps
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot V200.7 BEST ROUNDED - FINAL
+      - name: Run bot V200.8 WHALE LITE PERPS
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -39,11 +39,11 @@ jobs:
         run: |
           git config user.name "koma-bot"
           git config user.email "bot@koma.local"
-          git add active.json cooldown.json stats_v199.json trade_journal.csv || true
+          git add active.json cooldown.json || true
           if git diff --cached --quiet; then
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.7 ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.8-WHALE-PERPS ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           git pull --rebase --autostash
           git push
