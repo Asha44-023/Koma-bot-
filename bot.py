@@ -413,12 +413,17 @@ def scan():
   except Exception as e:print(f"TG EX {e}")
 
 if __name__=="__main__":
- while True:
-  try:
+ import sys
+ if "--once" in sys.argv:
    scan()
-  except Exception as e:
-   print(f"SCAN ERR {e}")
-   tg(f"SCAN ERR {e}")
-  sleep_sec = 900
-  print(f"--- SLEEP {sleep_sec}s {get_time()} ---")
-  time.sleep(sleep_sec)
+   print(f"--- DONE ONCE {get_time()} SLEEP 0 ---")
+ else:
+   while True:
+     try:
+       scan()
+     except Exception as e:
+       print(f"SCAN ERR {e}")
+       tg(f"SCAN ERR {e}")
+     sleep_sec = 900
+     print(f"--- SLEEP {sleep_sec}s {get_time()} ---")
+     time.sleep(sleep_sec)
