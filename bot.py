@@ -9,7 +9,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 MAX_ACTIVE=10;TOP_N_PER_SCAN=8
 session=requests.Session()
-TAG="V200.7-BEST-ROUNDED"
+TAG="V200.8-WHALE-LITE-PERPS"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -53,6 +53,53 @@ def tg(m):
  if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:print(m);return
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m},timeout=15)
  except:pass
+
+def detect_wick_grab(d):
+    try:
+        if not d or len(d["c"])<2: return None
+        o,h,l,c = d["o"][-1], d["h"][-1], d["l"][-1], d["c"][-1]
+        body = abs(c - o)
+        if body==0: body = c*0.0005
+        lower = min(o,c) - l
+        upper = h - max(o,c)
+        lower_pct = lower / c if c else 0
+        upper_pct = upper / c if c else 0
+        threshold = 0.002 if c>1000 else 0.006
+        if lower > body*2.0 and lower_pct > threshold:
+            return {"type":"GRAB_DOWN","wick":lower,"pct":lower_pct*100,"body":body,"note":f"Lower wick {lower_pct*100:.3f}% x{lower/body:.1f}"}
+        if upper > body*2.0 and upper_pct > threshold:
+            return {"type":"GRAB_UP","wick":upper,"pct":upper_pct*100,"body":body,"note":f"Upper wick {upper_pct*100:.3f}% x{upper/body:.1f}"}
+        return None
+    except: return None
+
+def get_mexc_perps_wall(symbol):
+    try:
+        url = f"https://contract.mexc.com/api/v1/contract/depth/{symbol}"
+        r = session.get(url, timeout=6, headers={"User-Agent":"Mozilla/5.0"}).json()
+        data = r.get("data", r)
+        bids = data.get("bids", [])[:20]
+        asks = data.get("asks", [])[:20]
+        if not bids or not asks:
+            return {"bias":"UNKNOWN","note":"no perps book"}
+        bid_vol = sum(float(b[1]) for b in bids)
+        ask_vol = sum(float(a[1]) for a in asks)
+        biggest_bid_qty = max(float(b[1]) for b in bids)
+        biggest_ask_qty = max(float(a[1]) for a in asks)
+        biggest_bid_price = float(bids[0][0])
+        biggest_ask_price = float(asks[0][0])
+        total = bid_vol + ask_vol
+        imbalance = (bid_vol - ask_vol) / total * 100 if total else 0
+        if biggest_bid_qty > bid_vol*0.30:
+            return {"bias":"WHALE_BUY_WALL","imbalance":imbalance,"bid_vol":bid_vol,"ask_vol":ask_vol,"note":f"PERPS BUY WALL {fmt(biggest_bid_qty)} contracts @ {fmt(biggest_bid_price)} | Imbal {imbalance:+.1f}%","price":biggest_bid_price}
+        if biggest_ask_qty > ask_vol*0.30:
+            return {"bias":"WHALE_SELL_WALL","imbalance":imbalance,"bid_vol":bid_vol,"ask_vol":ask_vol,"note":f"PERPS SELL WALL {fmt(biggest_ask_qty)} contracts @ {fmt(biggest_ask_price)} | Imbal {imbalance:+.1f}%","price":biggest_ask_price}
+        if imbalance > 25:
+            return {"bias":"BID_HEAVY","imbalance":imbalance,"bid_vol":bid_vol,"ask_vol":ask_vol,"note":f"PERPS BIDS heavy {imbalance:+.1f}% ({bid_vol:.0f} vs {ask_vol:.0f})"}
+        if imbalance < -25:
+            return {"bias":"ASK_HEAVY","imbalance":imbalance,"bid_vol":bid_vol,"ask_vol":ask_vol,"note":f"PERPS ASKS heavy {imbalance:+.1f}% ({bid_vol:.0f} vs {ask_vol:.0f})"}
+        return {"bias":"NEUTRAL","imbalance":imbalance,"bid_vol":bid_vol,"ask_vol":ask_vol,"note":f"Balanced {imbalance:+.1f}%"}
+    except Exception as e:
+        return {"bias":"ERR","note":str(e)[:80],"imbalance":0}
 
 def kl(symbol,interval):
  sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400};sec=sec_map.get(interval,300);end=int(time.time());start=end-sec*500
@@ -134,15 +181,34 @@ def get_weekly_phase():
   return "RANGE",week_change,c[-1],d1,get_afar_levels(d1,90)
  except:return "RANGE",0,77000,None,None
 
-def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar):
+def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar, perps_wall, wick_info):
  try:
   y_high,y_low,y_mid,y_range=get_daily_levels(d1)
   h15=d15["h"];l15=d15["l"];c15=d15["c"]
   last_h=max(h15[-5:]);last_l=min(l15[-5:])
   y_high_r=round_level(y_high); y_low_r=round_level(y_low)
-  if last_l<y_low: return True,"BUY","SWEEP_FAKE",f"FAKE LOW {fmt(round_level(last_l))} < YL {fmt(y_low_r)}",y_high,y_low,y_mid,"4/5",4,""
-  if last_h>y_high: return True,"SELL","SWEEP_FAKE",f"FAKE HIGH {fmt(round_level(last_h))} > YH {fmt(y_high_r)}",y_high,y_low,y_mid,"4/5",4,""
-  if c15[-1]>y_high and c15[-2]>y_high: return True,"BUY","BREAKOUT",f"BREAKOUT {fmt(y_high_r)}->{fmt(round_level(live))}",y_high,y_low,y_mid,"4/5",4,""
+  wall_bias = perps_wall.get("bias","")
+  imbalance = perps_wall.get("imbalance",0)
+  wick_type = wick_info["type"] if wick_info else None
+  if wick_type=="GRAB_DOWN" and last_l<y_low:
+      return True,"BUY","PERPS_WHALe_FAKE",f"PERPS GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))} < YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"5/5 PERPS WHALE",5,""
+  if wick_type=="GRAB_UP" and last_h>y_high:
+      return True,"SELL","PERPS_WHALe_FAKE",f"PERPS GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))} > YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"5/5 PERPS WHALE",5,""
+  if wick_type=="GRAB_DOWN":
+      if wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"]:
+          return True,"BUY","PERPS_GRAB",f"GRAB_DOWN {wick_info['note']} + {perps_wall['note']} => BUY REVERSAL",y_high,y_low,y_mid,"4/5 PERPS",4,""
+      return True,"BUY","GRAB",f"GRAB_DOWN {wick_info['note']} | {perps_wall['note']} => Wait BUY",y_high,y_low,y_mid,"3/5",3,""
+  if wick_type=="GRAB_UP":
+      if wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"]:
+          return True,"SELL","PERPS_GRAB",f"GRAB_UP {wick_info['note']} + {perps_wall['note']} => SELL REVERSAL",y_high,y_low,y_mid,"4/5 PERPS",4,""
+      return True,"SELL","GRAB",f"GRAB_UP {wick_info['note']} | {perps_wall['note']} => Wait SELL",y_high,y_low,y_mid,"3/5",3,""
+  if wall_bias=="BID_HEAVY" and last_l<y_low*1.005:
+      return True,"BUY","PERPS_IMBAL",f"BID HEAVY {imbalance:+.1f}% + near YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5 IMBAL",3,""
+  if wall_bias=="ASK_HEAVY" and last_h>y_high*0.995:
+      return True,"SELL","PERPS_IMBAL",f"ASK HEAVY {imbalance:+.1f}% + near YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5 IMBAL",3,""
+  if last_l<y_low: return True,"BUY","SWEEP_FAKE",f"FAKE LOW {fmt(round_level(last_l))} < YL {fmt(y_low_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
+  if last_h>y_high: return True,"SELL","SWEEP_FAKE",f"FAKE HIGH {fmt(round_level(last_h))} > YH {fmt(y_high_r)} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
+  if c15[-1]>y_high and c15[-2]>y_high: return True,"BUY","BREAKOUT",f"BREAKOUT {fmt(y_high_r)}->{fmt(round_level(live))} | {perps_wall['note']}",y_high,y_low,y_mid,"3/5",3,""
   return False,"","","",y_high,y_low,y_mid,"0/5",0,"no setup"
  except Exception as e:return False,"",f"ERR {e}","",0,0,0,"0/5",0,str(e)
 
@@ -218,16 +284,26 @@ def scan():
    if not live:continue
    afar=get_afar_levels(d1,90)
    if not afar:continue
-   ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar)
-   if not ok:continue
+   wick = detect_wick_grab(d15)
+   wall = get_mexc_perps_wall(sym)
+   time.sleep(0.2)
+   ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar, wall, wick)
+   if not ok: 
+       if wick or wall["bias"]!="NEUTRAL":
+           print(f"PERPS WATCH {sym} WICK:{wick} WALL:{wall}")
+       continue
    atr=afar["atr"]
    if direction=="BUY":
     sl_raw=afar["recent_low"]*0.97
+    if wick and wick["type"]=="GRAB_DOWN":
+        sl_raw = min(sl_raw, d15["l"][-1]*0.995)
     sl=round_level(sl_raw if sl_raw < live*0.99 else live*0.97)
     tp1_body,tp1_wick,tp2_body,tp2_wick,tp3=aligned_tp_calculation(sym, live, btc_price, btc_afar, afar, "BUY")
     rebuy_low=round_level(afar["recent_low"]); rebuy2=round_level(afar["major_low"]*0.98)
    else:
     sl_raw=afar["recent_high"]*1.03
+    if wick and wick["type"]=="GRAB_UP":
+        sl_raw = max(sl_raw, d15["h"][-1]*1.005)
     sl=round_level(sl_raw if sl_raw > live*1.01 else live*1.03)
     tp1_body,tp1_wick,tp2_body,tp2_wick,tp3=aligned_tp_calculation(sym, live, btc_price, btc_afar, afar, "SELL")
     rebuy_low=round_level(afar["recent_high"]); rebuy2=round_level(afar["major_high"])
@@ -239,24 +315,25 @@ def scan():
    d3_hold=calc_hold_days_dynamic(live, tp3, atr)
    d_flip=calc_hold_days_dynamic(tp1_body, rebuy_low, atr)
    d_flip2=calc_hold_days_dynamic(tp2_body, rebuy2, atr)
-   cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,BETA_MAP.get(sym,2.0),reason,checks_str))
+   cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,BETA_MAP.get(sym,2.0),reason,checks_str, wall, wick))
   except Exception as e:print(f"EX {sym} {e}");continue
  cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
- for score,sym,dir,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,beta,reason,checks_str in cands:
+ for score,sym,dir,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,beta,reason,checks_str, wall, wick in cands:
   try:
    entry=live;is_buy=dir=="BUY"
-   ACTIVE[sym]={"entry":entry,"sl":sl,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"ts":time.time(),"rr":rr,"afar":{"shape":afar["shape"],"month_line":afar["month_line"],"hl_seq":afar["hl_seq"]},"atr":atr,"rebuy":rebuy_low,"rebuy2":rebuy2,"beta":beta,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"d_flip2":d_flip2}
+   ACTIVE[sym]={"entry":entry,"sl":sl,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"ts":time.time(),"rr":rr,"afar":{"shape":afar["shape"],"month_line":afar["month_line"],"hl_seq":afar["hl_seq"]},"atr":atr,"rebuy":rebuy_low,"rebuy2":rebuy2,"beta":beta,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"d_flip2":d_flip2,"whale":wall,"wick":wick}
    save_a()
-   msg=(f"🟢 BUY {sym} | {TAG}\n"
+   whale_emoji = "🐋" if "WHALE" in sig_type or "PERPS" in sig_type else "🐟"
+   msg=(f"{whale_emoji} {dir} {sym} | {TAG} | {sig_type}\n"
         f"{reason} {checks_str} PHASE {btc_phase} BTC {fmt(round_level(btc_price))}\n"
         f"📅 MONTH: {afar['month_line']}\n"
         f"🔭 AFAR {afar['shape']} | SEQ {afar['hl_seq']} | ATR {fmt(round_level(atr))} | BETA {beta}x\n"
-        f"🟢 BUY FROM HERE:\nBUY AT {fmt(round_level(entry))} | SL {fmt(round_level(sl))} (AFAR Low {afar.get('recent_low_days',6)}d)\n"
+        f"🐋 PERPS WALL: {wall['note']}\n"
+        f"🕯️ WICK: {wick['note'] if wick else 'No grab'}\n"
+        f"🟢 BUY FROM HERE:\nBUY AT {fmt(round_level(entry))} | SL {fmt(round_level(sl))}\n"
         f"HOLD {d1_hold:.0f} DAYS TO {fmt(tp1_body)} | WICK {fmt(tp1_wick)}\n"
         f"🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(rebuy_low)} IN {d_flip:.0f} DAYS\n"
-        f"🔴 SECOND SELL FROM {fmt(tp1_body)} UP TO {fmt(tp2_body)} WICK {fmt(tp2_wick)} -> {fmt(tp3)} FINAL\n"
-        f"🟢 HOLD LONG FROM {fmt(rebuy_low)} TO {fmt(tp3)} = BREAKOUT PAST {fmt(tp2_body)}\n"
-        f"RR {rr:.1f} | D2 {d2_hold:.0f}D D3 {d3_hold:.0f}D")
+        f"RR {rr:.1f} | $20: $3 entry, SL {fmt(sl)}\n")
    tg(msg); print(msg)
   except Exception as e:print(f"SAVE EX {e}");continue
 
