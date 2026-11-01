@@ -9,17 +9,15 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 MAX_ACTIVE=6;TOP_N_PER_SCAN=3
 session=requests.Session()
-TAG="V201.0-GREEN-RED-LIVE"
+TAG="V201.1-GREEN-RED-LIVE-FIXED"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
  try:
-  import json
   with open(p,"r") as f:v=json.load(f);return v if isinstance(v,type(d)) else d
  except:return d
 def atomic_save(path,data):
- import tempfile,json,os
  d=os.path.dirname(os.path.abspath(path)) or ".";fd,tp=tempfile.mkstemp(dir=d,prefix=".tmp_")
  try:
   with os.fdopen(fd,"w") as f:json.dump(data,f,indent=2);f.flush();os.fsync(f.fileno());os.replace(tp,path)
@@ -124,13 +122,19 @@ def aligned_tp_calculation(sym, live, btc_live, btc_afar, afar, direction):
   btc_pct1=(btc_mid-btc_live)/btc_live if btc_live>0 else 0.06
   btc_pct2=(btc_h1-btc_live)/btc_live if btc_live>0 else 0.10
   btc_pct3=(btc_tp3-btc_live)/btc_live if btc_live>0 else 0.15
+  btc_pct1=max(btc_pct1,0.04); btc_pct2=max(btc_pct2,0.07)
   tp1=live*(1+btc_pct1*beta); tp2=live*(1+btc_pct2*beta); tp3=live*(1+btc_pct3*beta)
   if afar and afar["major_high"]>0: tp2=min(tp2, afar["major_high"]*1.10)
   tp3=max(tp3, tp2*1.15)
   return tp1,tp1*1.06,tp2,tp2*1.08,tp3
  else:
-  btc_pct1=(btc_live-btc_mid)/btc_live if btc_live>0 else 0.06
-  tp1=live*(1-btc_pct1*beta); tp2=live*(1-btc_pct1*1.6*beta); tp3=live*(1-btc_pct1*2.2*beta)
+  # FIXED SELL - always below live
+  btc_pct1=abs((btc_live-btc_mid)/btc_live) if btc_live>0 else 0.06
+  btc_pct1=max(btc_pct1,0.04)
+  tp1=live*(1-btc_pct1*beta)
+  tp2=live*(1-btc_pct1*1.6*beta)
+  tp3=live*(1-btc_pct1*2.2*beta)
+  tp1=min(tp1, live*0.96); tp2=min(tp2, tp1*0.94); tp3=min(tp3, tp2*0.90)
   return tp1,tp1*0.98,tp2,tp2*0.95,tp3
 
 def scan():
@@ -184,23 +188,34 @@ def scan():
    entry=live;is_buy=dir=="BUY"
    ACTIVE[sym]={"entry":entry,"sl":sl,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"ts":time.time(),"rr":rr,"afar":{"shape":afar["shape"]},"atr":atr,"rebuy":rebuy_low,"rebuy2":rebuy2,"beta":beta,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"d_flip2":d_flip2}
    save_a()
-   msg=(f"{'🟢 BUY TO HERE' if is_buy else '🔴 SELL TO HERE'}: {sym} {dir} {sig_type} LIVE {fmt(live)}\n"
-        f"🟢 BUY AT {fmt(entry)}\n"
-        f"✅ Take profit at {fmt(tp1_body)} HOLD {d1_hold} DAYS\n"
-        f"🔴 SELL FROM {fmt(tp1_body)} TO {fmt(rebuy_low)} IN {d_flip} DAYS\n"
-        f"🟢 BUY BACK AT {fmt(rebuy_low)} TO {fmt(tp2_body)} HOLD {d2_hold} DAYS\n"
-        f"✅ Take profit at {fmt(tp2_body)}\n"
-        f"🔴 SELL FROM {fmt(tp2_body)} TO {fmt(rebuy2)} IN {d_flip2} DAYS\n"
-        f"🟢 BUY BACK AT {fmt(rebuy2)} TO FINAL {fmt(tp3)} HOLD {d3_hold} DAYS\n"
-        f"🏁 FINAL CLOSE AT {fmt(tp3)}\n"
-        f"SL {fmt(sl)} RR {rr:.1f} {checks_str}")
+   if is_buy:
+    msg=(f"🟢 BUY TO HERE: {sym} {dir} {sig_type} LIVE {fmt(live)}\n"
+         f"🟢 BUY AT {fmt(entry)}\n"
+         f"✅ Take profit at {fmt(tp1_body)} HOLD {d1_hold} DAYS\n"
+         f"🔴 SELL FROM {fmt(tp1_body)} TO {fmt(rebuy_low)} IN {d_flip} DAYS\n"
+         f"🟢 BUY BACK AT {fmt(rebuy_low)} TO {fmt(tp2_body)} HOLD {d2_hold} DAYS\n"
+         f"✅ Take profit at {fmt(tp2_body)}\n"
+         f"🔴 SELL FROM {fmt(tp2_body)} TO {fmt(rebuy2)} IN {d_flip2} DAYS\n"
+         f"🟢 BUY BACK AT {fmt(rebuy2)} TO FINAL {fmt(tp3)} HOLD {d3_hold} DAYS\n"
+         f"🏁 FINAL CLOSE AT {fmt(tp3)}\n"
+         f"SL {fmt(sl)} RR {rr:.1f} {checks_str}")
+   else:
+    msg=(f"🔴 SELL TO HERE: {sym} {dir} {sig_type} LIVE {fmt(live)}\n"
+         f"🔴 SELL AT {fmt(entry)}\n"
+         f"✅ Take profit at {fmt(tp1_body)} HOLD {d1_hold} DAYS\n"
+         f"🟢 BUY FROM {fmt(tp1_body)} TO {fmt(rebuy_low)} IN {d_flip} DAYS\n"
+         f"🔴 SELL BACK AT {fmt(rebuy_low)} TO {fmt(tp2_body)} HOLD {d2_hold} DAYS\n"
+         f"✅ Take profit at {fmt(tp2_body)}\n"
+         f"🟢 BUY FROM {fmt(tp2_body)} TO {fmt(rebuy2)} IN {d_flip2} DAYS\n"
+         f"🔴 SELL BACK AT {fmt(rebuy2)} TO FINAL {fmt(tp3)} HOLD {d3_hold} DAYS\n"
+         f"🏁 FINAL CLOSE AT {fmt(tp3)}\n"
+         f"SL {fmt(sl)} RR {rr:.1f} {checks_str}")
    tg(msg); print(msg)
   except Exception as e:print(f"SAVE EX {e}");continue
 
 if __name__=="__main__":
  import sys
- if "--once" in sys.argv:
-  scan()
+ if "--once" in sys.argv: scan()
  else:
   while True:
    try: scan()
