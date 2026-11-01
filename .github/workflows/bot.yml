@@ -12,7 +12,7 @@ jobs:
       contents: write
     concurrency:
       group: scan-8coins-v200-7-best-rounded
-      cancel-in-progress: true  # <- CHANGE THIS from false to true
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,7 +35,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
 
-      - name: Save state (throttle-safe)
+      - name: Save state
         run: |
           git config user.name "koma-bot"
           git config user.email "bot@koma.local"
@@ -44,6 +44,6 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.7-BEST-ROUNDED FINAL ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.7 ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           git pull --rebase --autostash
           git push
