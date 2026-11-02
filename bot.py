@@ -9,7 +9,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
 MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
-TAG="V200.15-FIXED-COLOR-WHALE"
+TAG="V200.16-TACTICAL-DUAL"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -101,7 +101,7 @@ def map_btc_coordinates(btc_afar, btc_d1):
             elif is_ll: signal="BEAR_CONTINUE"; reason=f"Still LL {fmt(l1)}->{fmt(l2)} bear continue"
             elif is_hh and is_hl: signal="PUMP_STARTING"; reason=f"HH {fmt(h1)}->{fmt(h2)} + HL {fmt(l1)}->{fmt(l2)} bull start"
             else: signal="RANGE"; reason=f"Range H {fmt(h1)}->{fmt(h2)} L {fmt(l1)}->{fmt(l2)} filling liquidity"
-        return {"signal":signal,"reason":reason,"pattern":pattern,"coords":coords,"coord_text":coord_text,"entry_long":l2,"sl_long":l2*0.80,"entry_short":h2,"sl_short":h2*1.20}
+        return {"signal":signal,"reason":reason,"pattern":pattern,"coords":coords,"coord_text":coord_text,"entry_long":l2,"sl_long":l2*0.80,"entry_short":h2,"sl_short":h2*1.20,"major_low":l2,"major_high":h2}
     except Exception as e: return {"signal":"NO_MAP","reason":str(e)[:80],"pattern":"ERR","coord_text":"ERR"}
 
 def get_oi_funding(symbol):
@@ -221,44 +221,60 @@ def get_weekly_phase():
   d1=kl("BTC_USDT","Day1");c=d1["c"];week_change=(c[-1]-c[-8])/c[-8]*100 if c[-8]!=0 else 0;return "RANGE",week_change,c[-1],d1,get_afar_levels(d1,90)
  except:return "RANGE",0,77000,None,None
 
-# ===== FIXED DETECT 5CHECK =====
+# ===== V200.16 TACTICAL DUAL - CATCH 97K PUMP AND 65K DUMP =====
 def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,perps_wall,wick_info,third_algo,btc_map):
  try:
   y_high,y_low,y_mid,y_range=get_daily_levels(d1);h15=d15["h"];l15=d15["l"];last_h=max(h15[-5:]);last_l=min(l15[-5:]);y_high_r=round_level(y_high);y_low_r=round_level(y_low)
-  wall_bias=perps_wall.get("bias","");imbalance=perps_wall.get("imbalance",0);wick_type=wick_info["type"] if wick_info else None;third_ok=third_algo.get("ok",True);third_msg=third_algo.get("msg","");btc_signal=btc_map.get("signal","NO_MAP") if btc_map else "NO_MAP";btc_pat=btc_map.get("pattern","NONE")
+  major_low=afar.get("major_low",y_low);major_high=afar.get("major_high",y_high)
+  wall_bias=perps_wall.get("bias","");imbalance=perps_wall.get("imbalance",0);wick_type=wick_info["type"] if wick_info else None;third_ok=third_algo.get("ok",True);third_msg=third_algo.get("msg","");btc_signal=btc_map.get("signal","NO_MAP") if btc_map else "NO_MAP";btc_pat=btc_map.get("pattern","NONE") if btc_map else "NONE"
   if not third_ok:return False,"","","",y_high,y_low,y_mid,f"BLOCKED 3RD {third_msg}",0,third_msg
   def wall_ok(dir,bias):
       if dir=="BUY" and bias=="WHALE_SELL_WALL": return False
       if dir=="SELL" and bias=="WHALE_BUY_WALL": return False
       return True
-  is_btc_bottom = btc_signal in ["BOTTOM_FORMING","BUY_IN_BEAR","PUMP_STARTING","DOUBLE_BOTTOM"] or "BOTTOM" in btc_pat or btc_pat=="INV_H&S_BOTTOM"
+  is_btc_bottom = btc_signal in ["BOTTOM_FORMING","BUY_IN_BEAR","PUMP_STARTING","DOUBLE_BOTTOM","BOTTOM"] or "BOTTOM" in btc_pat or btc_pat=="INV_H&S_BOTTOM"
   is_btc_top = btc_signal in ["TOP_FORMING","DUMP_STARTING","DOUBLE_TOP"] or "TOP" in btc_pat or btc_pat=="HEAD_SHOULDERS_TOP"
+  is_breakdown = live < major_low * 0.95
+  is_bear_trap_zone = live < major_low * 0.99 and live > major_low * 0.95
+  is_breakout_zone = live > y_high * 1.002
+
+  if is_breakdown and wall_bias in ["ASK_HEAVY","WHALE_SELL_WALL"] and imbalance < -20:
+      return True,"SELL","BREAKDOWN 65K",f"BREAKDOWN {fmt(live)} < major_low {fmt(major_low)}*0.95 + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} -> 65k DUMP",y_high,y_low,y_mid,"BREAKDOWN SELL to 65k",5,""
+
+  if is_bear_trap_zone and wick_type=="GRAB_DOWN" and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and imbalance>20:
+      return True,"BUY","BEAR TRAP 97K",f"BEAR TRAP {fmt(live)} in zone {fmt(major_low*0.95)}-{fmt(major_low*0.99)} GRAB {wick_info['note']} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BULL to 97k",y_high,y_low,y_mid,"BEAR TRAP BOTTOM -> 97k",5,""
+
+  if is_breakout_zone and wall_bias in ["BID_HEAVY","WHALE_BUY_WALL"] and imbalance>20:
+      if is_btc_top:
+          return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC TOP blocks breakout BUY {btc_signal}",0,"BTC TOP"
+      return True,"BUY","BREAKOUT 97K",f"BREAKOUT {fmt(round_level(last_h))}> YH {fmt(y_high_r)} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BULL to 97k",y_high,y_low,y_mid,"BREAKOUT BUY to 97k",4,""
+
   if wick_type=="GRAB_DOWN" and last_l<y_low and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and imbalance>20:
       if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} TOP - BUY 5/5 blocked",0,f"BTC TOP blocks BUY"
       return True,"BUY","5/5 WHALE FAKE",f"GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))}<{fmt(y_low_r)} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BULL",y_high,y_low,y_mid,"5/5 BOTTOM",5,""
   if wick_type=="GRAB_UP" and last_h>y_high and wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] and imbalance<-20:
-      if is_btc_bottom: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} BOTTOM - SELL 5/5 blocked",0,f"BTC BOTTOM blocks SELL"
+      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} BOTTOM - SELL 5/5 blocked (no breakdown)",0,f"BTC BOTTOM blocks SELL"
       return True,"SELL","5/5 WHALE FAKE",f"GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))}>{fmt(y_high_r)} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BEAR",y_high,y_low,y_mid,"5/5 TOP",5,""
   if wick_type=="GRAB_DOWN" and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and imbalance>20:
       if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} TOP - BUY 4/5 blocked",0,"BTC TOP"
       return True,"BUY","4/5 WHALE GRAB",f"GRAB_DOWN {wick_info['note']} + {perps_wall['note']} + {third_msg} BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"4/5 BOTTOM",4,""
   if wick_type=="GRAB_UP" and wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] and imbalance<-20:
-      if is_btc_bottom: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} BOTTOM - SELL 4/5 blocked",0,"BTC BOTTOM"
+      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} BOTTOM - SELL 4/5 blocked",0,"BTC BOTTOM"
       return True,"SELL","4/5 WHALE GRAB",f"GRAB_UP {wick_info['note']} + {perps_wall['note']} + {third_msg} BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"4/5 TOP",4,""
   if wick_type=="GRAB_DOWN" and last_l<y_low:
       if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} TOP - BUY fake blocked",0,"BTC TOP"
       if not wall_ok("BUY",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH BUY but {wall_bias} {perps_wall['note']}",0,"wall mismatch"
       return True,"BUY","4/5 FAKE GRAB",f"GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))}<{fmt(y_low_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat}",y_high,y_low,y_mid,"4/5 BOTTOM",4,""
   if wick_type=="GRAB_UP" and last_h>y_high:
-      if is_btc_bottom: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL fake blocked",0,"BTC BOTTOM"
-      if not wall_ok("SELL",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH SELL but {wall_bias} {perps_wall['note']} is BUY WALL",0,"wall mismatch"
+      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL fake blocked",0,"BTC BOTTOM"
+      if not wall_ok("SELL",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH SELL but {wall_bias} {perps_wall['note']}",0,"wall mismatch"
       return True,"SELL","4/5 FAKE GRAB",f"GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))}>{fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat}",y_high,y_low,y_mid,"4/5 TOP",4,""
   if wick_type in ["GRAB_DOWN","GRAB_UP"]:return False,"","","",y_high,y_low,y_mid,"0/5 BLOCKED - wick alone",0,"needs wall>20% or fake"
-  if wall_bias=="BID_HEAVY" and imbalance>25 and last_l<y_low*1.005:
+  if wall_bias in ["BID_HEAVY","WHALE_BUY_WALL"] and imbalance>20 and last_l<y_low*1.005:
       if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} TOP - BUY 3/5 WALL blocked",0,"BTC TOP"
       return True,"BUY","3/5 WALL",f"BID HEAVY {imbalance:+.1f}% + near YL {fmt(y_low_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
-  if wall_bias=="ASK_HEAVY" and imbalance<-25 and last_h>y_high*0.995:
-      if is_btc_bottom: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL 3/5 WALL blocked",0,"BTC BOTTOM"
+  if wall_bias in ["ASK_HEAVY","WHALE_SELL_WALL"] and imbalance<-20 and last_h>y_high*0.995:
+      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL 3/5 WALL blocked (no breakdown)",0,"BTC BOTTOM"
       return True,"SELL","3/5 WALL",f"ASK HEAVY {imbalance:+.1f}% + near YH {fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
   if last_l<y_low*0.998:
       if not wall_ok("BUY",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH BUY but {wall_bias} {perps_wall['note']}",0,"wall mismatch"
@@ -266,7 +282,7 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,perps_wall,w
       return True,"BUY","3/5 FAKE",f"FAKE LOW {fmt(round_level(last_l))}< YL {fmt(y_low_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
   if last_h>y_high*1.002:
       if not wall_ok("SELL",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH SELL but {wall_bias} {perps_wall['note']} BUY WALL",0,"wall mismatch BUY WALL cant SELL"
-      if is_btc_bottom: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL 3/5 FAKE blocked (bull flip)",0,"BTC BOTTOM blocks SELL"
+      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL 3/5 FAKE blocked (bull flip)",0,"BTC BOTTOM blocks SELL"
       return True,"SELL","3/5 FAKE",f"FAKE HIGH {fmt(round_level(last_h))}> YH {fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
   return False,"","","",y_high,y_low,y_mid,"0/5",0,"no confluence"
  except Exception as e:return False,"",f"ERR {e}","",0,0,0,"0/5",0,str(e)
