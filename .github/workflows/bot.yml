@@ -1,7 +1,7 @@
 name: Scan 10 Coins 15M V200.17 TACTICAL FLIPS
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 jobs:
   scan:
@@ -27,12 +27,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-      - name: Save state
+      - name: Save state + keep alive
+        if: always()
         run: |
           git config user.name "koma-bot"
           git config user.email "bot@koma.local"
-          git add active.json cooldown.json oi_history.json whale_log.json || true
-          if git diff --cached --quiet; then echo "No state change"; exit 0; fi
-          git commit -m "V200.17-FLIPS ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
-          git pull --rebase --autostash
-          git push
+          echo "alive $(date -u)" > keepalive.txt
+          git add active.json cooldown.json oi_history.json whale_log.json keepalive.txt || true
+          if git diff --cached --quiet; then echo "No change"; exit 0; fi
+          git commit -m "4hr keepalive ${{ github.run_id }} [skip ci]" || true
+          git push || (git pull --rebase && git push) || true
