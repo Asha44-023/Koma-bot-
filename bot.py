@@ -1,4 +1,3 @@
-===START FILE===
 import json,os,time,tempfile,requests
 from datetime import datetime
 import pytz
@@ -11,7 +10,6 @@ ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json
 MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
 TAG="V200.17-TACTICAL-FLIPS"
-
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -50,7 +48,6 @@ def tg(m):
  if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:print(m);return
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m},timeout=15)
  except:pass
-
 def map_coin_pattern(afar):
     try:
         if not afar: return {"pattern":"NONE","signal":"NONE","reason":"no afar"}
@@ -71,7 +68,6 @@ def map_coin_pattern(afar):
             if h2<h1*0.97: return {"pattern":"LH","signal":"TOP","reason":f"LH {fmt(h1)}->{fmt(h2)}"}
         return {"pattern":"RANGE","signal":"RANGE","reason":"Ranging filling liquidity"}
     except Exception as e: return {"pattern":"ERR","signal":"ERR","reason":str(e)[:60]}
-
 def map_btc_coordinates(btc_afar, btc_d1):
     try:
         if not btc_afar: return {"signal":"NO_MAP","reason":"no afar","pattern":"NONE","coord_text":"NO_COORD"}
@@ -104,7 +100,6 @@ def map_btc_coordinates(btc_afar, btc_d1):
             else: signal="RANGE"; reason=f"Range H {fmt(h1)}->{fmt(h2)} L {fmt(l1)}->{fmt(l2)} filling liquidity"
         return {"signal":signal,"reason":reason,"pattern":pattern,"coords":coords,"coord_text":coord_text,"entry_long":l2,"sl_long":l2*0.80,"entry_short":h2,"sl_short":h2*1.20,"major_low":l2,"major_high":h2}
     except Exception as e: return {"signal":"NO_MAP","reason":str(e)[:80],"pattern":"ERR","coord_text":"ERR"}
-
 def get_oi_funding(symbol):
     try:
         hist=load_json(OI_FILE,{});oi_now=None;funding=0.0
@@ -133,7 +128,6 @@ def get_oi_funding(symbol):
         if oi_change>oi_thr*1.8:return {"status":"OI_SPIKE","ok":False,"msg":f"OI_SPIKE OI+{oi_change:.1f}%","oi_change":oi_change,"funding":funding}
         return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK OI{oi_change:+.1f}% fund{fp:+.3f}%","oi_change":oi_change,"funding":funding}
     except Exception as e:return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK err {str(e)[:30]}","oi_change":0,"funding":0}
-
 def detect_wick_grab(d):
     try:
         if not d or len(d["c"])<2:return None
@@ -143,7 +137,6 @@ def detect_wick_grab(d):
         if upper>body*mult and upper_pct>thr:return {"type":"GRAB_UP","wick":upper,"pct":upper_pct*100,"body":body,"note":f"Upper wick {upper_pct*100:.3f}% x{upper/body:.1f}"}
         return None
     except:return None
-
 def get_mexc_perps_wall(symbol):
     try:
         url=f"https://contract.mexc.com/api/v1/contract/depth/{symbol}";r=session.get(url,timeout=6,headers={"User-Agent":"Mozilla/5.0"}).json();data=r.get("data",r);bids=data.get("bids",[])[:30];asks=data.get("asks",[])[:30]
@@ -161,7 +154,6 @@ def get_mexc_perps_wall(symbol):
         if imb<-25: return {"bias":"ASK_HEAVY","imbalance":imb,"note":f"ASKS heavy {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
         return {"bias":"NEUTRAL","imbalance":imb,"note":f"Balanced {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
     except Exception as e: return {"bias":"ERR","note":str(e)[:80],"imbalance":0,"whale_log":f"ERR {e}"}
-
 def kl(symbol,interval):
  sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400};sec=sec_map.get(interval,300);end=int(time.time());start=end-sec*500
  url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
@@ -221,7 +213,6 @@ def get_weekly_phase():
  try:
   d1=kl("BTC_USDT","Day1");c=d1["c"];week_change=(c[-1]-c[-8])/c[-8]*100 if c[-8]!=0 else 0;return "RANGE",week_change,c[-1],d1,get_afar_levels(d1,90)
  except:return "RANGE",0,77000,None,None
-
 def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,perps_wall,wick_info,third_algo,btc_map):
  try:
   y_high,y_low,y_mid,y_range=get_daily_levels(d1);h15=d15["h"];l15=d15["l"];last_h=max(h15[-5:]);last_l=min(l15[-5:]);y_high_r=round_level(y_high);y_low_r=round_level(y_low)
@@ -282,7 +273,6 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,perps_wall,w
       return True,"SELL","3/5 FAKE",f"FAKE HIGH {fmt(round_level(last_h))}> YH {fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
   return False,"","","",y_high,y_low,y_mid,"0/5",0,"no confluence"
  except Exception as e:return False,"",f"ERR {e}","",0,0,0,"0/5",0,str(e)
-
 def get_btc_trend():
  try:
   d=kl("BTC_USDT","Hour4")
