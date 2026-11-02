@@ -100,5 +100,107 @@
       "signal": "BEAR",
       "reason": "LL 0.06599->0.05516"
     }
+  },
+  "JASMY_USDT": {
+    "entry": 0.003649,
+    "sl": 0.003,
+    "tp1_body": 0.004,
+    "tp1_wick": 0.004,
+    "tp2_body": 0.004,
+    "tp2_wick": 0.004,
+    "tp3": 0.005,
+    "is_buy": true,
+    "ts": 1793661299.0231853,
+    "rr": 0.540832049306626,
+    "afar": {
+      "shape": "RANGE 90D",
+      "month_line": "1W 5d ago High 0.005 -> 2W 0d ago Low 0.004",
+      "hl_seq": "LL -> LH ->"
+    },
+    "atr": 0.00030078571428571426,
+    "rebuy": 0.004,
+    "rebuy2": 0.004,
+    "beta": 1.9,
+    "d1_hold": 1,
+    "d2_hold": 1,
+    "d3_hold": 4,
+    "d_flip": 1,
+    "d_flip2": 1,
+    "whale": {
+      "bias": "WHALE_BUY_WALL",
+      "imbalance": -18.467120440428896,
+      "note": "BUY WALL 11055832 @ 0.003615 Imbal -18.5%",
+      "price": 0.003615,
+      "whale_log": "WHALE LOG JASMY_USDT | BIDS 32376426 vs ASKS 47042886 Imbal -18.5% | BIG BID 11055832 @ 0.003615 pos 28 | BIG ASK 10872520 @ 0.003679 pos 26",
+      "big_bid": 11055832.0,
+      "big_ask": 10872520.0
+    },
+    "wick": null,
+    "third": {
+      "status": "PEG_OK",
+      "ok": true,
+      "msg": "PEG_OK OI-6.0% fund+0.010%",
+      "oi_change": -5.994604239947756,
+      "funding": 0.0001
+    },
+    "btc_map": {
+      "signal": "BOTTOM_FORMING",
+      "reason": "INV H&S BOTTOM 79737.7->79179->80350 bull flip",
+      "pattern": "INV_H&S_BOTTOM",
+      "coords": [
+        {
+          "x": -34,
+          "y": 82502.4,
+          "type": "L"
+        },
+        {
+          "x": -30,
+          "y": 87216.3,
+          "type": "H"
+        },
+        {
+          "x": -24,
+          "y": 80350.0,
+          "type": "L"
+        },
+        {
+          "x": -20,
+          "y": 84312.0,
+          "type": "H"
+        },
+        {
+          "x": -17,
+          "y": 79737.7,
+          "type": "L"
+        },
+        {
+          "x": -11,
+          "y": 84868.0,
+          "type": "H"
+        },
+        {
+          "x": -8,
+          "y": 79179.0,
+          "type": "L"
+        },
+        {
+          "x": -3,
+          "y": 81946.0,
+          "type": "H"
+        }
+      ],
+      "coord_text": "L(24d 80350)->H(20d 84312)->L(17d 79737.7)->H(11d 84868)->L(8d 79179)->H(3d 81946)",
+      "entry_long": 79179.0,
+      "sl_long": 63343.200000000004,
+      "entry_short": 81946.0,
+      "sl_short": 98335.2,
+      "major_low": 79179.0,
+      "major_high": 81946.0
+    },
+    "coin_pat": {
+      "pattern": "DOUBLE_BOTTOM",
+      "signal": "BOTTOM",
+      "reason": "Double Bottom 0.004461~0.004348"
+    }
   }
 }
