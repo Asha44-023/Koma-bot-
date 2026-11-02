@@ -1,4 +1,4 @@
-name: Scan 10 Coins 15M V200.14 FINAL COLOR WHALE COIN-HS
+name: Scan 10 Coins 15M V200.15 FIXED COLOR WHALE BLOCK
 
 on:
   schedule:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-10coins-v200-14-final
+      group: scan-10coins-v200-15-fixed
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
       - name: Install deps
         run: pip install requests pytz
 
-      - name: Run bot V200.14 FINAL COLOR WHALE COIN-HS
+      - name: Run bot V200.15 FIXED COLOR WHALE BLOCK
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -44,6 +44,6 @@ jobs:
             echo "No state change"
             exit 0
           fi
-          git commit -m "V200.14-FINAL ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git commit -m "V200.15-FIXED ${{ github.run_id }} $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
           git pull --rebase --autostash
           git push
