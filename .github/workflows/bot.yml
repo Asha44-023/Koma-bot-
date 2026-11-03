@@ -1,10 +1,8 @@
 name: Scan 10 Coins 30M V202 LIQUIDITY GRAB MAP
-
 on:
   schedule:
     - cron: '5 * * * *'
   workflow_dispatch:
-
 jobs:
   scan:
     runs-on: ubuntu-latest
