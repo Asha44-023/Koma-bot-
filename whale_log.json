@@ -1,25 +1,17 @@
 {
   "BTC_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 655866.0,
-    "ask_vol": 514281.0,
-    "imbalance": 12.099761824796373,
-    "big_bid": 131601.0,
-    "big_bid_price": 77441.1,
-    "big_ask": 179329.0,
-    "big_ask_price": 77448.9,
-    "log": "WHALE LOG BTC_USDT | BIDS 655866 vs ASKS 514281 Imbal +12.1% | BIG BID 131601 @ 77441.1 pos 21 | BIG ASK 179329 @ 77448.9 pos 5"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 707057.0,
+    "ask_vol": 775027.0,
+    "imbalance": -4.586109829132492,
+    "log": "WHALE LOG BTC_USDT | BIDS 707057 vs ASKS 775027 Imbal -4.6% | BIG BID 293860 @ 77738"
   },
   "KOMA_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 749530.0,
-    "ask_vol": 749183.0,
-    "imbalance": 0.02315319877788476,
-    "big_bid": 140991.0,
-    "big_bid_price": 0.014351,
-    "big_ask": 145376.0,
-    "big_ask_price": 0.014494,
-    "log": "WHALE LOG KOMA_USDT | BIDS 749530 vs ASKS 749183 Imbal +0.0% | BIG BID 140991 @ 0.014351 pos 26 | BIG ASK 145376 @ 0.014494 pos 25"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 755207.0,
+    "ask_vol": 754236.0,
+    "imbalance": 0.06432836483391556,
+    "log": "WHALE LOG KOMA_USDT | BIDS 755207 vs ASKS 754236 Imbal +0.1% | BIG BID 150784 @ 0.014393"
   },
   "GRASS_USDT": {
     "time": "2026-11-03 18:09 EAT",
@@ -33,15 +25,11 @@
     "log": "WHALE LOG GRASS_USDT | BIDS 1207037 vs ASKS 1189057 Imbal +0.8% | BIG BID 266434 @ 0.5578 pos 28 | BIG ASK 240648 @ 0.5688 pos 29"
   },
   "SENT_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 962431.0,
-    "ask_vol": 591390.0,
-    "imbalance": 23.879262797967076,
-    "big_bid": 95372.0,
-    "big_bid_price": 0.01924,
-    "big_ask": 41888.0,
-    "big_ask_price": 0.01961,
-    "log": "WHALE LOG SENT_USDT | BIDS 962431 vs ASKS 591390 Imbal +23.9% | BIG BID 95372 @ 0.01924 pos 18 | BIG ASK 41888 @ 0.01961 pos 17"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 1134227.0,
+    "ask_vol": 678652.0,
+    "imbalance": 25.12991766135523,
+    "log": "WHALE LOG SENT_USDT | BIDS 1134227 vs ASKS 678652 Imbal +25.1% | BIG BID 127118 @ 0.01931"
   },
   "SIREN_USDT": {
     "time": "2026-11-03 18:09 EAT",
@@ -55,58 +43,38 @@
     "log": "WHALE LOG SIREN_USDT | BIDS 466029 vs ASKS 344056 Imbal +15.1% | BIG BID 55976 @ 0.0254 pos 7 | BIG ASK 20907 @ 0.02562 pos 13"
   },
   "JASMY_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 41863666.0,
-    "ask_vol": 36195747.0,
-    "imbalance": 7.261032055160344,
-    "big_bid": 10829987.0,
-    "big_bid_price": 0.003685,
-    "big_ask": 10649628.0,
-    "big_ask_price": 0.003761,
-    "log": "WHALE LOG JASMY_USDT | BIDS 41863666 vs ASKS 36195747 Imbal +7.3% | BIG BID 10829987 @ 0.003685 pos 29 | BIG ASK 10649628 @ 0.003761 pos 28"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 19992212.0,
+    "ask_vol": 30154626.0,
+    "imbalance": -20.26531363752187,
+    "log": "WHALE LOG JASMY_USDT | BIDS 19992212 vs ASKS 30154626 Imbal -20.3% | BIG BID 5462050 @ 0.003736"
   },
   "LAB_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 235799.0,
-    "ask_vol": 440148.0,
-    "imbalance": -30.23151223394734,
-    "big_bid": 69919.0,
-    "big_bid_price": 0.04591,
-    "big_ask": 76379.0,
-    "big_ask_price": 0.04608,
-    "log": "WHALE LOG LAB_USDT | BIDS 235799 vs ASKS 440148 Imbal -30.2% | BIG BID 69919 @ 0.04591 pos 4 | BIG ASK 76379 @ 0.04608 pos 3"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 471406.0,
+    "ask_vol": 365833.0,
+    "imbalance": 12.609661040634753,
+    "log": "WHALE LOG LAB_USDT | BIDS 471406 vs ASKS 365833 Imbal +12.6% | BIG BID 78837 @ 0.04583"
   },
   "VELVET_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 368913.0,
-    "ask_vol": 766926.0,
-    "imbalance": -35.0413218774844,
-    "big_bid": 169020.0,
-    "big_bid_price": 0.0522,
-    "big_ask": 188787.0,
-    "big_ask_price": 0.05316,
-    "log": "WHALE LOG VELVET_USDT | BIDS 368913 vs ASKS 766926 Imbal -35.0% | BIG BID 169020 @ 0.0522 pos 28 | BIG ASK 188787 @ 0.05316 pos 28"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 281924.0,
+    "ask_vol": 331995.0,
+    "imbalance": -8.15596194286217,
+    "log": "WHALE LOG VELVET_USDT | BIDS 281924 vs ASKS 331995 Imbal -8.2% | BIG BID 83600 @ 0.05222"
   },
   "PEPE_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 880.0,
-    "ask_vol": 746.0,
-    "imbalance": 8.241082410824108,
-    "big_bid": 103.0,
-    "big_bid_price": 4.904e-06,
-    "big_ask": 138.0,
-    "big_ask_price": 4.9055e-06,
-    "log": "WHALE LOG PEPE_USDT | BIDS 880 vs ASKS 746 Imbal +8.2% | BIG BID 103 @ 0.0000049 pos 9 | BIG ASK 138 @ 0.00000491 pos 3"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 1102.0,
+    "ask_vol": 1044.0,
+    "imbalance": 2.7027027027027026,
+    "log": "WHALE LOG PEPE_USDT | BIDS 1102 vs ASKS 1044 Imbal +2.7% | BIG BID 101 @ 0.00000491"
   },
   "DOGE_USDT": {
-    "time": "2026-11-03 18:09 EAT",
-    "bid_vol": 870388.0,
-    "ask_vol": 756759.0,
-    "imbalance": 6.9833272593072415,
-    "big_bid": 106443.0,
-    "big_bid_price": 0.07515,
-    "big_ask": 106270.0,
-    "big_ask_price": 0.07542,
-    "log": "WHALE LOG DOGE_USDT | BIDS 870388 vs ASKS 756759 Imbal +7.0% | BIG BID 106443 @ 0.07515 pos 13 | BIG ASK 106270 @ 0.07542 pos 13"
+    "time": "2026-11-03 18:57 EAT",
+    "bid_vol": 1169513.0,
+    "ask_vol": 1070462.0,
+    "imbalance": 4.421968995189678,
+    "log": "WHALE LOG DOGE_USDT | BIDS 1169513 vs ASKS 1070462 Imbal +4.4% | BIG BID 154813 @ 0.07535"
   }
 }
