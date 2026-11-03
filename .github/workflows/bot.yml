@@ -1,8 +1,10 @@
 name: Scan 10 Coins 30M V202 LIQUIDITY GRAB MAP
+
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '5 * * * *'
   workflow_dispatch:
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -20,11 +22,6 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests pytz
-      - name: FORCE CLEAR COOLDOWN FOR V202 TEST
-        run: |
-          echo "{}" > cooldown.json
-          echo "{}" > active.json
-          cat cooldown.json
       - name: Run bot V202 LIQUIDITY GRAB MAP
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
@@ -40,5 +37,5 @@ jobs:
           echo "V202 LIQUIDITY MAP alive $(date -u) BUY->UP TP SELL" > keepalive.txt
           git add active.json cooldown.json oi_history.json whale_log.json keepalive.txt || true
           if git diff --cached --quiet; then echo "No change"; exit 0; fi
-          git commit -m "V202 TEST CLEAR ${{ github.run_id }} [skip ci]" || true
+          git commit -m "V202 LIVE ${{ github.run_id }}" || true
           git push || (git pull --rebase && git push) || true
