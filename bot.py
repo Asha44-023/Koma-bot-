@@ -12,10 +12,11 @@ session=requests.Session()
 TAG="V201-CLUSTER-30M-BUY-SELL-FINAL"
 ENTRY_TF="Min30";EXIT_TF="Day1";V201_DUST_FILTER=True;V201_BOTH_SIDES=True;V201_HOLD_DAYS=5
 
-# ===== V201 RSI CONFIG 20/80 =====
-RSI_BUY_MAX = 20   # BUY only if RSI30 < 20
-RSI_SELL_MIN = 80  # SELL only if RSI30 > 80
-# =================================
+# ===== V201 RSI CONFIG 20/80 + 12H COOLDOWN =====
+RSI_BUY_MAX = 20
+RSI_SELL_MIN = 80
+COOLDOWN_HOURS = 12  # Don't resignal same coin for 12H
+# ================================================
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -252,7 +253,6 @@ def v201_30m_signal(d30, d1, live, rsi_30m, perps_wall):
         greed_zone = y_high * 0.90
         wall_bias = perps_wall.get("bias","")
         imb = perps_wall.get("imbalance",0)
-        # ===== RSI 20/80 - RELAXED WALL (Balanced allowed) =====
         if live <= fear_zone:
             rsi_ok = rsi_30m < RSI_BUY_MAX
             wall_ok = wall_bias != "WHALE_SELL_WALL" and imb > -15
@@ -277,7 +277,6 @@ def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,perps_wall,w
   major_low=afar.get("major_low",y_low);major_high=afar.get("major_high",y_high)
   wall_bias=perps_wall.get("bias","");imbalance=perps_wall.get("imbalance",0);wick_type=wick_info["type"] if wick_info else None;third_ok=third_algo.get("ok",True);third_msg=third_algo.get("msg","");btc_signal=btc_map.get("signal","NO_MAP") if btc_map else "NO_MAP"
   if not third_ok:return False,"","","",y_high,y_low,y_mid,f"BLOCKED 3RD {third_msg}",0,third_msg
-  # FAKE LOW
   if live < y_low and live < last_l:
       return True,"FAKE","BUY",f"FAKE LOW {fmt(live)}< YL {fmt(y_low)} {wall_bias} {imbalance:+.1f}% {third_msg} BTC {btc_signal}",y_high,y_low,y_mid,"",3,third_msg
   if live > y_high and live > last_h:
@@ -292,6 +291,14 @@ def scan_once():
     results=[]
     for sym in SYMBOLS:
         try:
+            # ===== 12H COOLDOWN CHECK FIRST =====
+            last_entry = COOLDOWN.get(sym)
+            if last_entry and isinstance(last_entry, dict) and "last_ts" in last_entry:
+                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600:
+                    hrs_left = (COOLDOWN_HOURS*3600 - (time.time()-last_entry["last_ts"]))/3600
+                    print(f"[{sym}] Cooldown {hrs_left:.1f}H left - skip")
+                    continue
+
             d1=kl(sym,"Day1"); d30=kl(sym,"Min30"); d15=kl(sym,"Min15"); d5=kl(sym,"Min5")
             if not d1 or not d30: continue
             live=get_live(sym)
@@ -308,8 +315,11 @@ def scan_once():
                 entry=v201["entry"]; side=v201["side"]; zone=v201["zone"]
                 real_tp1=v201["real_tp1"]; real_tp2=v201["real_tp2"]; dust_tp=v201["dust_tp"]; sl=v201["sl"]
                 afar1d=v201["afar_1d"]; afar30m=v201["afar_30m"]
-                hold1=calc_hold_days_dynamic(entry,real_tp1,afar1d["atr"]); hold2=calc_hold_days_dynamic(entry,real_tp2,afar1d["atr"])
+                hold2=calc_hold_days_dynamic(entry,real_tp2,afar1d["atr"])
                 beta=BETA_MAP.get(sym,2.0)
+                # Save cooldown immediately
+                COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry, "rsi": rsi30, "zone": zone}
+                atomic_save(COOLDOWN_FILE, COOLDOWN)
                 # Format message V201 20/80
                 msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f} | {v201['reason']}\n"
                 msg+=f"🗺 BTC COORD: {btc_map.get('coord_text','')} {btc_map.get('signal','')} {btc_map.get('reason','')}\n"
@@ -322,14 +332,20 @@ def scan_once():
                     msg+=f"🔴 Small Sell DUST {fmt(dust_tp)} {ENTRY_TF} DUST SKIP | 🟢 REAL BUY TP1 {fmt(real_tp1)}->{fmt(real_tp2)} {EXIT_TF} REAL SELL\n"
                 else:
                     msg+=f"🟢 Small Buy DUST {fmt(dust_tp)} {ENTRY_TF} DUST SKIP | 🔴 REAL SELL TP1 {fmt(real_tp1)}->{fmt(real_tp2)} {EXIT_TF} REAL BUY\n"
-                msg+=f"🏁 TP2 {fmt(real_tp2)} {hold2}D {zone} WIN\n"
+                msg+=f"🏁 TP2 {fmt(real_tp2)} {hold2}D {zone} WIN | Cooldown {COOLDOWN_HOURS}H\n"
                 msg+=f"🧠 3RD ALGO {third['msg']} | RSI30 {rsi30:.0f} <{RSI_BUY_MAX} BUY >{RSI_SELL_MIN} SELL"
                 results.append((sym,msg,v201))
                 continue
             # Fallback old 5check
             ok,typ,side,reason,yh,yl,ym,extra,score,tmsg=detect_5check(d1,d15,d5,live,btc_trend,btc_trend,btc_price,afar1,wall,wick,third,btc_map)
             if ok:
-                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {typ} {side} {sym} | {TAG} | 3/5 FAKE\n🟢 FAKE LOW {fmt(live)}< YL {fmt(yl)} | {wall['note']} | {third['msg']} | BTC {btc_map['signal']} {btc_map['reason']}\n🗺 BTC COORD: {btc_map.get('coord_text','')}\n📈 COIN COORD: {afar1['hl_seq']} | {afar1['month_line']} | ATR {fmt(afar1['atr'])}\n🔍 AFAR {afar1['shape']} {afar1['hl_seq']} -> ATR {fmt(afar1['atr'])}\n🐋 WHALE LOG: {wall.get('whale_log','')}\n🟢 OVERALL {typ} {side} {fmt(live)} SL {fmt(yl*0.80 if side=='BUY' else yh*1.20)} (WIDE 20%) RR 0.5 Beta {BETA_MAP.get(sym,2.0)}x\n🔴 Small Sell TP1 {fmt(yh*0.8)}->{fmt(yh)} 1D RED SELL | 🟢 Small Buy FLIP {fmt(yh*0.8)}->{fmt(yl)} 1D GREEN BUY\n🔴 TP2 {fmt(yh*0.9)}->{fmt(yh)} 1D RED SELL | 🟢 FLIP {fmt(yh*0.9)}->{fmt(yl*0.9)} 3D GREEN BUY\n🏁 TP3 {fmt(yh)} 3D GREEN WIN\n🧠 3RD ALGO {third['msg']}"
+                last_entry = COOLDOWN.get(sym)
+                if last_entry and isinstance(last_entry, dict) and "last_ts" in last_entry:
+                    if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600:
+                        continue
+                COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": live, "rsi": rsi30}
+                atomic_save(COOLDOWN_FILE, COOLDOWN)
+                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {typ} {side} {sym} | {TAG} | 3/5 FAKE\n🟢 FAKE LOW {fmt(live)}< YL {fmt(yl)} | {wall['note']} | {third['msg']} | BTC {btc_map['signal']} {btc_map['reason']}\n🗺 BTC COORD: {btc_map.get('coord_text','')}\n📈 COIN COORD: {afar1['hl_seq']} | {afar1['month_line']} | ATR {fmt(afar1['atr'])}\n🔍 AFAR {afar1['shape']} {afar1['hl_seq']} -> ATR {fmt(afar1['atr'])}\n🐋 WHALE LOG: {wall.get('whale_log','')}\n🟢 OVERALL {typ} {side} {fmt(live)} SL {fmt(yl*0.80 if side=='BUY' else yh*1.20)} (WIDE 20%) RR 0.5 Beta {BETA_MAP.get(sym,2.0)}x\n🔴 Small Sell TP1 {fmt(yh*0.8)}->{fmt(yh)} 1D RED SELL | 🟢 Small Buy FLIP {fmt(yh*0.8)}->{fmt(yl)} 1D GREEN BUY\n🔴 TP2 {fmt(yh*0.9)}->{fmt(yh)} 1D RED SELL | 🟢 FLIP {fmt(yh*0.9)}->{fmt(yl*0.9)} 3D GREEN BUY\n🏁 TP3 {fmt(yh)} 3D GREEN WIN\n🧠 3RD ALGO {third['msg']} | Cooldown {COOLDOWN_HOURS}H"
                 results.append((sym,msg,None))
         except Exception as e:
             print(f"ERR {sym} {e}")
@@ -340,7 +356,7 @@ def main():
     import argparse; p=argparse.ArgumentParser(); p.add_argument("--once",action="store_true"); args=p.parse_args()
     res,btc_price,btc_map=scan_once()
     if not res:
-        print(f"[{get_time()}] No signals RSI {RSI_BUY_MAX}/{RSI_SELL_MIN} - waiting extreme")
+        print(f"[{get_time()}] No signals RSI {RSI_BUY_MAX}/{RSI_SELL_MIN} - waiting extreme | Cooldown {COOLDOWN_HOURS}H active")
         return
     for sym,msg,v201 in res[:TOP_N_PER_SCAN]:
         tg(msg)
