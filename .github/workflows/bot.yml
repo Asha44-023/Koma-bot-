@@ -1,7 +1,7 @@
 name: Scan 10 Coins 30M V201 CLUSTER BUY-SELL FINAL
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Every 30M - matches your 30M entry TF
+    - cron: '0 * * * *'  # Every 1 hour - best for GitHub, avoids 1-2H throttle
   workflow_dispatch:
 jobs:
   scan:
@@ -9,7 +9,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-10coins-v201-30m-cluster
+      group: scan-10coins-v201-30m-1h
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -20,20 +20,20 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests pytz
-      - name: Run bot V201 30M CLUSTER BUY-SELL
+      - name: Run bot V201 30M CLUSTER BUY-SELL 1H
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-      - name: Save state + keep alive V201
+      - name: Save state + keep alive V201 1H
         if: always()
         run: |
-          git config user.name "koma-bot-v201"
-          git config user.email "bot-v201@koma.local"
-          echo "V201 alive $(date -u) 30M BUY-SELL FINAL" > keepalive.txt
+          git config user.name "koma-bot-v201-1h"
+          git config user.email "bot-v201-1h@koma.local"
+          echo "V201 1H alive $(date -u) 30M BUY-SELL FINAL" > keepalive.txt
           git add active.json cooldown.json oi_history.json whale_log.json keepalive.txt || true
           if git diff --cached --quiet; then echo "No change"; exit 0; fi
-          git commit -m "V201 30M keepalive ${{ github.run_id }} [skip ci]" || true
+          git commit -m "V201 1H keepalive ${{ github.run_id }} [skip ci]" || true
           git push || (git pull --rebase && git push) || true
