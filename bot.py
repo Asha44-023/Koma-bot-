@@ -9,8 +9,7 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
 MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
-TAG="V202-LIQUIDITY-GRAB-BUY-SELL-MAP"
-ENTRY_TF="Min30";EXIT_TF="Day1"
+TAG="V203-6LEVEL-HIERARCHY"
 RSI_BUY_MAX = 20
 RSI_SELL_MIN = 80
 COOLDOWN_HOURS = 12
@@ -54,148 +53,27 @@ def tg(m):
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m},timeout=15)
  except:pass
 
-def get_liquidity_grab_levels(afar1d, afar30m, live, side, atr):
-    try:
-        if not atr or atr==0: atr=live*0.04
-        min_gap = live*0.04
-        if side=="BUY":
-            up_tp1 = round_level(live + atr*1.5)
-            if up_tp1 - live < min_gap: up_tp1 = round_level(live + min_gap)
-            up_tp2 = round_level(live + atr*3)
-            if up_tp2 - up_tp1 < min_gap: up_tp2 = round_level(up_tp1 + min_gap)
-            down_tp1 = round_level(live - atr*1.2)
-            down_tp2 = round_level(afar1d.get("major_low", live*0.8))
-            final_tp1 = round_level(afar1d.get("major_high", live*1.2)*0.75)
-            if final_tp1 <= up_tp2: final_tp1 = round_level(up_tp2 + min_gap)
-            final_tp2 = round_level(afar1d.get("major_high", live*1.2))
-            if final_tp2 <= final_tp1: final_tp2 = round_level(final_tp1 + min_gap)
-            chain = []
-            chain.append(f"BUY {fmt(live)} -> UP TP {fmt(up_tp1)} SELL (+{((up_tp1-live)/live*100):.1f}%)")
-            chain.append(f"SELL {fmt(up_tp1)} -> DOWN TP {fmt(down_tp1)} BUY ({((down_tp1-up_tp1)/up_tp1*100):.1f}%)")
-            chain.append(f"BUY {fmt(down_tp1)} -> UP TP {fmt(up_tp2)} SELL (+{((up_tp2-down_tp1)/down_tp1*100):.1f}%)")
-            chain.append(f"SELL {fmt(up_tp2)} -> DOWN TP {fmt(down_tp2)} BUY ({((down_tp2-up_tp2)/up_tp2*100):.1f}%)")
-            chain.append(f"BUY {fmt(down_tp2)} -> UP TP {fmt(final_tp1)} TP1 SELL (+{((final_tp1-down_tp2)/down_tp2*100):.1f}%)")
-            chain.append(f"BUY {fmt(down_tp2)} -> UP TP {fmt(final_tp2)} TP2 SELL (+{((final_tp2-down_tp2)/down_tp2*100):.1f}%)")
-        else:
-            down_tp1 = round_level(live - atr*1.5)
-            if live - down_tp1 < min_gap: down_tp1 = round_level(live - min_gap)
-            down_tp2 = round_level(live - atr*3)
-            up_tp1 = round_level(live + atr*1.2)
-            final_tp1 = round_level(afar1d.get("major_low", live*0.8)*1.25)
-            final_tp2 = round_level(afar1d.get("major_low", live*0.8))
-            chain = []
-            chain.append(f"SELL {fmt(live)} -> DOWN TP {fmt(down_tp1)} BUY ({((live-down_tp1)/live*100):.1f}%)")
-            chain.append(f"BUY {fmt(down_tp1)} -> UP TP {fmt(up_tp1)} SELL (+{((up_tp1-down_tp1)/down_tp1*100):.1f}%)")
-            chain.append(f"SELL {fmt(up_tp1)} -> DOWN TP {fmt(final_tp1)} TP1 BUY (-{((up_tp1-final_tp1)/up_tp1*100):.1f}%)")
-            chain.append(f"SELL {fmt(up_tp1)} -> DOWN TP {fmt(final_tp2)} TP2 BUY (-{((up_tp1-final_tp2)/up_tp1*100):.1f}%)")
-        return {"chain": chain, "up_tp1": up_tp1, "up_tp2": up_tp2, "down_tp1": down_tp1, "down_tp2": down_tp2, "final_tp1": final_tp1, "final_tp2": final_tp2, "atr": atr}
-    except Exception as e:
-        return {"chain":[f"ERR mapping {e}"], "up_tp1":live*1.05, "down_tp1":live*0.95, "final_tp1":live*1.1, "final_tp2":live*1.2, "up_tp2":live*1.08, "down_tp2":live*0.9, "atr":live*0.04}
-
-def map_coin_pattern(afar):
-    try:
-        if not afar: return {"pattern":"NONE","signal":"NONE","reason":"no afar"}
-        highs=afar.get("highs",[]); lows=afar.get("lows",[])
-        if len(highs)>=3:
-            h1=highs[1]["price"] if len(highs)>1 else 0; h2=highs[0]["price"] if len(highs)>0 else 0; h3=highs[2]["price"] if len(highs)>2 else 0
-            if h1<h2 and h3<h2 and abs(h1-h3)/h2<0.08: return {"pattern":"H&S_TOP","signal":"TOP","reason":f"H&S TOP S {fmt(h1)} H {fmt(h2)} S {fmt(h3)}"}
-        if len(lows)>=3:
-            l1=lows[1]["price"] if len(lows)>1 else 0; l2=lows[0]["price"] if len(lows)>0 else 0; l3=lows[2]["price"] if len(lows)>2 else 0
-            if l1>l2 and l3>l2 and abs(l1-l3)/l1<0.08: return {"pattern":"INV_H&S_BOTTOM","signal":"BOTTOM","reason":f"INV H&S {fmt(l1)}->{fmt(l2)}->{fmt(l3)}"}
-        if len(highs)>=2 and len(lows)>=2:
-            h1=highs[1]["price"] if len(highs)>1 else 0; h2=highs[0]["price"] if len(highs)>0 else 0; l1=lows[1]["price"] if len(lows)>1 else 0; l2=lows[0]["price"] if len(lows)>0 else 0
-            if abs(h1-h2)/h2<0.03: return {"pattern":"DOUBLE_TOP","signal":"TOP","reason":f"Double Top {fmt(h1)}~{fmt(h2)}"}
-            if abs(l1-l2)/l2<0.03: return {"pattern":"DOUBLE_BOTTOM","signal":"BOTTOM","reason":f"Double Bottom {fmt(l1)}~{fmt(l2)}"}
-            if l2>l1*0.97 and h2>h1*0.97 and h2<h1: return {"pattern":"COIL","signal":"COIL","reason":f"Coil HL {fmt(l1)}->{fmt(l2)} + LH rising {fmt(h1)}->{fmt(h2)}"}
-            if l2>l1*0.97: return {"pattern":"HL","signal":"BOTTOM","reason":f"HL {fmt(l1)}->{fmt(l2)}"}
-            if l2<l1*0.97: return {"pattern":"LL","signal":"BEAR","reason":f"LL {fmt(l1)}->{fmt(l2)}"}
-            if h2<h1*0.97: return {"pattern":"LH","signal":"TOP","reason":f"LH {fmt(h1)}->{fmt(h2)}"}
-        return {"pattern":"RANGE","signal":"RANGE","reason":"Ranging filling liquidity"}
-    except Exception as e: return {"pattern":"ERR","signal":"ERR","reason":str(e)[:60]}
-
-def map_btc_coordinates(btc_afar, btc_d1):
-    try:
-        if not btc_afar: return {"signal":"NO_MAP","reason":"no afar","pattern":"NONE","coord_text":"NO_COORD"}
-        highs=btc_afar.get("highs",[]); lows=btc_afar.get("lows",[])
-        if len(lows)<1: return {"signal":"NO_MAP","reason":"no lows","pattern":"NONE","coord_text":"NO_COORD"}
-        coords=[]
-        for h in highs: coords.append({"x":-h["days_ago"],"y":h["price"],"type":"H"})
-        for l in lows: coords.append({"x":-l["days_ago"],"y":l["price"],"type":"L"})
-        coords=sorted(coords,key=lambda c:c["x"])
-        coord_text=""
-        for c in coords[-6:]: coord_text+=f"{c['type']}({abs(c['x'])}d {fmt(c['y'])})->"
-        coord_text=coord_text[:-2] if len(coord_text)>2 else "NO_COORD"
-        h1=highs[1]["price"] if len(highs)>1 else 0; h2=highs[0]["price"] if len(highs)>0 else 0; h3=highs[2]["price"] if len(highs)>2 else 0
-        l1=lows[1]["price"] if len(lows)>1 else 0; l2=lows[0]["price"] if len(lows)>0 else 0; l3=lows[2]["price"] if len(lows)>2 else 0
-        pattern="NONE"; signal="RANGE"; reason=""
-        if len(highs)>=3:
-            if h1<h2 and h3<h2 and abs(h1-h3)/h2<0.08: pattern="HEAD_SHOULDERS_TOP"; signal="TOP_FORMING"; reason=f"H&S TOP S {fmt(h1)} H {fmt(h2)} S {fmt(h3)} bear flip"
-        if pattern=="NONE" and len(lows)>=3:
-            if l1>l2 and l3>l2 and abs(l1-l3)/l1<0.08: pattern="INV_H&S_BOTTOM"; signal="BOTTOM_FORMING"; reason=f"INV H&S BOTTOM {fmt(l1)}->{fmt(l2)}->{fmt(l3)} bull flip"
-        if pattern=="NONE" and len(highs)>=2 and abs(h1-h2)/h2<0.03: pattern="DOUBLE_TOP"; signal="TOP_FORMING"; reason=f"Double Top {fmt(h1)}~{fmt(h2)}"
-        if pattern=="NONE" and len(lows)>=2 and abs(l1-l2)/l2<0.03: pattern="DOUBLE_BOTTOM"; signal="BOTTOM_FORMING"; reason=f"Double Bottom {fmt(l1)}~{fmt(l2)}"
-        is_hl=l2>l1*0.97; is_ll=l2<l1*0.97; is_hh=h2>h1*1.03; is_lh=h2<h1*0.97; is_higher_lh=h2>h1*0.97 and h2<h1
-        if pattern=="NONE":
-            if is_lh and is_ll: signal="DUMP_STARTING"; reason=f"LH {fmt(h1)}->{fmt(h2)} + LL {fmt(l1)}->{fmt(l2)}"
-            elif is_lh and is_hl: signal="TOP_FORMING"; reason=f"LH {fmt(h1)}->{fmt(h2)} + HL {fmt(l1)}->{fmt(l2)} coiling top"
-            elif is_hl and is_higher_lh: signal="BUY_IN_BEAR"; reason=f"Coil HL {fmt(l1)}->{fmt(l2)} + LH rising {fmt(h1)}->{fmt(h2)}"
-            elif is_hl: signal="BOTTOM_FORMING"; reason=f"HL {fmt(l1)}->{fmt(l2)} bottom forming"
-            elif is_ll: signal="BEAR_CONTINUE"; reason=f"Still LL {fmt(l1)}->{fmt(l2)} bear continue"
-            elif is_hh and is_hl: signal="PUMP_STARTING"; reason=f"HH {fmt(h1)}->{fmt(h2)} + HL {fmt(l1)}->{fmt(l2)} bull start"
-            else: signal="RANGE"; reason=f"Range H {fmt(h1)}->{fmt(h2)} L {fmt(l1)}->{fmt(l2)}"
-        return {"signal":signal,"reason":reason,"pattern":pattern,"coords":coords,"coord_text":coord_text,"entry_long":l2,"sl_long":l2*0.80,"entry_short":h2,"sl_short":h2*1.20,"major_low":l2,"major_high":h2}
-    except Exception as e: return {"signal":"NO_MAP","reason":str(e)[:80],"pattern":"ERR","coord_text":"ERR"}
-
-def get_oi_funding(symbol):
-    try:
-        hist=load_json(OI_FILE,{});oi_now=None;funding=0.0
-        for url in [f"https://contract.mexc.com/api/v1/contract/open_interest/{symbol}",f"https://contract.mexc.com/api/v1/contract/ticker?symbol={symbol}"]:
-            try:
-                r=session.get(url,timeout=6).json();data=r.get("data",r)
-                if isinstance(data,dict):
-                    if "openInterest" in data:oi_now=float(data["openInterest"]);break
-                    if "open_interest" in data:oi_now=float(data["open_interest"]);break
-                    if "holdVol" in data:oi_now=float(data["holdVol"]);break
-            except:continue
-        try:
-            fr=session.get(f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}",timeout=6).json();fd=fr.get("data",fr)
-            if isinstance(fd,dict):funding=float(fd.get("fundingRate",fd.get("funding_rate",0)))
-            elif isinstance(fd,list) and fd:funding=float(fd[0].get("fundingRate",0))
-        except:funding=0.0
-        beta=BETA_MAP.get(symbol,2.0);oi_thr=20-(beta*3);fund_thr=0.08-(beta*0.01);oi_thr=max(oi_thr,8);fund_thr=max(fund_thr,0.025)
-        if oi_now is None:return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK OI no data fund {funding*100:.3f}%","oi_change":0,"funding":funding}
-        prev=hist.get(symbol,{}).get("oi",oi_now);prev_ts=hist.get(symbol,{}).get("ts",0)
-        if time.time()-prev_ts>7200 and symbol not in hist:oi_change=0
-        else:oi_change=(oi_now-prev)/prev*100 if prev>0 else 0
-        hist[symbol]={"oi":oi_now,"ts":time.time(),"funding":funding};atomic_save(OI_FILE,hist);fp=funding*100
-        if abs(fp)>0.12:return {"status":"FUND_EXTREME","ok":False,"msg":f"FUND_EXTREME {fp:.3f}%","oi_change":oi_change,"funding":funding}
-        if oi_change>oi_thr and fp>fund_thr:return {"status":"LONG_TRAP","ok":False,"msg":f"LONG_TRAP OI+{oi_change:.1f}%","oi_change":oi_change,"funding":funding}
-        if oi_change>oi_thr and fp<-fund_thr:return {"status":"SHORT_TRAP","ok":False,"msg":f"SHORT_TRAP OI+{oi_change:.1f}%","oi_change":oi_change,"funding":funding}
-        if oi_change>oi_thr*1.8:return {"status":"OI_SPIKE","ok":False,"msg":f"OI_SPIKE OI+{oi_change:.1f}%","oi_change":oi_change,"funding":funding}
-        return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK OI{oi_change:+.1f}% fund{fp:+.3f}%","oi_change":oi_change,"funding":funding}
-    except Exception as e:return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK err","oi_change":0,"funding":0}
-
-def get_mexc_perps_wall(symbol):
-    try:
-        url=f"https://contract.mexc.com/api/v1/contract/depth/{symbol}";r=session.get(url,timeout=6,headers={"User-Agent":"Mozilla/5.0"}).json();data=r.get("data",r);bids=data.get("bids",[])[:30];asks=data.get("asks",[])[:30]
-        if not bids or not asks: return {"bias":"UNKNOWN","note":"no book","imbalance":0,"whale_log":"NO BOOK"}
-        bid_vol=sum(float(b[1]) for b in bids);ask_vol=sum(float(a[1]) for a in asks);big_bid=max(float(b[1]) for b in bids);big_ask=max(float(a[1]) for a in asks)
-        big_bid_idx=max(range(len(bids)), key=lambda i: float(bids[i][1]));big_ask_idx=max(range(len(asks)), key=lambda i: float(asks[i][1]))
-        total=bid_vol+ask_vol;imb=(bid_vol-ask_vol)/total*100 if total else 0
-        whale_log=f"WHALE LOG {symbol} | BIDS {bid_vol:.0f} vs ASKS {ask_vol:.0f} Imbal {imb:+.1f}% | BIG BID {fmt(big_bid)} @ {fmt(bids[big_bid_idx][0])}"
-        try:
-            wlog=load_json(WHALE_LOG,{});wlog[symbol]={"time":get_time(),"bid_vol":bid_vol,"ask_vol":ask_vol,"imbalance":imb,"log":whale_log};atomic_save(WHALE_LOG,wlog)
-        except: pass
-        if big_bid>bid_vol*0.30: return {"bias":"WHALE_BUY_WALL","imbalance":imb,"note":f"BUY WALL {fmt(big_bid)} @ {fmt(bids[big_bid_idx][0])}","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
-        if big_ask>ask_vol*0.30: return {"bias":"WHALE_SELL_WALL","imbalance":imb,"note":f"SELL WALL {fmt(big_ask)} @ {fmt(asks[big_ask_idx][0])}","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
-        if imb>25: return {"bias":"BID_HEAVY","imbalance":imb,"note":f"BIDS heavy {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
-        if imb<-25: return {"bias":"ASK_HEAVY","imbalance":imb,"note":f"ASKS heavy {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
-        return {"bias":"NEUTRAL","imbalance":imb,"note":f"Balanced {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
-    except Exception as e: return {"bias":"ERR","note":str(e)[:80],"imbalance":0,"whale_log":f"ERR {e}"}
+# === 6 LEVEL HIERARCHY ===
+HIERARCHY = {
+    "MONTHLY": {"key_tf": "Month1", "struct_tf": "Day1", "key_lb": 12, "struct_lb": 90, "label": "MONTHLY KEY > DAILY STRUCT"},
+    "WEEKLY":  {"key_tf": "Week1", "struct_tf": "Hour4", "key_lb": 12, "struct_lb": 60, "label": "WEEKLY KEY > H4 STRUCT"},
+    "DAILY":   {"key_tf": "Day1", "struct_tf": "Hour1", "key_lb": 20, "struct_lb": 72, "label": "DAILY KEY > H1 STRUCT"},
+    "H4":      {"key_tf": "Hour4", "struct_tf": "Min15", "key_lb": 60, "struct_lb": 96, "label": "H4 KEY > M15 STRUCT"},
+    "H1":      {"key_tf": "Hour1", "struct_tf": "Min5", "key_lb": 72, "struct_lb": 96, "label": "H1 KEY > M5 STRUCT"},
+    "M15":     {"key_tf": "Min15", "struct_tf": "Min1", "key_lb": 96, "struct_lb": 120, "label": "M15 KEY > M1 STRUCT"},
+}
 
 def kl(symbol,interval):
- sec_map={"Min5":300,"Min15":900,"Min30":1800,"Min60":3600,"Hour4":14400,"Day1":86400};sec=sec_map.get(interval,300);end=int(time.time());start=end-sec*500
- url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
+ sec_map={"Min1":60,"Min5":300,"Min15":900,"Min30":1800,"Hour1":3600,"Min60":3600,"Hour4":14400,"Day1":86400,"Week1":604800,"Month1":2592000}
+ sec=sec_map.get(interval,300)
+ # fallback for Month1 if not supported by API
+ api_interval = interval
+ if interval=="Month1": api_interval="Day1"; sec=86400
+ if interval=="Week1": api_interval="Day1"; sec=86400
+ if interval=="Hour1": api_interval="Min60"
+ if interval=="Min1": api_interval="Min5"
+ end=int(time.time()); start=end-sec*500
+ url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={api_interval}&start={start}&end={end}"
  for _ in range(3):
   try:
    r=session.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=15);j=r.json();d=j.get("data",j)
@@ -203,7 +81,7 @@ def kl(symbol,interval):
    if not d or "open" not in d:continue
    res={"o":[float(x) for x in d["open"]],"h":[float(x) for x in d["high"]],"l":[float(x) for x in d["low"]],"c":[float(x) for x in d["close"]],"v":[float(x) for x in d.get("vol",[0]*len(d["close"]))]}
    for k in res:res[k]=res[k][:-1]
-   if len(res["c"])<50:continue
+   if len(res["c"])<30:continue
    return res
   except:time.sleep(1)
  return None
@@ -250,38 +128,193 @@ def get_afar_levels(d1,lookback=90):
   highs=sorted(highs,key=lambda x:x["days_ago"])[:4];lows=sorted(lows,key=lambda x:x["days_ago"])[:4]
   h_recent=d1["h"][-20:];l_recent=d1["l"][-20:];recent_high=max(h_recent);recent_low=min(l_recent)
   mh=max(h);ml=min(l);major_high=highs[0]["price"] if highs else mh;major_high_2=highs[1]["price"] if len(highs)>1 else mh;major_low=lows[0]["price"] if lows else ml;major_low_2=lows[1]["price"] if len(lows)>1 else ml
-  shape="RANGE 90D"
-  if len(lows)>1 and lows[1]['price']<lows[0]['price']:shape="ASCENDING 90D"
-  if len(highs)>1 and highs[1]['price']<highs[0]['price'] and shape=="ASCENDING 90D":shape="TRIANGLE COILING 90D"
-  elif len(highs)>1 and highs[1]['price']<highs[0]['price']:shape="HH COILING 90D"
+  shape="RANGE"
+  if len(lows)>1 and lows[1]['price']<lows[0]['price']:shape="ASCENDING"
+  if len(highs)>1 and highs[1]['price']<highs[0]['price'] and shape=="ASCENDING":shape="TRIANGLE COILING"
   seq=""
-  if len(lows)>1:seq+=f"{'HL ->' if lows[1]['price']<lows[0]['price'] else 'LL ->'} "
-  if len(highs)>1:seq+=f"{'HH ->' if highs[1]['price']<highs[0]['price'] else 'LH ->'}"
+  if len(lows)>1:seq+=f"{'HL' if lows[1]['price']<lows[0]['price'] else 'LL'} "
+  if len(highs)>1:seq+=f"{'HH' if highs[1]['price']<highs[0]['price'] else 'LH'}"
   def days_to_str(d):
    if d<8:return f"{d}d"
    if d<35:return f"{d//7}W {d%7}d"
    return f"{d//30}M {d%30}d"
-  month_line=f"{days_to_str(highs[0]['days_ago'])} ago High {fmt(round_level(highs[0]['price']))} -> {days_to_str(lows[0]['days_ago'])} ago Low {fmt(round_level(lows[0]['price']))}" if highs and lows else "NO STRUCTURE"
+  month_line=f"{days_to_str(highs[0]['days_ago'])} ago H {fmt(round_level(highs[0]['price']))} -> {days_to_str(lows[0]['days_ago'])} ago L {fmt(round_level(lows[0]['price']))}" if highs and lows else "NO STRUCTURE"
   return {"major_high":major_high,"major_high_2":major_high_2,"major_low":major_low,"major_low_2":major_low_2,"recent_high":recent_high,"recent_low":recent_low,"highs":highs,"lows":lows,"mid":(major_high+major_low)/2,"shape":shape,"hl_seq":seq,"month_line":month_line,"atr":calc_atr(d1)}
  except:return None
 
-def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2,float(d1["h"][-2])-float(d1["l"][-2])
+def get_hierarchy_levels(sym):
+    levels={}
+    for name,cfg in HIERARCHY.items():
+        try:
+            d_key=kl(sym,cfg["key_tf"])
+            d_struct=kl(sym,cfg["struct_tf"])
+            if not d_key: continue
+            key_afar=get_afar_levels(d_key,cfg["key_lb"])
+            struct_afar=get_afar_levels(d_struct,cfg["struct_lb"]) if d_struct else None
+            if not key_afar: continue
+            # KEY LEVELS > STRUCTURE LOGIC
+            struct_bias="NEUTRAL"
+            if struct_afar and len(struct_afar["lows"])>1:
+                l1=struct_afar["lows"][1]["price"]; l2=struct_afar["lows"][0]["price"]
+                h1=struct_afar["highs"][1]["price"] if len(struct_afar["highs"])>1 else 0
+                h2=struct_afar["highs"][0]["price"] if struct_afar["highs"] else 0
+                if l2>l1 and h2>h1*0.97: struct_bias=f"{cfg['struct_tf']} HL HH BULL"
+                elif l2<l1 and h2<h1: struct_bias=f"{cfg['struct_tf']} LL LH BEAR"
+                elif l2>l1: struct_bias=f"{cfg['struct_tf']} HL"
+                else: struct_bias=f"{cfg['struct_tf']} LL"
+            levels[name]={"cfg":cfg,"key":key_afar,"struct":struct_afar,"bias":struct_bias}
+        except: continue
+    return levels
 
-def v201_30m_signal(d30, d1, live, rsi_30m, perps_wall):
+def get_liquidity_grab_levels_hierarchy(h_levels, live, side, atr):
+    try:
+        if not atr or atr==0: atr=live*0.04
+        min_gap = live*0.04
+        # GET KEY LEVELS FROM HIERARCHY
+        monthly = h_levels.get("MONTHLY",{}).get("key")
+        weekly = h_levels.get("WEEKLY",{}).get("key")
+        daily = h_levels.get("DAILY",{}).get("key")
+        h4 = h_levels.get("H4",{}).get("key")
+        h1 = h_levels.get("H1",{}).get("key")
+        m15 = h_levels.get("M15",{}).get("key")
+
+        # FALLBACKS
+        monthly_high = monthly["major_high"] if monthly else live*1.5
+        monthly_low = monthly["major_low"] if monthly else live*0.5
+        weekly_high = weekly["major_high"] if weekly else daily["major_high"]*1.1 if daily else live*1.2
+        weekly_low = weekly["major_low"] if weekly else daily["major_low"]*0.9 if daily else live*0.8
+        daily_high = daily["major_high"] if daily else live*1.2
+        daily_low = daily["major_low"] if daily else live*0.8
+        h4_high = h4["major_high"] if h4 else live*1.1
+        h4_low = h4["major_low"] if h4 else live*0.9
+
+        if side=="BUY":
+            # M15 KEY > M1 STRUCT : entry at M15 low
+            # H1 KEY > M5 STRUCT : TP1 at H1 high
+            # H4 KEY > M15 STRUCT : TP2 at H4 high
+            # DAILY KEY > H1 STRUCT : FINAL at DAILY high
+            # WEEKLY KEY > H4 STRUCT : SUPER at WEEKLY high
+            # MONTHLY KEY > DAILY STRUCT : MOON at MONTHLY high
+            up_tp1 = round_level(h1["major_high"]*0.8 if h1 else live + atr*1.5)
+            up_tp2 = round_level(h4["major_high"]*0.85 if h4 else live + atr*3)
+            final_tp1 = round_level(daily_high*0.75)
+            final_tp2 = round_level(daily_high)
+            super_tp = round_level(weekly_high)
+            moon_tp = round_level(monthly_high)
+
+            # enforce min gap
+            if up_tp1 - live < min_gap: up_tp1 = round_level(live + min_gap)
+            if up_tp2 - up_tp1 < min_gap: up_tp2 = round_level(up_tp1 + min_gap)
+            if final_tp1 <= up_tp2: final_tp1 = round_level(up_tp2 + min_gap)
+            if final_tp2 <= final_tp1: final_tp2 = round_level(final_tp1 + min_gap)
+            if super_tp <= final_tp2: super_tp = round_level(final_tp2 + min_gap)
+            if moon_tp <= super_tp: moon_tp = round_level(super_tp + min_gap*2)
+
+            chain=[]
+            chain.append(f"BUY {fmt(live)} (M15 KEY {fmt(m15['major_low']) if m15 else 'N/A'} > M1 STRUCT)")
+            chain.append(f"-> TP1 {fmt(up_tp1)} H1 KEY > M5 (+{((up_tp1-live)/live*100):.1f}%) SELL")
+            chain.append(f"-> TP2 {fmt(up_tp2)} H4 KEY > M15 (+{((up_tp2-live)/live*100):.1f}%) SELL")
+            chain.append(f"-> TP3 {fmt(final_tp1)} DAILY KEY > H1 (+{((final_tp1-live)/live*100):.1f}%) SELL")
+            chain.append(f"-> TP4 {fmt(final_tp2)} DAILY HIGH (+{((final_tp2-live)/live*100):.1f}%) SELL")
+            chain.append(f"-> TP5 {fmt(super_tp)} WEEKLY KEY > H4 (+{((super_tp-live)/live*100):.1f}%) SELL")
+            chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY > DAILY (+{((moon_tp-live)/live*100):.1f}%) SELL")
+            return {"chain":chain,"up_tp1":up_tp1,"up_tp2":up_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
+        else:
+            down_tp1 = round_level(h1["major_low"]*1.2 if h1 else live - atr*1.5)
+            down_tp2 = round_level(h4["major_low"]*1.15 if h4 else live - atr*3)
+            final_tp1 = round_level(daily_low*1.25)
+            final_tp2 = round_level(daily_low)
+            super_tp = round_level(weekly_low)
+            moon_tp = round_level(monthly_low)
+            if live - down_tp1 < min_gap: down_tp1 = round_level(live - min_gap)
+            chain=[]
+            chain.append(f"SELL {fmt(live)} -> DOWN TP {fmt(down_tp1)} H1 KEY BUY")
+            chain.append(f"-> TP2 {fmt(down_tp2)} H4 KEY BUY")
+            chain.append(f"-> FINAL {fmt(final_tp2)} DAILY KEY BUY")
+            chain.append(f"-> SUPER {fmt(super_tp)} WEEKLY KEY BUY")
+            chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY BUY")
+            return {"chain":chain,"up_tp1":live,"down_tp1":down_tp1,"down_tp2":down_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
+    except Exception as e:
+        return {"chain":[f"ERR {e}"],"up_tp1":live*1.05,"down_tp1":live*0.95,"final_tp1":live*1.1,"final_tp2":live*1.2,"super_tp":live*1.3,"moon_tp":live*1.5,"atr":live*0.04}
+
+def map_btc_coordinates(btc_afar, btc_d1):
+    try:
+        if not btc_afar: return {"signal":"NO_MAP","reason":"no afar","pattern":"NONE","coord_text":"NO_COORD"}
+        highs=btc_afar.get("highs",[]); lows=btc_afar.get("lows",[])
+        if len(lows)<1: return {"signal":"NO_MAP","reason":"no lows","pattern":"NONE","coord_text":"NO_COORD"}
+        coords=[]
+        for h in highs: coords.append({"x":-h["days_ago"],"y":h["price"],"type":"H"})
+        for l in lows: coords.append({"x":-l["days_ago"],"y":l["price"],"type":"L"})
+        coords=sorted(coords,key=lambda c:c["x"])
+        coord_text=""
+        for c in coords[-6:]: coord_text+=f"{c['type']}({abs(c['x'])}d {fmt(c['y'])})->"
+        coord_text=coord_text[:-2] if len(coord_text)>2 else "NO_COORD"
+        h1=highs[1]["price"] if len(highs)>1 else 0; h2=highs[0]["price"] if len(highs)>0 else 0
+        l1=lows[1]["price"] if len(lows)>1 else 0; l2=lows[0]["price"] if len(lows)>0 else 0
+        signal="RANGE"; reason=f"H {fmt(h1)}->{fmt(h2)} L {fmt(l1)}->{fmt(l2)}"
+        if l2>l1*0.97 and h2>h1*0.97: signal="BOTTOM_FORMING"; reason=f"HL {fmt(l1)}->{fmt(l2)}"
+        elif l2<l1*0.97: signal="BEAR_CONTINUE"; reason=f"LL {fmt(l1)}->{fmt(l2)}"
+        return {"signal":signal,"reason":reason,"pattern":"NONE","coords":coords,"coord_text":coord_text,"major_low":l2,"major_high":h2}
+    except Exception as e: return {"signal":"NO_MAP","reason":str(e)[:80],"pattern":"ERR","coord_text":"ERR"}
+
+def get_oi_funding(symbol):
+    try:
+        hist=load_json(OI_FILE,{});oi_now=None;funding=0.0
+        for url in [f"https://contract.mexc.com/api/v1/contract/open_interest/{symbol}",f"https://contract.mexc.com/api/v1/contract/ticker?symbol={symbol}"]:
+            try:
+                r=session.get(url,timeout=6).json();data=r.get("data",r)
+                if isinstance(data,dict):
+                    if "openInterest" in data:oi_now=float(data["openInterest"]);break
+                    if "holdVol" in data:oi_now=float(data["holdVol"]);break
+            except:continue
+        try:
+            fr=session.get(f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}",timeout=6).json();fd=fr.get("data",fr)
+            if isinstance(fd,dict):funding=float(fd.get("fundingRate",fd.get("funding_rate",0)))
+        except:funding=0.0
+        beta=BETA_MAP.get(symbol,2.0);oi_thr=20-(beta*3);oi_thr=max(oi_thr,8)
+        if oi_now is None:return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK","oi_change":0,"funding":funding}
+        prev=hist.get(symbol,{}).get("oi",oi_now);oi_change=(oi_now-prev)/prev*100 if prev>0 else 0
+        hist[symbol]={"oi":oi_now,"ts":time.time(),"funding":funding};atomic_save(OI_FILE,hist)
+        if oi_change>oi_thr*1.8:return {"status":"OI_SPIKE","ok":False,"msg":f"OI_SPIKE {oi_change:.1f}%","oi_change":oi_change,"funding":funding}
+        return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK OI{oi_change:+.1f}%","oi_change":oi_change,"funding":funding}
+    except:return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK err","oi_change":0,"funding":0}
+
+def get_mexc_perps_wall(symbol):
+    try:
+        url=f"https://contract.mexc.com/api/v1/contract/depth/{symbol}";r=session.get(url,timeout=6,headers={"User-Agent":"Mozilla/5.0"}).json();data=r.get("data",r);bids=data.get("bids",[])[:30];asks=data.get("asks",[])[:30]
+        if not bids or not asks: return {"bias":"UNKNOWN","note":"no book","imbalance":0,"whale_log":"NO BOOK"}
+        bid_vol=sum(float(b[1]) for b in bids);ask_vol=sum(float(a[1]) for a in asks);total=bid_vol+ask_vol;imb=(bid_vol-ask_vol)/total*100 if total else 0
+        whale_log=f"{symbol} BIDS {bid_vol:.0f} vs ASKS {ask_vol:.0f} {imb:+.1f}%"
+        if max(float(b[1]) for b in bids)>bid_vol*0.30: return {"bias":"WHALE_BUY_WALL","imbalance":imb,"note":"BUY WALL","whale_log":whale_log}
+        if max(float(a[1]) for a in asks)>ask_vol*0.30: return {"bias":"WHALE_SELL_WALL","imbalance":imb,"note":"SELL WALL","whale_log":whale_log}
+        return {"bias":"NEUTRAL","imbalance":imb,"note":f"Bal {imb:+.1f}%","whale_log":whale_log}
+    except: return {"bias":"ERR","note":"err","imbalance":0,"whale_log":"ERR"}
+
+def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2
+
+def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels):
     try:
         if not d30 or not d1: return None
-        afar_1d = get_afar_levels(d1, 90)
-        afar_30m = get_afar_levels(d30, 20)
-        if not afar_1d: return None
-        y_high, y_low, y_mid, y_range = get_daily_levels(d1)
+        monthly = h_levels.get("MONTHLY",{}).get("key")
+        daily = h_levels.get("DAILY",{}).get("key")
+        if not daily: daily = get_afar_levels(d1,20)
+        if not daily: return None
+        y_high, y_low, y_mid = get_daily_levels(d1)
         fear_zone = y_low * 1.10
         greed_zone = y_high * 0.90
         wall_bias = perps_wall.get("bias","")
-        imb = perps_wall.get("imbalance",0)
+        # HIERARCHY FILTER: MONTHLY KEY LEVELS > DAILY STRUCTURE
+        # Only BUY if live near MONTHLY low or DAILY low, not in middle
+        monthly_low = monthly["major_low"] if monthly else y_low*0.7
+        monthly_high = monthly["major_high"] if monthly else y_high*1.5
+        # DAILY STRUCTURE must be HL or near low
+        daily_struct_bias = h_levels.get("DAILY",{}).get("bias","")
         if live <= fear_zone and rsi_30m < RSI_BUY_MAX and wall_bias != "WHALE_SELL_WALL":
-            return {"side":"BUY","zone":f"FEAR RSI{RSI_BUY_MAX}","entry":live,"real_tp1":afar_1d["major_high"]*0.75,"real_tp2":afar_1d["major_high"],"dust_tp":afar_30m["recent_high"] if afar_30m else y_high*1.05,"sl":y_low*0.80,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"V201 FEAR {RSI_BUY_MAX} RSI {rsi_30m:.0f}<{RSI_BUY_MAX} ZONE {fmt(live)} <= {fmt(fear_zone)} {wall_bias}"}
+            # Extra check: MONTHLY KEY > DAILY STRUCTURE
+            if live > monthly_high*0.95: return None # too high vs monthly key
+            return {"side":"BUY","zone":f"FEAR RSI{RSI_BUY_MAX} | {daily_struct_bias}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}"}
         if live >= greed_zone and rsi_30m > RSI_SELL_MIN and wall_bias != "WHALE_BUY_WALL":
-            return {"side":"SELL","zone":f"GREED RSI{RSI_SELL_MIN}","entry":live,"real_tp1":afar_1d["major_low"]*1.25,"real_tp2":afar_1d["major_low"],"dust_tp":afar_30m["recent_low"] if afar_30m else y_low*0.95,"sl":y_high*1.20,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"V201 GREED {RSI_SELL_MIN} RSI {rsi_30m:.0f}>{RSI_SELL_MIN} ZONE {fmt(live)} >= {fmt(greed_zone)} {wall_bias}"}
+            return {"side":"SELL","zone":f"GREED RSI{RSI_SELL_MIN}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_high)} < DAILY LH"}
         return None
     except Exception as e: return None
 
@@ -298,37 +331,27 @@ def check_active_positions():
             if not isinstance(entry_info, dict): continue
             entry = float(entry_info.get("entry",0))
             side = entry_info.get("side","BUY")
-            tp1 = float(entry_info.get("tp1",0))
-            tp2 = float(entry_info.get("tp2",0))
-            sl = float(entry_info.get("sl",0))
+            tp1 = float(entry_info.get("tp1",0)); tp2 = float(entry_info.get("tp2",0)); sl = float(entry_info.get("sl",0))
             live = get_live(sym)
             if not live: continue
             pnl = (live-entry)/entry*100 if side=="BUY" else (entry-live)/entry*100
             hit=False
             if side=="BUY":
-                if live >= tp2: msg=f"🚀🚀 TP2 HIT SELL {sym} | BUY {fmt(entry)} -> NOW {fmt(live)} (+{pnl:.1f}%) | {TAG}\nHold days done! Take profit!"; hit=True
-                elif live >= tp1: msg=f"🎯 TP1 HIT SELL {sym} | BUY {fmt(entry)} -> NOW {fmt(live)} (+{pnl:.1f}%) | {TAG}\nTake 50% profit, move SL to entry"; hit=False
+                if live >= tp2: msg=f"🚀🚀 TP2 HIT SELL {sym} | BUY {fmt(entry)} -> NOW {fmt(live)} (+{pnl:.1f}%) | {TAG}"; hit=True
+                elif live >= tp1: msg=f"🎯 TP1 HIT SELL {sym} | BUY {fmt(entry)} -> NOW {fmt(live)} (+{pnl:.1f}%) | {TAG}"; hit=False
                 elif live <= sl: msg=f"🛑 SL HIT SELL {sym} | BUY {fmt(entry)} -> NOW {fmt(live)} ({pnl:.1f}%) | {TAG}"; hit=True
                 else: continue
-                if "TP1 HIT" in msg:
-                    tg(msg); print(msg); continue
+                if "TP1 HIT" in msg: tg(msg); print(msg); continue
             else:
                 if live <= tp2: msg=f"🚀🚀 TP2 HIT BUY {sym} | SELL {fmt(entry)} -> NOW {fmt(live)} (+{pnl:.1f}%) | {TAG}"; hit=True
                 elif live <= tp1: msg=f"🎯 TP1 HIT BUY {sym} | SELL {fmt(entry)} -> NOW {fmt(live)} (+{pnl:.1f}%) | {TAG}"; hit=False
                 elif live >= sl: msg=f"🛑 SL HIT BUY {sym} | SELL {fmt(entry)} -> NOW {fmt(live)} ({pnl:.1f}%)"; hit=True
                 else: continue
-                if "TP1 HIT" in msg:
-                    tg(msg); print(msg); continue
+                if "TP1 HIT" in msg: tg(msg); print(msg); continue
             if hit:
-                tg(msg); print(msg)
-                del ACTIVE[sym]
-                COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry}
-                updated=True
-        except Exception as e:
-            print(f"check active err {sym} {e}")
-            continue
-    if updated:
-        save_a(); save_c()
+                tg(msg); print(msg); del ACTIVE[sym]; COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry}; updated=True
+        except: continue
+    if updated: save_a(); save_c()
 
 def scan_once():
     btc_trend,btc_week_change,btc_price,btc_d1,btc_afar=get_weekly_phase()
@@ -340,33 +363,37 @@ def scan_once():
             if sym in ACTIVE: continue
             last_entry = COOLDOWN.get(sym)
             if last_entry and isinstance(last_entry, dict) and "last_ts" in last_entry:
-                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600:
-                    continue
-            d1=kl(sym,"Day1"); d30=kl(sym,"Min30"); d15=kl(sym,"Min15"); d5=kl(sym,"Min5")
+                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600: continue
+            d1=kl(sym,"Day1"); d30=kl(sym,"Min30")
             if not d1 or not d30: continue
             live=get_live(sym)
             if not live: live=d1["c"][-1]
             rsi30=calc_rsi(d30["c"])
             wall=get_mexc_perps_wall(sym)
-            afar1=get_afar_levels(d1,90)
-            if not afar1: continue
             third=get_oi_funding(sym)
             if not third.get("ok",True): continue
-            v201=v201_30m_signal(d30,d1,live,rsi30,wall)
-            if v201 and v201.get("side") in ["BUY","SELL"]:
-                entry=v201["entry"]; side=v201["side"]; zone=v201["zone"]
-                real_tp1=v201["real_tp1"]; real_tp2=v201["real_tp2"]; sl=v201["sl"]
-                afar1d=v201["afar_1d"]; afar30m=v201["afar_30m"]
-                hold2=calc_hold_days_dynamic(entry,real_tp2,afar1d["atr"])
-                beta=BETA_MAP.get(sym,2.0)
-                liq = get_liquidity_grab_levels(afar1d, afar30m, entry, side, afar1d["atr"])
-                chain_text = "\n".join(liq["chain"])
-                ACTIVE[sym] = {"entry": entry, "side": side, "tp1": liq["up_tp1"] if side=="BUY" else liq["down_tp1"], "tp2": liq["final_tp2"], "sl": sl, "time": get_time(), "rsi": rsi30, "zone": zone}
+            h_levels=get_hierarchy_levels(sym)
+            v203=v203_signal(d30,d1,live,rsi30,wall,h_levels)
+            if v203 and v203.get("side") in ["BUY","SELL"]:
+                entry=v203["entry"]; side=v203["side"]; zone=v203["zone"]
+                sl=v203["sl"]
+                atr = h_levels.get("DAILY",{}).get("key",{}).get("atr", live*0.04)
+                liq = get_liquidity_grab_levels_hierarchy(h_levels, entry, side, atr)
+                hold2=calc_hold_days_dynamic(entry,liq["final_tp2"],atr)
+                ACTIVE[sym] = {"entry": entry, "side": side, "tp1": liq["up_tp1"] if side=="BUY" else liq.get("down_tp1",live*0.95), "tp2": liq["final_tp2"], "sl": sl, "time": get_time(), "rsi": rsi30, "zone": zone}
                 save_a()
                 COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry, "rsi": rsi30, "zone": zone}
                 save_c()
-                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f}\n🗺 BTC: {btc_map.get('coord_text','')} {btc_map.get('signal','')}\n📈 {afar1d['month_line']} | ATR {fmt(afar1d['atr'])}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP:\n{chain_text}\n🏁 TP2 {fmt(liq['final_tp2'])} {hold2}D | SL {fmt(sl)} | Cooldown {COOLDOWN_HOURS}H\n🧠 {third['msg']}"
-                results.append((sym,msg,v201))
+                # BUILD HIERARCHY TEXT
+                hier_text=""
+                for lvl_name in ["MONTHLY","WEEKLY","DAILY","H4","H1","M15"]:
+                    if lvl_name in h_levels:
+                        k = h_levels[lvl_name]["key"]
+                        b = h_levels[lvl_name]["bias"]
+                        hier_text+=f"{lvl_name} KEY {fmt(k['major_low'])}-{fmt(k['major_high'])} > {b}\n"
+                chain_text = "\n".join(liq["chain"])
+                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f}\n🗺 BTC: {btc_map.get('coord_text','')} {btc_map.get('signal','')}\n📊 HIERARCHY:\n{hier_text}🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n{chain_text}\n🏁 TP2 {fmt(liq['final_tp2'])} {hold2}D | SUPER {fmt(liq.get('super_tp',0))} | MOON {fmt(liq.get('moon_tp',0))} | SL {fmt(sl)}\n🧠 {third['msg']}"
+                results.append((sym,msg,v203))
         except Exception as e:
             print(f"ERR {sym} {e}")
             continue
@@ -378,10 +405,8 @@ def main():
     if not res:
         print(f"[{get_time()}] No new signals - active positions checked. Cooldown {COOLDOWN_HOURS}H")
         return
-    for sym,msg,v201 in res[:TOP_N_PER_SCAN]:
-        tg(msg)
-        print(msg)
-        time.sleep(1)
+    for sym,msg,v203 in res[:TOP_N_PER_SCAN]:
+        tg(msg); print(msg); time.sleep(1)
 
 if __name__=="__main__":
     main()
