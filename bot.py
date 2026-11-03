@@ -7,12 +7,9 @@ BETA_MAP={"BTC_USDT":1.0,"GRASS_USDT":2.5,"KOMA_USDT":2.2,"SENT_USDT":2.2,"SIREN
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
-MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
-TAG="V203-6LEVEL-HIERARCHY"
-RSI_BUY_MAX = 20
-RSI_SELL_MIN = 80
-COOLDOWN_HOURS = 12
+TAG="V203.1-BETA-RSI-6LEVEL"
+COOLDOWN_HOURS=12; TOP_N_PER_SCAN=10
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -53,7 +50,6 @@ def tg(m):
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m},timeout=15)
  except:pass
 
-# === 6 LEVEL HIERARCHY ===
 HIERARCHY = {
     "MONTHLY": {"key_tf": "Month1", "struct_tf": "Day1", "key_lb": 12, "struct_lb": 90, "label": "MONTHLY KEY > DAILY STRUCT"},
     "WEEKLY":  {"key_tf": "Week1", "struct_tf": "Hour4", "key_lb": 12, "struct_lb": 60, "label": "WEEKLY KEY > H4 STRUCT"},
@@ -63,10 +59,18 @@ HIERARCHY = {
     "M15":     {"key_tf": "Min15", "struct_tf": "Min1", "key_lb": 96, "struct_lb": 120, "label": "M15 KEY > M1 STRUCT"},
 }
 
+def get_rsi_thresholds(sym):
+    beta = BETA_MAP.get(sym, 2.0)
+    if beta >= 2.4: # VELVET, GRASS, SIREN - extreme pumpers
+        return 15, 85
+    elif beta >= 2.0: # KOMA, SENT, LAB
+        return 18, 82
+    else: # BTC, DOGE, PEPE, JASMY
+        return 20, 80
+
 def kl(symbol,interval):
  sec_map={"Min1":60,"Min5":300,"Min15":900,"Min30":1800,"Hour1":3600,"Min60":3600,"Hour4":14400,"Day1":86400,"Week1":604800,"Month1":2592000}
  sec=sec_map.get(interval,300)
- # fallback for Month1 if not supported by API
  api_interval = interval
  if interval=="Month1": api_interval="Day1"; sec=86400
  if interval=="Week1": api_interval="Day1"; sec=86400
@@ -100,11 +104,9 @@ def calc_atr(d1,period=14):
   for i in range(1,len(c)):tr.append(max(h[i]-l[i],abs(h[i]-c[i-1]),abs(l[i]-c[i-1])))
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
-
 def calc_hold_days_dynamic(entry,target,atr):
  if atr==0 or atr is None:atr=abs(entry-target)/3.5 if target else entry*0.03
  dist=abs(target-entry);days=dist/atr if atr>0 else 3.5;days=max(1,round(days));return min(days,30)
-
 def calc_rsi(c, period=14):
     try:
         if len(c)<period+1: return 50
@@ -146,18 +148,16 @@ def get_hierarchy_levels(sym):
     levels={}
     for name,cfg in HIERARCHY.items():
         try:
-            d_key=kl(sym,cfg["key_tf"])
-            d_struct=kl(sym,cfg["struct_tf"])
+            d_key=kl(sym,cfg["key_tf"]); d_struct=kl(sym,cfg["struct_tf"])
             if not d_key: continue
             key_afar=get_afar_levels(d_key,cfg["key_lb"])
             struct_afar=get_afar_levels(d_struct,cfg["struct_lb"]) if d_struct else None
             if not key_afar: continue
-            # KEY LEVELS > STRUCTURE LOGIC
             struct_bias="NEUTRAL"
-            if struct_afar and len(struct_afar["lows"])>1:
+            if struct_afar and len(struct_afar["lows"])>1 and len(struct_afar["highs"])>0:
                 l1=struct_afar["lows"][1]["price"]; l2=struct_afar["lows"][0]["price"]
-                h1=struct_afar["highs"][1]["price"] if len(struct_afar["highs"])>1 else 0
-                h2=struct_afar["highs"][0]["price"] if struct_afar["highs"] else 0
+                h1=struct_afar["highs"][1]["price"] if len(struct_afar["highs"])>1 else struct_afar["highs"][0]["price"]
+                h2=struct_afar["highs"][0]["price"]
                 if l2>l1 and h2>h1*0.97: struct_bias=f"{cfg['struct_tf']} HL HH BULL"
                 elif l2<l1 and h2<h1: struct_bias=f"{cfg['struct_tf']} LL LH BEAR"
                 elif l2>l1: struct_bias=f"{cfg['struct_tf']} HL"
@@ -170,92 +170,37 @@ def get_liquidity_grab_levels_hierarchy(h_levels, live, side, atr):
     try:
         if not atr or atr==0: atr=live*0.04
         min_gap = live*0.04
-        # GET KEY LEVELS FROM HIERARCHY
-        monthly = h_levels.get("MONTHLY",{}).get("key")
-        weekly = h_levels.get("WEEKLY",{}).get("key")
-        daily = h_levels.get("DAILY",{}).get("key")
-        h4 = h_levels.get("H4",{}).get("key")
-        h1 = h_levels.get("H1",{}).get("key")
-        m15 = h_levels.get("M15",{}).get("key")
-
-        # FALLBACKS
-        monthly_high = monthly["major_high"] if monthly else live*1.5
-        monthly_low = monthly["major_low"] if monthly else live*0.5
-        weekly_high = weekly["major_high"] if weekly else daily["major_high"]*1.1 if daily else live*1.2
-        weekly_low = weekly["major_low"] if weekly else daily["major_low"]*0.9 if daily else live*0.8
-        daily_high = daily["major_high"] if daily else live*1.2
-        daily_low = daily["major_low"] if daily else live*0.8
-        h4_high = h4["major_high"] if h4 else live*1.1
-        h4_low = h4["major_low"] if h4 else live*0.9
-
+        monthly = h_levels.get("MONTHLY",{}).get("key"); weekly = h_levels.get("WEEKLY",{}).get("key")
+        daily = h_levels.get("DAILY",{}).get("key"); h4 = h_levels.get("H4",{}).get("key"); h1 = h_levels.get("H1",{}).get("key"); m15 = h_levels.get("M15",{}).get("key")
+        monthly_high = monthly["major_high"] if monthly else live*1.5; monthly_low = monthly["major_low"] if monthly else live*0.5
+        weekly_high = weekly["major_high"] if weekly else daily["major_high"]*1.1 if daily else live*1.2; weekly_low = weekly["major_low"] if weekly else daily["major_low"]*0.9 if daily else live*0.8
+        daily_high = daily["major_high"] if daily else live*1.2; daily_low = daily["major_low"] if daily else live*0.8
         if side=="BUY":
-            # M15 KEY > M1 STRUCT : entry at M15 low
-            # H1 KEY > M5 STRUCT : TP1 at H1 high
-            # H4 KEY > M15 STRUCT : TP2 at H4 high
-            # DAILY KEY > H1 STRUCT : FINAL at DAILY high
-            # WEEKLY KEY > H4 STRUCT : SUPER at WEEKLY high
-            # MONTHLY KEY > DAILY STRUCT : MOON at MONTHLY high
-            up_tp1 = round_level(h1["major_high"]*0.8 if h1 else live + atr*1.5)
-            up_tp2 = round_level(h4["major_high"]*0.85 if h4 else live + atr*3)
-            final_tp1 = round_level(daily_high*0.75)
-            final_tp2 = round_level(daily_high)
-            super_tp = round_level(weekly_high)
-            moon_tp = round_level(monthly_high)
-
-            # enforce min gap
+            up_tp1 = round_level(h1["major_high"]*0.8 if h1 else live + atr*1.5); up_tp2 = round_level(h4["major_high"]*0.85 if h4 else live + atr*3)
+            final_tp1 = round_level(daily_high*0.75); final_tp2 = round_level(daily_high); super_tp = round_level(weekly_high); moon_tp = round_level(monthly_high)
             if up_tp1 - live < min_gap: up_tp1 = round_level(live + min_gap)
             if up_tp2 - up_tp1 < min_gap: up_tp2 = round_level(up_tp1 + min_gap)
             if final_tp1 <= up_tp2: final_tp1 = round_level(up_tp2 + min_gap)
             if final_tp2 <= final_tp1: final_tp2 = round_level(final_tp1 + min_gap)
             if super_tp <= final_tp2: super_tp = round_level(final_tp2 + min_gap)
             if moon_tp <= super_tp: moon_tp = round_level(super_tp + min_gap*2)
-
             chain=[]
-            chain.append(f"BUY {fmt(live)} (M15 KEY {fmt(m15['major_low']) if m15 else 'N/A'} > M1 STRUCT)")
-            chain.append(f"-> TP1 {fmt(up_tp1)} H1 KEY > M5 (+{((up_tp1-live)/live*100):.1f}%) SELL")
-            chain.append(f"-> TP2 {fmt(up_tp2)} H4 KEY > M15 (+{((up_tp2-live)/live*100):.1f}%) SELL")
-            chain.append(f"-> TP3 {fmt(final_tp1)} DAILY KEY > H1 (+{((final_tp1-live)/live*100):.1f}%) SELL")
-            chain.append(f"-> TP4 {fmt(final_tp2)} DAILY HIGH (+{((final_tp2-live)/live*100):.1f}%) SELL")
-            chain.append(f"-> TP5 {fmt(super_tp)} WEEKLY KEY > H4 (+{((super_tp-live)/live*100):.1f}%) SELL")
-            chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY > DAILY (+{((moon_tp-live)/live*100):.1f}%) SELL")
+            chain.append(f"BUY {fmt(live)} (M15 KEY {fmt(m15['major_low']) if m15 else 'N/A'} > M1)")
+            chain.append(f"-> TP1 {fmt(up_tp1)} H1 KEY > M5 (+{((up_tp1-live)/live*100):.1f}%)")
+            chain.append(f"-> TP2 {fmt(up_tp2)} H4 KEY > M15 (+{((up_tp2-live)/live*100):.1f}%)")
+            chain.append(f"-> TP3 {fmt(final_tp1)} DAILY KEY > H1 (+{((final_tp1-live)/live*100):.1f}%)")
+            chain.append(f"-> TP4 {fmt(final_tp2)} DAILY HIGH (+{((final_tp2-live)/live*100):.1f}%)")
+            chain.append(f"-> TP5 {fmt(super_tp)} WEEKLY KEY > H4 (+{((super_tp-live)/live*100):.1f}%)")
+            chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY > DAILY (+{((moon_tp-live)/live*100):.1f}%)")
             return {"chain":chain,"up_tp1":up_tp1,"up_tp2":up_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
         else:
-            down_tp1 = round_level(h1["major_low"]*1.2 if h1 else live - atr*1.5)
-            down_tp2 = round_level(h4["major_low"]*1.15 if h4 else live - atr*3)
-            final_tp1 = round_level(daily_low*1.25)
-            final_tp2 = round_level(daily_low)
-            super_tp = round_level(weekly_low)
-            moon_tp = round_level(monthly_low)
+            down_tp1 = round_level(h1["major_low"]*1.2 if h1 else live - atr*1.5); down_tp2 = round_level(h4["major_low"]*1.15 if h4 else live - atr*3)
+            final_tp1 = round_level(daily_low*1.25); final_tp2 = round_level(daily_low); super_tp = round_level(weekly_low); moon_tp = round_level(monthly_low)
             if live - down_tp1 < min_gap: down_tp1 = round_level(live - min_gap)
-            chain=[]
-            chain.append(f"SELL {fmt(live)} -> DOWN TP {fmt(down_tp1)} H1 KEY BUY")
-            chain.append(f"-> TP2 {fmt(down_tp2)} H4 KEY BUY")
-            chain.append(f"-> FINAL {fmt(final_tp2)} DAILY KEY BUY")
-            chain.append(f"-> SUPER {fmt(super_tp)} WEEKLY KEY BUY")
-            chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY BUY")
+            chain=[]; chain.append(f"SELL {fmt(live)} -> DOWN TP {fmt(down_tp1)} H1 KEY BUY"); chain.append(f"-> TP2 {fmt(down_tp2)} H4 KEY BUY"); chain.append(f"-> FINAL {fmt(final_tp2)} DAILY KEY BUY"); chain.append(f"-> SUPER {fmt(super_tp)} WEEKLY KEY BUY"); chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY BUY")
             return {"chain":chain,"up_tp1":live,"down_tp1":down_tp1,"down_tp2":down_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
     except Exception as e:
         return {"chain":[f"ERR {e}"],"up_tp1":live*1.05,"down_tp1":live*0.95,"final_tp1":live*1.1,"final_tp2":live*1.2,"super_tp":live*1.3,"moon_tp":live*1.5,"atr":live*0.04}
-
-def map_btc_coordinates(btc_afar, btc_d1):
-    try:
-        if not btc_afar: return {"signal":"NO_MAP","reason":"no afar","pattern":"NONE","coord_text":"NO_COORD"}
-        highs=btc_afar.get("highs",[]); lows=btc_afar.get("lows",[])
-        if len(lows)<1: return {"signal":"NO_MAP","reason":"no lows","pattern":"NONE","coord_text":"NO_COORD"}
-        coords=[]
-        for h in highs: coords.append({"x":-h["days_ago"],"y":h["price"],"type":"H"})
-        for l in lows: coords.append({"x":-l["days_ago"],"y":l["price"],"type":"L"})
-        coords=sorted(coords,key=lambda c:c["x"])
-        coord_text=""
-        for c in coords[-6:]: coord_text+=f"{c['type']}({abs(c['x'])}d {fmt(c['y'])})->"
-        coord_text=coord_text[:-2] if len(coord_text)>2 else "NO_COORD"
-        h1=highs[1]["price"] if len(highs)>1 else 0; h2=highs[0]["price"] if len(highs)>0 else 0
-        l1=lows[1]["price"] if len(lows)>1 else 0; l2=lows[0]["price"] if len(lows)>0 else 0
-        signal="RANGE"; reason=f"H {fmt(h1)}->{fmt(h2)} L {fmt(l1)}->{fmt(l2)}"
-        if l2>l1*0.97 and h2>h1*0.97: signal="BOTTOM_FORMING"; reason=f"HL {fmt(l1)}->{fmt(l2)}"
-        elif l2<l1*0.97: signal="BEAR_CONTINUE"; reason=f"LL {fmt(l1)}->{fmt(l2)}"
-        return {"signal":signal,"reason":reason,"pattern":"NONE","coords":coords,"coord_text":coord_text,"major_low":l2,"major_high":h2}
-    except Exception as e: return {"signal":"NO_MAP","reason":str(e)[:80],"pattern":"ERR","coord_text":"ERR"}
 
 def get_oi_funding(symbol):
     try:
@@ -292,29 +237,22 @@ def get_mexc_perps_wall(symbol):
 
 def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2
 
-def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels):
+def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
     try:
-        if not d30 or not d1: return None
-        monthly = h_levels.get("MONTHLY",{}).get("key")
-        daily = h_levels.get("DAILY",{}).get("key")
+        buy_thr,sell_thr = get_rsi_thresholds(sym)
+        monthly = h_levels.get("MONTHLY",{}).get("key"); daily = h_levels.get("DAILY",{}).get("key")
         if not daily: daily = get_afar_levels(d1,20)
         if not daily: return None
         y_high, y_low, y_mid = get_daily_levels(d1)
-        fear_zone = y_low * 1.10
-        greed_zone = y_high * 0.90
+        fear_zone = y_low * 1.10; greed_zone = y_high * 0.90
         wall_bias = perps_wall.get("bias","")
-        # HIERARCHY FILTER: MONTHLY KEY LEVELS > DAILY STRUCTURE
-        # Only BUY if live near MONTHLY low or DAILY low, not in middle
         monthly_low = monthly["major_low"] if monthly else y_low*0.7
         monthly_high = monthly["major_high"] if monthly else y_high*1.5
-        # DAILY STRUCTURE must be HL or near low
-        daily_struct_bias = h_levels.get("DAILY",{}).get("bias","")
-        if live <= fear_zone and rsi_30m < RSI_BUY_MAX and wall_bias != "WHALE_SELL_WALL":
-            # Extra check: MONTHLY KEY > DAILY STRUCTURE
-            if live > monthly_high*0.95: return None # too high vs monthly key
-            return {"side":"BUY","zone":f"FEAR RSI{RSI_BUY_MAX} | {daily_struct_bias}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}"}
-        if live >= greed_zone and rsi_30m > RSI_SELL_MIN and wall_bias != "WHALE_BUY_WALL":
-            return {"side":"SELL","zone":f"GREED RSI{RSI_SELL_MIN}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_high)} < DAILY LH"}
+        if live <= fear_zone and rsi_30m < buy_thr and wall_bias != "WHALE_SELL_WALL":
+            if live > monthly_high*0.95: return None
+            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr}","buy_thr":buy_thr,"sell_thr":sell_thr}
+        if live >= greed_zone and rsi_30m > sell_thr and wall_bias != "WHALE_BUY_WALL":
+            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr}","buy_thr":buy_thr,"sell_thr":sell_thr}
         return None
     except Exception as e: return None
 
@@ -329,9 +267,7 @@ def check_active_positions():
         try:
             entry_info = ACTIVE[sym]
             if not isinstance(entry_info, dict): continue
-            entry = float(entry_info.get("entry",0))
-            side = entry_info.get("side","BUY")
-            tp1 = float(entry_info.get("tp1",0)); tp2 = float(entry_info.get("tp2",0)); sl = float(entry_info.get("sl",0))
+            entry = float(entry_info.get("entry",0)); side = entry_info.get("side","BUY"); tp1 = float(entry_info.get("tp1",0)); tp2 = float(entry_info.get("tp2",0)); sl = float(entry_info.get("sl",0))
             live = get_live(sym)
             if not live: continue
             pnl = (live-entry)/entry*100 if side=="BUY" else (entry-live)/entry*100
@@ -353,60 +289,83 @@ def check_active_positions():
         except: continue
     if updated: save_a(); save_c()
 
-def scan_once():
+def scan_once(debug=True):
     btc_trend,btc_week_change,btc_price,btc_d1,btc_afar=get_weekly_phase()
-    btc_map=map_btc_coordinates(btc_afar,btc_d1) if btc_afar else {"signal":"NO_MAP","reason":"no btc afar","pattern":"NONE","coord_text":"NO_COORD"}
     check_active_positions()
     results=[]
+    print(f"\n[{get_time()}] BTC {fmt(btc_price)} | {TAG} | BETA RSI: VELVET/GRASS 15/85, KOMA 18/82, BTC 20/80")
+    print("-"*90)
     for sym in SYMBOLS:
         try:
-            if sym in ACTIVE: continue
+            if sym in ACTIVE: print(f"{sym} ACTIVE - skip"); continue
             last_entry = COOLDOWN.get(sym)
             if last_entry and isinstance(last_entry, dict) and "last_ts" in last_entry:
-                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600: continue
+                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600: 
+                    hrs_left = (COOLDOWN_HOURS*3600 - (time.time()-last_entry["last_ts"]))/3600
+                    if debug: print(f"{sym} COOLDOWN {hrs_left:.1f}H left"); 
+                    continue
             d1=kl(sym,"Day1"); d30=kl(sym,"Min30")
-            if not d1 or not d30: continue
+            if not d1 or not d30: print(f"{sym} NO DATA"); continue
             live=get_live(sym)
             if not live: live=d1["c"][-1]
             rsi30=calc_rsi(d30["c"])
             wall=get_mexc_perps_wall(sym)
             third=get_oi_funding(sym)
-            if not third.get("ok",True): continue
+            if not third.get("ok",True): print(f"{sym} OI BLOCK {third['msg']}"); continue
             h_levels=get_hierarchy_levels(sym)
-            v203=v203_signal(d30,d1,live,rsi30,wall,h_levels)
+            buy_thr,sell_thr = get_rsi_thresholds(sym)
+            v203=v203_signal(d30,d1,live,rsi30,wall,h_levels,sym)
+
+            # DEBUG PRINT - SEE IT WORKING
+            if debug:
+                daily = h_levels.get("DAILY",{}).get("key")
+                monthly = h_levels.get("MONTHLY",{}).get("key")
+                y_high, y_low, y_mid = get_daily_levels(d1)
+                fear_zone = y_low*1.10; greed_zone = y_high*0.90
+                status = "NEUTRAL"
+                if live <= fear_zone: status = "NEAR FEAR ZONE"
+                if live >= greed_zone: status = "NEAR GREED ZONE"
+                print(f"\n{sym} LIVE {fmt(live)} RSI30 {rsi30:.0f} (BUY<{buy_thr}/SELL>{sell_thr}) BETA{BETA_MAP[sym]} | {status}")
+                if monthly: print(f"  MONTHLY KEY {fmt(monthly['major_low'])}-{fmt(monthly['major_high'])} > DAILY {h_levels.get('DAILY',{}).get('bias','')}")
+                if daily: print(f"  DAILY KEY {fmt(daily['major_low'])}-{fmt(daily['major_high'])} {daily['shape']} {daily['hl_seq']} | Y-Low {fmt(y_low)} Fear {fmt(fear_zone)} | Y-High {fmt(y_high)} Greed {fmt(greed_zone)}")
+                print(f"  WHALE {wall['whale_log']} OI {third['msg']}")
+                # show how far from buy/sell
+                if rsi30 < buy_thr and live <= fear_zone: print(f"  >>> READY TO BUY (if not cooldown)")
+                elif rsi30 > sell_thr and live >= greed_zone: print(f"  >>> READY TO SELL")
+                else: print(f"  Need RSI {rsi30:.0f} -> {buy_thr} for BUY or {sell_thr} for SELL + price to zone")
+
             if v203 and v203.get("side") in ["BUY","SELL"]:
-                entry=v203["entry"]; side=v203["side"]; zone=v203["zone"]
-                sl=v203["sl"]
+                entry=v203["entry"]; side=v203["side"]; zone=v203["zone"]; sl=v203["sl"]
                 atr = h_levels.get("DAILY",{}).get("key",{}).get("atr", live*0.04)
                 liq = get_liquidity_grab_levels_hierarchy(h_levels, entry, side, atr)
                 hold2=calc_hold_days_dynamic(entry,liq["final_tp2"],atr)
                 ACTIVE[sym] = {"entry": entry, "side": side, "tp1": liq["up_tp1"] if side=="BUY" else liq.get("down_tp1",live*0.95), "tp2": liq["final_tp2"], "sl": sl, "time": get_time(), "rsi": rsi30, "zone": zone}
-                save_a()
-                COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry, "rsi": rsi30, "zone": zone}
-                save_c()
-                # BUILD HIERARCHY TEXT
+                save_a(); COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry, "rsi": rsi30, "zone": zone}; save_c()
                 hier_text=""
                 for lvl_name in ["MONTHLY","WEEKLY","DAILY","H4","H1","M15"]:
                     if lvl_name in h_levels:
-                        k = h_levels[lvl_name]["key"]
-                        b = h_levels[lvl_name]["bias"]
+                        k = h_levels[lvl_name]["key"]; b = h_levels[lvl_name]["bias"]
                         hier_text+=f"{lvl_name} KEY {fmt(k['major_low'])}-{fmt(k['major_high'])} > {b}\n"
                 chain_text = "\n".join(liq["chain"])
-                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f}\n🗺 BTC: {btc_map.get('coord_text','')} {btc_map.get('signal','')}\n📊 HIERARCHY:\n{hier_text}🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n{chain_text}\n🏁 TP2 {fmt(liq['final_tp2'])} {hold2}D | SUPER {fmt(liq.get('super_tp',0))} | MOON {fmt(liq.get('moon_tp',0))} | SL {fmt(sl)}\n🧠 {third['msg']}"
+                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr})\n📊 HIERARCHY:\n{hier_text}🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n{chain_text}\n🏁 TP2 {fmt(liq['final_tp2'])} {hold2}D | SUPER {fmt(liq.get('super_tp',0))} | MOON {fmt(liq.get('moon_tp',0))} | SL {fmt(sl)}\n🧠 {third['msg']}"
                 results.append((sym,msg,v203))
         except Exception as e:
             print(f"ERR {sym} {e}")
             continue
-    return results, btc_price, btc_map
+    return results, btc_price
 
 def main():
     import argparse; p=argparse.ArgumentParser(); p.add_argument("--once",action="store_true"); args=p.parse_args()
-    res,btc_price,btc_map=scan_once()
+    res,btc_price=scan_once(debug=True)
     if not res:
-        print(f"[{get_time()}] No new signals - active positions checked. Cooldown {COOLDOWN_HOURS}H")
+        print(f"\n[{get_time()}] No new signals - but hierarchy printed above. Cooldown {COOLDOWN_HOURS}H")
+        print("Next signals when RSI hits beta thresholds:")
+        for sym in SYMBOLS:
+            buy_thr,sell_thr = get_rsi_thresholds(sym)
+            print(f"  {sym}: BUY RSI<{buy_thr} SELL RSI>{sell_thr}")
         return
     for sym,msg,v203 in res[:TOP_N_PER_SCAN]:
-        tg(msg); print(msg); time.sleep(1)
+        tg(msg); print("\n"+msg); time.sleep(1)
 
 if __name__=="__main__":
     main()
