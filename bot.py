@@ -9,14 +9,12 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
 MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
-TAG="V201-CLUSTER-30M-BUY-SELL-FINAL"
+TAG="V202-LIQUIDITY-GRAB-BUY-SELL-MAP"
 ENTRY_TF="Min30";EXIT_TF="Day1";V201_DUST_FILTER=True;V201_BOTH_SIDES=True;V201_HOLD_DAYS=5
 
-# ===== V201 RSI CONFIG 20/80 + 12H COOLDOWN =====
 RSI_BUY_MAX = 20
 RSI_SELL_MIN = 80
-COOLDOWN_HOURS = 12  # Don't resignal same coin for 12H
-# ================================================
+COOLDOWN_HOURS = 12
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
@@ -56,6 +54,48 @@ def tg(m):
  if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:print(m);return
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m},timeout=15)
  except:pass
+
+# ===== NEW: LIQUIDITY GRAB MAPPING =====
+def get_liquidity_grab_levels(afar1d, afar30m, live, side):
+    try:
+        recent_high_30m = afar30m["recent_high"] if afar30m and "recent_high" in afar30m else live*1.05
+        recent_low_30m = afar30m["recent_low"] if afar30m and "recent_low" in afar30m else live*0.95
+        major_high = afar1d.get("major_high", live*1.2) if afar1d else live*1.2
+        major_low = afar1d.get("major_low", live*0.8) if afar1d else live*0.8
+        y_low = afar1d.get("recent_low", recent_low_30m) if afar1d else recent_low_30m
+
+        up_tp1 = round_level(recent_high_30m)
+        up_tp2 = round_level(major_high*0.75) if side=="BUY" else round_level(major_high*0.85)
+        if up_tp2 <= up_tp1:
+            up_tp2 = round_level(up_tp1*1.08)
+        
+        down_tp1 = round_level(recent_low_30m)
+        down_tp2 = round_level(major_low*1.25) if side=="SELL" else round_level(y_low*1.02)
+        if side=="BUY":
+            down_tp1 = round_level(live*0.99 if live>0 else recent_low_30m)
+            down_tp2 = round_level(live*1.02)
+
+        final_tp1 = round_level(major_high*0.75) if side=="BUY" else round_level(major_low*1.25)
+        final_tp2 = round_level(major_high) if side=="BUY" else round_level(major_low)
+
+        if side=="BUY":
+            chain = []
+            chain.append(f"BUY {fmt(live)} -> UP TP {fmt(up_tp1)} SELL (+{((up_tp1-live)/live*100):.1f}%)")
+            chain.append(f"SELL {fmt(up_tp1)} -> DOWN TP {fmt(down_tp1)} BUY ({((down_tp1-up_tp1)/up_tp1*100):.1f}%)")
+            chain.append(f"BUY {fmt(down_tp1)} -> UP TP {fmt(up_tp2)} SELL (+{((up_tp2-down_tp1)/down_tp1*100):.1f}%)")
+            chain.append(f"SELL {fmt(up_tp2)} -> DOWN TP {fmt(down_tp2)} BUY ({((down_tp2-up_tp2)/up_tp2*100):.1f}%)")
+            chain.append(f"BUY {fmt(down_tp2)} -> UP TP {fmt(final_tp1)} TP1 SELL (+{((final_tp1-down_tp2)/down_tp2*100):.1f}%)")
+            chain.append(f"BUY {fmt(down_tp2)} -> UP TP {fmt(final_tp2)} TP2 SELL (+{((final_tp2-down_tp2)/down_tp2*100):.1f}%)")
+        else:
+            chain = []
+            chain.append(f"SELL {fmt(live)} -> DOWN TP {fmt(down_tp1)} BUY ({((live-down_tp1)/live*100):.1f}%)")
+            chain.append(f"BUY {fmt(down_tp1)} -> UP TP {fmt(up_tp1)} SELL (+{((up_tp1-down_tp1)/down_tp1*100):.1f}%)")
+            chain.append(f"SELL {fmt(up_tp1)} -> DOWN TP {fmt(final_tp1)} TP1 BUY")
+            chain.append(f"SELL {fmt(up_tp1)} -> DOWN TP {fmt(final_tp2)} TP2 BUY")
+
+        return {"chain": chain, "up_tp1": up_tp1, "up_tp2": up_tp2, "down_tp1": down_tp1, "down_tp2": down_tp2, "final_tp1": final_tp1, "final_tp2": final_tp2}
+    except Exception as e:
+        return {"chain":[f"ERR mapping {e}"], "up_tp1":live*1.05, "down_tp1":live*0.95, "final_tp1":live*1.1, "final_tp2":live*1.2, "up_tp2":live*1.08, "down_tp2":live*1.02}
 
 def map_coin_pattern(afar):
     try:
@@ -291,7 +331,6 @@ def scan_once():
     results=[]
     for sym in SYMBOLS:
         try:
-            # ===== 12H COOLDOWN CHECK FIRST =====
             last_entry = COOLDOWN.get(sym)
             if last_entry and isinstance(last_entry, dict) and "last_ts" in last_entry:
                 if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600:
@@ -309,7 +348,6 @@ def scan_once():
             if not afar1: continue
             third=get_oi_funding(sym)
             wick=detect_wick_grab(d30)
-            # ===== V201 FIRST - RSI 20/80 =====
             v201=v201_30m_signal(d30,d1,live,rsi30,wall)
             if v201 and v201.get("side") in ["BUY","SELL"]:
                 entry=v201["entry"]; side=v201["side"]; zone=v201["zone"]
@@ -317,26 +355,23 @@ def scan_once():
                 afar1d=v201["afar_1d"]; afar30m=v201["afar_30m"]
                 hold2=calc_hold_days_dynamic(entry,real_tp2,afar1d["atr"])
                 beta=BETA_MAP.get(sym,2.0)
-                # Save cooldown immediately
+                liq = get_liquidity_grab_levels(afar1d, afar30m, entry, side)
+                chain_text = "\n".join(liq["chain"])
                 COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry, "rsi": rsi30, "zone": zone}
                 atomic_save(COOLDOWN_FILE, COOLDOWN)
-                # Format message V201 20/80
                 msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f} | {v201['reason']}\n"
                 msg+=f"🗺 BTC COORD: {btc_map.get('coord_text','')} {btc_map.get('signal','')} {btc_map.get('reason','')}\n"
                 coin_pat=map_coin_pattern(afar1d)
                 msg+=f"📈 COIN COORD: {coin_pat['reason']} | {afar1d['month_line']} | ATR {fmt(afar1d['atr'])}\n"
                 msg+=f"🔍 {afar1d['shape']} {afar1d['hl_seq']}\n"
                 msg+=f"🐋 WHALE LOG: {wall.get('whale_log','')}\n"
+                msg+=f"💧 LIQUIDITY GRAB MAP - BUY low SELL high:\n{chain_text}\n"
                 msg+=f"{'🟢' if side=='BUY' else '🔴'} OVERALL {zone} {side} {fmt(entry)} SL {fmt(sl)} RR {(abs(real_tp2-entry)/abs(entry-sl) if abs(entry-sl)>0 else 0):.1f} Beta {beta}x\n"
-                if side=="BUY":
-                    msg+=f"🔴 Small Sell DUST {fmt(dust_tp)} {ENTRY_TF} DUST SKIP | 🟢 REAL BUY TP1 {fmt(real_tp1)}->{fmt(real_tp2)} {EXIT_TF} REAL SELL\n"
-                else:
-                    msg+=f"🟢 Small Buy DUST {fmt(dust_tp)} {ENTRY_TF} DUST SKIP | 🔴 REAL SELL TP1 {fmt(real_tp1)}->{fmt(real_tp2)} {EXIT_TF} REAL BUY\n"
-                msg+=f"🏁 TP2 {fmt(real_tp2)} {hold2}D {zone} WIN | Cooldown {COOLDOWN_HOURS}H\n"
-                msg+=f"🧠 3RD ALGO {third['msg']} | RSI30 {rsi30:.0f} <{RSI_BUY_MAX} BUY >{RSI_SELL_MIN} SELL"
+                msg+=f"🏁 TP2 {fmt(liq['final_tp2'])} {hold2}D {zone} WIN | Cooldown {COOLDOWN_HOURS}H\n"
+                msg+=f"🧠 3RD ALGO {third['msg']} | RSI30 {rsi30:.0f} <{RSI_BUY_MAX} BUY >{RSI_SELL_MIN} SELL\n"
+                msg+=f"⚡ Correct logic: LOW buy -> HIGH sell -> LOW buy -> HIGH sell"
                 results.append((sym,msg,v201))
                 continue
-            # Fallback old 5check
             ok,typ,side,reason,yh,yl,ym,extra,score,tmsg=detect_5check(d1,d15,d5,live,btc_trend,btc_trend,btc_price,afar1,wall,wick,third,btc_map)
             if ok:
                 last_entry = COOLDOWN.get(sym)
@@ -345,7 +380,9 @@ def scan_once():
                         continue
                 COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": live, "rsi": rsi30}
                 atomic_save(COOLDOWN_FILE, COOLDOWN)
-                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {typ} {side} {sym} | {TAG} | 3/5 FAKE\n🟢 FAKE LOW {fmt(live)}< YL {fmt(yl)} | {wall['note']} | {third['msg']} | BTC {btc_map['signal']} {btc_map['reason']}\n🗺 BTC COORD: {btc_map.get('coord_text','')}\n📈 COIN COORD: {afar1['hl_seq']} | {afar1['month_line']} | ATR {fmt(afar1['atr'])}\n🔍 AFAR {afar1['shape']} {afar1['hl_seq']} -> ATR {fmt(afar1['atr'])}\n🐋 WHALE LOG: {wall.get('whale_log','')}\n🟢 OVERALL {typ} {side} {fmt(live)} SL {fmt(yl*0.80 if side=='BUY' else yh*1.20)} (WIDE 20%) RR 0.5 Beta {BETA_MAP.get(sym,2.0)}x\n🔴 Small Sell TP1 {fmt(yh*0.8)}->{fmt(yh)} 1D RED SELL | 🟢 Small Buy FLIP {fmt(yh*0.8)}->{fmt(yl)} 1D GREEN BUY\n🔴 TP2 {fmt(yh*0.9)}->{fmt(yh)} 1D RED SELL | 🟢 FLIP {fmt(yh*0.9)}->{fmt(yl*0.9)} 3D GREEN BUY\n🏁 TP3 {fmt(yh)} 3D GREEN WIN\n🧠 3RD ALGO {third['msg']} | Cooldown {COOLDOWN_HOURS}H"
+                liq = get_liquidity_grab_levels(afar1, get_afar_levels(d15,20), live, side)
+                chain_text = "\n".join(liq["chain"])
+                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {typ} {side} {sym} | {TAG} | 3/5 FAKE\n🟢 FAKE LOW {fmt(live)}< YL {fmt(yl)} | {wall['note']} | {third['msg']} | BTC {btc_map['signal']} {btc_map['reason']}\n🗺 BTC COORD: {btc_map.get('coord_text','')}\n📈 COIN COORD: {afar1['hl_seq']} | {afar1['month_line']} | ATR {fmt(afar1['atr'])}\n💧 LIQUIDITY GRAB MAP:\n{chain_text}\n🧠 3RD ALGO {third['msg']} | Cooldown {COOLDOWN_HOURS}H"
                 results.append((sym,msg,None))
         except Exception as e:
             print(f"ERR {sym} {e}")
