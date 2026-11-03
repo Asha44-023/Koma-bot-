@@ -11,6 +11,12 @@ MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
 TAG="V201-CLUSTER-30M-BUY-SELL-FINAL"
 ENTRY_TF="Min30";EXIT_TF="Day1";V201_DUST_FILTER=True;V201_BOTH_SIDES=True;V201_HOLD_DAYS=5
+
+# ===== V201 RSI CONFIG 20/80 =====
+RSI_BUY_MAX = 20   # BUY only if RSI30 < 20
+RSI_SELL_MIN = 80  # SELL only if RSI30 > 80
+# =================================
+
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -49,6 +55,7 @@ def tg(m):
  if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:print(m);return
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m},timeout=15)
  except:pass
+
 def map_coin_pattern(afar):
     try:
         if not afar: return {"pattern":"NONE","signal":"NONE","reason":"no afar"}
@@ -69,6 +76,7 @@ def map_coin_pattern(afar):
             if h2<h1*0.97: return {"pattern":"LH","signal":"TOP","reason":f"LH {fmt(h1)}->{fmt(h2)}"}
         return {"pattern":"RANGE","signal":"RANGE","reason":"Ranging filling liquidity"}
     except Exception as e: return {"pattern":"ERR","signal":"ERR","reason":str(e)[:60]}
+
 def map_btc_coordinates(btc_afar, btc_d1):
     try:
         if not btc_afar: return {"signal":"NO_MAP","reason":"no afar","pattern":"NONE","coord_text":"NO_COORD"}
@@ -101,6 +109,7 @@ def map_btc_coordinates(btc_afar, btc_d1):
             else: signal="RANGE"; reason=f"Range H {fmt(h1)}->{fmt(h2)} L {fmt(l1)}->{fmt(l2)} filling liquidity"
         return {"signal":signal,"reason":reason,"pattern":pattern,"coords":coords,"coord_text":coord_text,"entry_long":l2,"sl_long":l2*0.80,"entry_short":h2,"sl_short":h2*1.20,"major_low":l2,"major_high":h2}
     except Exception as e: return {"signal":"NO_MAP","reason":str(e)[:80],"pattern":"ERR","coord_text":"ERR"}
+
 def get_oi_funding(symbol):
     try:
         hist=load_json(OI_FILE,{});oi_now=None;funding=0.0
@@ -129,6 +138,7 @@ def get_oi_funding(symbol):
         if oi_change>oi_thr*1.8:return {"status":"OI_SPIKE","ok":False,"msg":f"OI_SPIKE OI+{oi_change:.1f}%","oi_change":oi_change,"funding":funding}
         return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK OI{oi_change:+.1f}% fund{fp:+.3f}%","oi_change":oi_change,"funding":funding}
     except Exception as e:return {"status":"PEG_OK","ok":True,"msg":f"PEG_OK err {str(e)[:30]}","oi_change":0,"funding":0}
+
 def detect_wick_grab(d):
     try:
         if not d or len(d["c"])<2:return None
@@ -138,6 +148,7 @@ def detect_wick_grab(d):
         if upper>body*mult and upper_pct>thr:return {"type":"GRAB_UP","wick":upper,"pct":upper_pct*100,"body":body,"note":f"Upper wick {upper_pct*100:.3f}% x{upper/body:.1f}"}
         return None
     except:return None
+
 def get_mexc_perps_wall(symbol):
     try:
         url=f"https://contract.mexc.com/api/v1/contract/depth/{symbol}";r=session.get(url,timeout=6,headers={"User-Agent":"Mozilla/5.0"}).json();data=r.get("data",r);bids=data.get("bids",[])[:30];asks=data.get("asks",[])[:30]
@@ -155,6 +166,7 @@ def get_mexc_perps_wall(symbol):
         if imb<-25: return {"bias":"ASK_HEAVY","imbalance":imb,"note":f"ASKS heavy {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
         return {"bias":"NEUTRAL","imbalance":imb,"note":f"Balanced {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
     except Exception as e: return {"bias":"ERR","note":str(e)[:80],"imbalance":0,"whale_log":f"ERR {e}"}
+
 def kl(symbol,interval):
  sec_map={"Min5":300,"Min15":900,"Min30":1800,"Min60":3600,"Hour4":14400,"Day1":86400};sec=sec_map.get(interval,300);end=int(time.time());start=end-sec*500
  url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
@@ -169,6 +181,7 @@ def kl(symbol,interval):
    return res
   except:time.sleep(1)
  return None
+
 def get_live(s):
  for t in [s,s.replace("_",""),s.replace("_USDT","USDT")]:
   try:
@@ -176,15 +189,18 @@ def get_live(s):
    if lp and float(lp)>0:return float(lp)
   except:pass
  return None
+
 def calc_atr(d1,period=14):
  try:
   h=d1["h"];l=d1["l"];c=d1["c"];tr=[]
   for i in range(1,len(c)):tr.append(max(h[i]-l[i],abs(h[i]-c[i-1]),abs(l[i]-c[i-1])))
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
+
 def calc_hold_days_dynamic(entry,target,atr):
  if atr==0 or atr is None:atr=abs(entry-target)/3.5 if target else entry*0.03
  dist=abs(target-entry);days=dist/atr if atr>0 else 3.5;days=max(1,round(days));return min(days,30)
+
 def calc_rsi(c, period=14):
     try:
         if len(c)<period+1: return 50
@@ -197,6 +213,7 @@ def calc_rsi(c, period=14):
         rs=avg_gain/avg_loss
         return 100-(100/(1+rs))
     except: return 50
+
 def get_afar_levels(d1,lookback=90):
  try:
   if not d1 or len(d1["h"])<lookback:lookback=len(d1["h"])-5
@@ -221,6 +238,9 @@ def get_afar_levels(d1,lookback=90):
   month_line=f"{days_to_str(highs[0]['days_ago'])} ago High {fmt(round_level(highs[0]['price']))} -> {days_to_str(lows[0]['days_ago'])} ago Low {fmt(round_level(lows[0]['price']))}" if highs and lows else "NO STRUCTURE"
   return {"major_high":major_high,"major_high_2":major_high_2,"major_low":major_low,"major_low_2":major_low_2,"recent_high":recent_high,"recent_low":recent_low,"highs":highs,"lows":lows,"mid":(major_high+major_low)/2,"shape":shape,"hl_seq":seq,"month_line":month_line,"atr":calc_atr(d1)}
  except:return None
+
+def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2,float(d1["h"][-2])-float(d1["l"][-2])
+
 def v201_30m_signal(d30, d1, live, rsi_30m, perps_wall):
     try:
         if not d30 or not d1: return None
@@ -232,221 +252,100 @@ def v201_30m_signal(d30, d1, live, rsi_30m, perps_wall):
         greed_zone = y_high * 0.90
         wall_bias = perps_wall.get("bias","")
         imb = perps_wall.get("imbalance",0)
-        if live <= fear_zone and rsi_30m < 40 and (wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] or imb > 10):
-            return {"side":"BUY","zone":"FEAR","entry":live,"entry_tf":"30M","exit_tf":"1D","real_tp1":afar_1d["major_high"]*0.75,"real_tp2":afar_1d["major_high"],"dust_tp":afar_30m["recent_high"] if afar_30m else y_high*1.05,"sl":y_low*0.80,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"FEAR ZONE {fmt(live)} <= {fmt(fear_zone)} YL {fmt(y_low)} + RSI30 {rsi_30m:.0f}<40 + {wall_bias} {imb:+.1f}%"}
-        if live >= greed_zone and rsi_30m > 70 and (wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] or imb < -15):
-            return {"side":"SELL","zone":"GREED","entry":live,"entry_tf":"30M","exit_tf":"1D","real_tp1":afar_1d["major_low"]*1.25,"real_tp2":afar_1d["major_low"],"dust_tp":afar_30m["recent_low"] if afar_30m else y_low*0.95,"sl":y_high*1.20,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"GREED ZONE {fmt(live)} >= {fmt(greed_zone)} YH {fmt(y_high)} + RSI30 {rsi_30m:.0f}>70 + {wall_bias} {imb:+.1f}%"}
+        # ===== RSI 20/80 - RELAXED WALL (Balanced allowed) =====
+        if live <= fear_zone:
+            rsi_ok = rsi_30m < RSI_BUY_MAX
+            wall_ok = wall_bias != "WHALE_SELL_WALL" and imb > -15
+            if rsi_ok and wall_ok:
+                return {"side":"BUY","zone":f"FEAR RSI{RSI_BUY_MAX}","entry":live,"entry_tf":"30M","exit_tf":"1D","real_tp1":afar_1d["major_high"]*0.75,"real_tp2":afar_1d["major_high"],"dust_tp":afar_30m["recent_high"] if afar_30m else y_high*1.05,"sl":y_low*0.80,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"V201 FEAR {RSI_BUY_MAX} RSI {rsi_30m:.0f}<{RSI_BUY_MAX} ZONE {fmt(live)} <= {fmt(fear_zone)} YL {fmt(y_low)} {wall_bias} {imb:+.1f}% | 1D CLUSTER"}
+        if live >= greed_zone:
+            rsi_ok = rsi_30m > RSI_SELL_MIN
+            wall_ok = wall_bias != "WHALE_BUY_WALL" and imb < 15
+            if rsi_ok and wall_ok:
+                return {"side":"SELL","zone":f"GREED RSI{RSI_SELL_MIN}","entry":live,"entry_tf":"30M","exit_tf":"1D","real_tp1":afar_1d["major_low"]*1.25,"real_tp2":afar_1d["major_low"],"dust_tp":afar_30m["recent_low"] if afar_30m else y_low*0.95,"sl":y_high*1.20,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"V201 GREED {RSI_SELL_MIN} RSI {rsi_30m:.0f}>{RSI_SELL_MIN} ZONE {fmt(live)} >= {fmt(greed_zone)} YH {fmt(y_high)} {wall_bias} {imb:+.1f}% | 1D CLUSTER"}
         return None
     except Exception as e: return {"side":"ERR","reason":str(e)[:80]}
-def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2,float(d1["h"][-2])-float(d1["l"][-2])
+
 def get_weekly_phase():
  try:
   d1=kl("BTC_USDT","Day1");c=d1["c"];week_change=(c[-1]-c[-8])/c[-8]*100 if c[-8]!=0 else 0;return "RANGE",week_change,c[-1],d1,get_afar_levels(d1,90)
  except:return "RANGE",0,77000,None,None
+
 def detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,perps_wall,wick_info,third_algo,btc_map):
  try:
   y_high,y_low,y_mid,y_range=get_daily_levels(d1);h15=d15["h"];l15=d15["l"];last_h=max(h15[-5:]);last_l=min(l15[-5:]);y_high_r=round_level(y_high);y_low_r=round_level(y_low)
   major_low=afar.get("major_low",y_low);major_high=afar.get("major_high",y_high)
-  wall_bias=perps_wall.get("bias","");imbalance=perps_wall.get("imbalance",0);wick_type=wick_info["type"] if wick_info else None;third_ok=third_algo.get("ok",True);third_msg=third_algo.get("msg","");btc_signal=btc_map.get("signal","NO_MAP") if btc_map else "NO_MAP";btc_pat=btc_map.get("pattern","NONE")
+  wall_bias=perps_wall.get("bias","");imbalance=perps_wall.get("imbalance",0);wick_type=wick_info["type"] if wick_info else None;third_ok=third_algo.get("ok",True);third_msg=third_algo.get("msg","");btc_signal=btc_map.get("signal","NO_MAP") if btc_map else "NO_MAP"
   if not third_ok:return False,"","","",y_high,y_low,y_mid,f"BLOCKED 3RD {third_msg}",0,third_msg
-  def wall_ok(dir,bias):
-      if dir=="BUY" and bias=="WHALE_SELL_WALL": return False
-      if dir=="SELL" and bias=="WHALE_BUY_WALL": return False
-      return True
-  is_btc_bottom = btc_signal in ["BOTTOM_FORMING","BUY_IN_BEAR","PUMP_STARTING","DOUBLE_BOTTOM","BOTTOM"] or "BOTTOM" in btc_pat or btc_pat=="INV_H&S_BOTTOM"
-  is_btc_top = btc_signal in ["TOP_FORMING","DUMP_STARTING","DOUBLE_TOP"] or "TOP" in btc_pat or btc_pat=="HEAD_SHOULDERS_TOP"
-  is_breakdown = live < major_low * 0.95
-  is_bear_trap_zone = live < major_low * 0.99 and live > major_low * 0.95
-  is_breakout_zone = live > y_high * 1.002
-  if is_breakdown and wall_bias in ["ASK_HEAVY","WHALE_SELL_WALL"] and imbalance < -20:
-      return True,"SELL","BREAKDOWN 65K",f"BREAKDOWN {fmt(live)} < major_low {fmt(major_low)}*0.95 + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} -> 65k DUMP",y_high,y_low,y_mid,"BREAKDOWN SELL to 65k",5,""
-  if is_bear_trap_zone and wick_type=="GRAB_DOWN" and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and (imbalance>20 or wall_bias=="WHALE_BUY_WALL"):
-      return True,"BUY","BEAR TRAP 97K",f"BEAR TRAP {fmt(live)} in zone {fmt(major_low*0.95)}-{fmt(major_low*0.99)} GRAB {wick_info['note']} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BULL to 97k",y_high,y_low,y_mid,"BEAR TRAP BOTTOM -> 97k",5,""
-  if is_breakout_zone and wall_bias in ["BID_HEAVY","WHALE_BUY_WALL"] and (imbalance>-10 or wall_bias=="WHALE_BUY_WALL"):
-      if is_btc_top:
-          return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC TOP blocks breakout BUY {btc_signal}",0,"BTC TOP"
-      return True,"BUY","BREAKOUT 97K",f"BREAKOUT {fmt(round_level(last_h))}> YH {fmt(y_high_r)} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BULL to 97k",y_high,y_low,y_mid,"BREAKOUT BUY to 97k",4,""
-  if wick_type=="GRAB_DOWN" and last_l<y_low and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and (imbalance>10 or wall_bias=="WHALE_BUY_WALL"):
-      if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} TOP - BUY 5/5 blocked",0,f"BTC TOP blocks BUY"
-      return True,"BUY","5/5 WHALE FAKE",f"GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))}<{fmt(y_low_r)} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BULL",y_high,y_low,y_mid,"5/5 BOTTOM",5,""
-  if wick_type=="GRAB_UP" and last_h>y_high and wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] and imbalance<-20:
-      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} BOTTOM - SELL 5/5 blocked (no breakdown)",0,f"BTC BOTTOM blocks SELL"
-      return True,"SELL","5/5 WHALE FAKE",f"GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))}>{fmt(y_high_r)} + {perps_wall['note']} + {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat} {btc_signal} BEAR",y_high,y_low,y_mid,"5/5 TOP",5,""
-  if wick_type=="GRAB_DOWN" and wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] and (imbalance>10 or wall_bias=="WHALE_BUY_WALL"):
-      if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} TOP - BUY 4/5 blocked",0,"BTC TOP"
-      return True,"BUY","4/5 WHALE GRAB",f"GRAB_DOWN {wick_info['note']} + {perps_wall['note']} + {third_msg} BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"4/5 BOTTOM",4,""
-  if wick_type=="GRAB_UP" and wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] and imbalance<-20:
-      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} {btc_pat} BOTTOM - SELL 4/5 blocked",0,"BTC BOTTOM"
-      return True,"SELL","4/5 WHALE GRAB",f"GRAB_UP {wick_info['note']} + {perps_wall['note']} + {third_msg} BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"4/5 TOP",4,""
-  if wick_type=="GRAB_DOWN" and last_l<y_low:
-      if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} TOP - BUY fake blocked",0,"BTC TOP"
-      if not wall_ok("BUY",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH BUY but {wall_bias} {perps_wall['note']}",0,"wall mismatch"
-      return True,"BUY","4/5 FAKE GRAB",f"GRAB {wick_info['note']} + FAKE LOW {fmt(round_level(last_l))}<{fmt(y_low_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat}",y_high,y_low,y_mid,"4/5 BOTTOM",4,""
-  if wick_type=="GRAB_UP" and last_h>y_high:
-      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL fake blocked",0,"BTC BOTTOM"
-      if not wall_ok("SELL",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH SELL but {wall_bias} {perps_wall['note']}",0,"wall mismatch"
-      return True,"SELL","4/5 FAKE GRAB",f"GRAB {wick_info['note']} + FAKE HIGH {fmt(round_level(last_h))}>{fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_map.get('coord_text','')} {btc_pat}",y_high,y_low,y_mid,"4/5 TOP",4,""
-  if wick_type in ["GRAB_DOWN","GRAB_UP"]:return False,"","","",y_high,y_low,y_mid,"0/5 BLOCKED - wick alone",0,"needs wall>20% or fake"
-  if wall_bias in ["BID_HEAVY","WHALE_BUY_WALL"] and (imbalance>10 or wall_bias=="WHALE_BUY_WALL") and last_l<y_low*1.005:
-      if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} TOP - BUY 3/5 WALL blocked",0,"BTC TOP"
-      return True,"BUY","3/5 WALL",f"BID HEAVY {imbalance:+.1f}% + near YL {fmt(y_low_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
-  if wall_bias in ["ASK_HEAVY","WHALE_SELL_WALL"] and imbalance<-20 and last_h>y_high*0.995:
-      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL 3/5 WALL blocked (no breakdown)",0,"BTC BOTTOM"
-      return True,"SELL","3/5 WALL",f"ASK HEAVY {imbalance:+.1f}% + near YH {fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
-  if last_l<y_low*0.998:
-      if not wall_ok("BUY",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH BUY but {wall_bias} {perps_wall['note']}",0,"wall mismatch"
-      if is_btc_top: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} TOP - BUY 3/5 FAKE blocked",0,"BTC TOP"
-      return True,"BUY","3/5 FAKE",f"FAKE LOW {fmt(round_level(last_l))}< YL {fmt(y_low_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
-  if last_h>y_high*1.002:
-      if not wall_ok("SELL",wall_bias): return False,"","","",y_high,y_low,y_mid,f"BLOCKED WALL MISMATCH SELL but {wall_bias} {perps_wall['note']} BUY WALL",0,"wall mismatch BUY WALL cant SELL"
-      if is_btc_bottom and not is_breakdown: return False,"","","",y_high,y_low,y_mid,f"BLOCKED BTC {btc_signal} BOTTOM - SELL 3/5 FAKE blocked (bull flip)",0,"BTC BOTTOM blocks SELL"
-      return True,"SELL","3/5 FAKE",f"FAKE HIGH {fmt(round_level(last_h))}> YH {fmt(y_high_r)} | {perps_wall['note']} | {third_msg} | BTC {btc_signal} {btc_pat}",y_high,y_low,y_mid,"3/5",3,""
-  return False,"","","",y_high,y_low,y_mid,"0/5",0,"no confluence"
- except Exception as e:return False,"",f"ERR {e}","",0,0,0,"0/5",0,str(e)
-def get_btc_trend():
- try:
-  d=kl("BTC_USDT","Hour4")
-  if not d:return "RANGE"
-  c=d["c"]
-  if c[-1]>c[-20]*1.015:return "UP"
-  if c[-1]<c[-20]*0.985:return "DOWN"
-  return "RANGE"
- except:return "RANGE"
-def aligned_tp_calculation(sym,live,btc_live,btc_afar,afar,direction):
- beta=BETA_MAP.get(sym,2.0);btc_mid=btc_afar["mid"] if btc_afar else btc_live*1.06;btc_h1=btc_afar["major_high"] if btc_afar else btc_live*1.15;btc_range=btc_h1-btc_afar["major_low"] if btc_afar and btc_afar["major_low"]>0 else btc_live*0.15;btc_tp3=btc_h1+btc_range*0.6
- if direction=="BUY":
-  btc_pct1=(btc_mid-btc_live)/btc_live if btc_live>0 else 0.06;btc_pct2=(btc_h1-btc_live)/btc_live if btc_live>0 else 0.10;btc_pct3=(btc_tp3-btc_live)/btc_live if btc_live>0 else 0.15;btc_pct1=max(btc_pct1,0.04);btc_pct2=max(btc_pct2,0.07)
-  tp1=live*(1+btc_pct1*beta);tp2=live*(1+btc_pct2*beta);tp3=live*(1+btc_pct3*beta)
-  if afar and afar["major_high"]>0:tp2=min(tp2,afar["major_high"]*1.10)
-  tp3=max(tp3,tp2*1.15)
- else:
-  btc_pct1=abs((btc_live-btc_mid)/btc_live) if btc_live>0 else 0.06;btc_pct1=max(btc_pct1,0.04);tp1=live*(1-btc_pct1*beta);tp2=live*(1-btc_pct1*1.6*beta);tp3=live*(1-btc_pct1*2.2*beta);tp1=min(tp1,live*0.96);tp2=min(tp2,tp1*0.94);tp3=min(tp3,tp2*0.90)
- return round_level(tp1),round_level(tp1*1.06),round_level(tp2),round_level(tp2*1.08),round_level(tp3)
-def scan():
- btc_trend=get_btc_trend();btc_phase,btc_week_pct,btc_price,btc_d1,btc_afar=get_weekly_phase();btc_map=map_btc_coordinates(btc_afar,btc_d1)
- print(f"--- {TAG} {get_time()} BTC:{btc_trend} {fmt(btc_price)} MAP:{btc_map['signal']} PATTERN:{btc_map.get('pattern','')} {btc_map.get('reason','')} COORD:{btc_map.get('coord_text','')} ---")
- for sym,data in list(ACTIVE.items()):
-  p=get_live(sym)
-  if not p:continue
-  entry,is_buy,sl=float(data["entry"]),bool(data["is_buy"]),float(data["sl"]);tp1_body=data.get("tp1_body",0);tp2_body=data.get("tp2_body",0);tp3=data.get("tp3",0);atr=data.get("atr",entry*0.03);rebuy=data.get("rebuy",0);rebuy2=data.get("rebuy2",0);afar_info=data.get("afar",{})
-  d_flip=calc_hold_days_dynamic(entry,tp1_body,atr);d_flip2=calc_hold_days_dynamic(tp2_body,rebuy2,atr);days_held=(time.time()-data.get("ts",time.time()))/86400
-  if (is_buy and p<=sl) or (not is_buy and p>=sl):
-   color="🟢" if is_buy else "🔴"; dir_color="GREEN BUY" if is_buy else "RED SELL"
-   print(f"AUTO DELETE {sym} price {p} hit SL {sl} removing from active.json")
-   tg(f"{color} SL HIT + AUTO DELETE {sym} {fmt(p)} SL {fmt(sl)} {dir_color} Held {days_held:.0f} DAYS - deleted from active.json");ACTIVE.pop(sym,None);save_a();continue
-  if rebuy>0:
-   if (is_buy and p<rebuy*0.97) or (not is_buy and p>rebuy*1.03):
-    month_line=afar_info.get("month_line","") if isinstance(afar_info,dict) else ""
-    tg(f"🚨 OVERALL SELL {sym} 🚨\n🔴 Price {fmt(p)} BROKE rebuy {fmt(rebuy)} RED SELL\n📅 MONTH: {month_line}\nLH AFTER HH = FINAL PEAK REVERSAL\nCLOSE 100% - NO REBUY\nHeld {days_held:.0f} DAYS | BTC {fmt(btc_price)} COORD {btc_map.get('coord_text','')} PATTERN {btc_map.get('pattern','')}");ACTIVE.pop(sym,None);save_a();continue
-  if not data.get("tp1_body_hit") and ((is_buy and p>=tp1_body) or (not is_buy and p<=tp1_body)):
-   data["tp1_body_hit"]=True;data["sl"]=entry;save_a()
-   tg(f"🔴 SMALL SELL TO HERE: {sym} TP1 BODY HIT {fmt(p)} RED SELL\n🟢 BUY {fmt(entry)} -> TP1 {fmt(tp1_body)} GREEN->RED\n🔴 SELL FROM {fmt(tp1_body)} DOWN TO {fmt(rebuy)} IN {d_flip:.0f} DAYS (Small Sell RED)\n🟢 FLIP TO SHORT -> RE-BUY AT {fmt(rebuy)} (Small Buy GREEN) | Day {days_held:.0f} | BTC {btc_map.get('signal','')} {btc_map.get('pattern','')}")
-  if data.get("tp1_body_hit") and not data.get("small_buy_done") and ((is_buy and p<=rebuy*1.02) or (not is_buy and p>=rebuy*0.98)):
-   data["small_buy_done"]=True;save_a();tg(f"🟢 SMALL BUY {sym} at {fmt(p)} near rebuy {fmt(rebuy)} GREEN BUY flip long | BTC COORD {btc_map.get('coord_text','')}")
-  if not data.get("tp2_body_hit") and ((is_buy and p>=tp2_body) or (not is_buy and p<=tp2_body)):
-   data["tp2_body_hit"]=True;data["sl"]=tp1_body;save_a()
-   tg(f"🟢 HOLD TO BREAKOUT: {sym} TP2 BODY HIT {fmt(p)} GREEN\n🔴 SMALL SELL FROM {fmt(tp2_body)} DOWN TO {fmt(rebuy2)} IN {d_flip2:.0f} DAYS RED SELL\n🟢 FINAL HOLD {fmt(rebuy2)} TO {fmt(tp3)} GREEN | Day {days_held:.0f} | BTC {btc_map.get('signal','')} {btc_map.get('pattern','')}")
-  if data.get("tp2_body_hit") and not data.get("small_buy2_done") and ((is_buy and p<=rebuy2*1.02) or (not is_buy and p>=rebuy2*0.98)):
-   data["small_buy2_done"]=True;save_a();tg(f"🟢 SMALL BUY 2 {sym} at {fmt(p)} near rebuy2 {fmt(rebuy2)} GREEN BUY final flip | BTC COORD {btc_map.get('coord_text','')}")
-  if not data.get("tp3_hit") and ((is_buy and p>=tp3) or (not is_buy and p<=tp3)):
-   data["tp3_hit"]=True;save_a();tg(f"🏁 OVERALL FINAL CLOSE: {sym} TP3 WIN {fmt(p)} {fmt(entry)} -> {fmt(tp3)} Held {days_held:.0f} DAYS GREEN WIN | BTC {btc_map.get('signal','')} PATTERN {btc_map.get('pattern','')}")
- if len(ACTIVE)>=MAX_ACTIVE:return
- cands=[]
- for sym in SYMBOLS:
-  try:
-   if sym in ACTIVE:continue
-   d1=kl(sym,"Day1");time.sleep(0.2);d15=kl(sym,"Min15");time.sleep(0.2);d30=kl(sym,"Min30");time.sleep(0.2);d5=kl(sym,"Min5");time.sleep(0.2)
-   if not d1 or not d15 or not d30:continue
-   live=get_live(sym)
-   if not live:continue
-   afar=get_afar_levels(d1,90)
-   if not afar:continue
-   coin_pat=map_coin_pattern(afar)
-   wick=detect_wick_grab(d15);wall=get_mexc_perps_wall(sym);third=get_oi_funding(sym);time.sleep(0.2)
-   try:
-       rsi_30m = calc_rsi(d30["c"],14) if d30 else 50
-       v201_sig = v201_30m_signal(d30, d1, live, rsi_30m, wall)
-       if v201_sig and v201_sig.get("side") in ["BUY","SELL"]:
-           direction = v201_sig["side"]
-           sig_type = f"V201 CLUSTER {v201_sig['entry_tf']}->{v201_sig['exit_tf']} {v201_sig['zone']}"
-           reason = v201_sig["reason"]
-           afar = v201_sig["afar_1d"]
-           tp1_body = round_level(v201_sig["real_tp1"])
-           tp2_body = round_level(v201_sig["real_tp2"])
-           tp3 = round_level(v201_sig["real_tp2"]*1.15 if direction=="BUY" else v201_sig["real_tp2"]*0.85)
-           sl = round_level(v201_sig["sl"])
-           tp1_wick = round_level(tp1_body*1.05 if direction=="BUY" else tp1_body*0.95)
-           tp2_wick = round_level(tp2_body*1.08 if direction=="BUY" else tp2_body*0.92)
-           rebuy_low = round_level(v201_sig["afar_1d"]["recent_low"] if direction=="BUY" else v201_sig["afar_1d"]["recent_high"])
-           rebuy2 = round_level(v201_sig["afar_1d"]["major_low"]*0.98 if direction=="BUY" else v201_sig["afar_1d"]["major_high"]*1.02)
-           dust_price = v201_sig["dust_tp"]
-           reason += f" | DUST SKIP {fmt(dust_price)} | REAL TP1 {fmt(tp1_body)} TP2 {fmt(tp2_body)} (1D Cluster)"
-           atr = afar["atr"]
-           risk = abs(live-sl)/live*100
-           if risk<=35 and risk>=5:
-               reward = abs(tp1_body-live)/live*100
-               rr = reward/risk if risk>0 else 0
-               if rr>=0.5:
-                   d1_hold=calc_hold_days_dynamic(live,tp1_body,atr); d2_hold=calc_hold_days_dynamic(live,tp2_body,atr); d3_hold=calc_hold_days_dynamic(live,tp3,atr); d_flip=calc_hold_days_dynamic(tp1_body,rebuy_low,atr); d_flip2=calc_hold_days_dynamic(tp2_body,rebuy2,atr)
-                   cands.append((5, sym, direction, sig_type, live, sl, tp1_body, tp1_wick, tp2_body, tp2_wick, tp3, rr, afar, atr, rebuy_low, rebuy2, d1_hold, d2_hold, d3_hold, d_flip, d_flip2, BETA_MAP.get(sym,2.0), reason, f"V201 5/5", wall, wick, third, coin_pat))
-                   print(f"V201 CAND {sym} {direction} {fmt(live)} TP {fmt(tp1_body)} {fmt(tp2_body)} SL {fmt(sl)} RR {rr:.1f} DUST {fmt(dust_price)}")
-                   continue
-   except Exception as e:
-       print(f"V201 ERR {sym} {e}")
-   ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,wall,wick,third,btc_map)
-   if not ok:
-       if wick or wall["bias"]!="NEUTRAL" or not third["ok"]:
-           print(f"PERPS WATCH {sym} COIN_PAT:{coin_pat['pattern']} WICK:{wick['note'] if wick else None} WALL:{wall['note']} WHALE_LOG:{wall['whale_log']} 3RD:{third['msg']} BTC:{btc_map['signal']} PATTERN:{btc_map.get('pattern','')} REASON:{missing}")
-       continue
-   atr=afar["atr"]
-   if direction=="BUY":
-    sl_raw=afar["recent_low"]*0.80
-    if wick and wick["type"]=="GRAB_DOWN":sl_raw=min(sl_raw,d15["l"][-1]*0.995*0.80)
-    sl=round_level(sl_raw if sl_raw<live*0.99 else live*0.80)
-    tp1_body,tp1_wick,tp2_body,tp2_wick,tp3=aligned_tp_calculation(sym,live,btc_price,btc_afar,afar,"BUY")
-    rebuy_low=round_level(afar["recent_low"]);rebuy2=round_level(afar["major_low"]*0.98)
-   else:
-    sl_raw=afar["recent_high"]*1.20
-    if wick and wick["type"]=="GRAB_UP":sl_raw=max(sl_raw,d15["h"][-1]*1.005*1.20)
-    sl=round_level(sl_raw if sl_raw>live*1.01 else live*1.20)
-    tp1_body,tp1_wick,tp2_body,tp2_wick,tp3=aligned_tp_calculation(sym,live,btc_price,btc_afar,afar,"SELL")
-    rebuy_low=round_level(afar["recent_high"]);rebuy2=round_level(afar["major_high"])
-   risk=abs(live-sl)/live*100
-   if risk>35 or risk<5:continue
-   reward=abs(tp1_body-live)/live*100;rr=reward/risk if risk>0 else 0
-   rr_thr=0.5 if btc_map.get("signal") in ["BOTTOM_FORMING","BUY_IN_BEAR","DOUBLE_BOTTOM"] else 1.0
-   if rr<rr_thr:
-       print(f"BLOCKED LOW RR {sym} RR {rr:.2f} thr {rr_thr} risk {risk:.1f} reward {reward:.1f} BTC {btc_map.get('signal','')}")
-       continue
-   d1_hold=calc_hold_days_dynamic(live,tp1_body,atr);d2_hold=calc_hold_days_dynamic(live,tp2_body,atr);d3_hold=calc_hold_days_dynamic(live,tp3,atr);d_flip=calc_hold_days_dynamic(tp1_body,rebuy_low,atr);d_flip2=calc_hold_days_dynamic(tp2_body,rebuy2,atr)
-   cands.append((checks_score,sym,direction,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,BETA_MAP.get(sym,2.0),reason,checks_str,wall,wick,third,coin_pat))
-  except Exception as e:print(f"EX {sym} {e}");continue
- cands=sorted(cands,key=lambda x:x[0],reverse=True)[:TOP_N_PER_SCAN]
- for score,sym,dir,sig_type,live,sl,tp1_body,tp1_wick,tp2_body,tp2_wick,tp3,rr,afar,atr,rebuy_low,rebuy2,d1_hold,d2_hold,d3_hold,d_flip,d_flip2,beta,reason,checks_str,wall,wick,third,coin_pat in cands:
-  try:
-   entry=live;is_buy=dir=="BUY"
-   ACTIVE[sym]={"entry":entry,"sl":sl,"tp1_body":tp1_body,"tp1_wick":tp1_wick,"tp2_body":tp2_body,"tp2_wick":tp2_wick,"tp3":tp3,"is_buy":is_buy,"ts":time.time(),"rr":rr,"afar":{"shape":afar["shape"],"month_line":afar["month_line"],"hl_seq":afar["hl_seq"]},"atr":atr,"rebuy":rebuy_low,"rebuy2":rebuy2,"beta":beta,"d1_hold":d1_hold,"d2_hold":d2_hold,"d3_hold":d3_hold,"d_flip":d_flip,"d_flip2":d_flip2,"whale":wall,"wick":wick,"third":third,"btc_map":btc_map,"coin_pat":coin_pat}
-   save_a()
-   if is_buy: dir_emoji="🟢"; color_word="GREEN BUY"; whale_emoji="🐳🟢"
-   else: dir_emoji="🔴"; color_word="RED SELL"; whale_emoji="🐳🔴"
-   msg=(f"{whale_emoji} {color_word} {sym} | {TAG} | {sig_type}\n"
-        f"{dir_emoji} {reason} {checks_str} PHASE {btc_phase} BTC {fmt(round_level(btc_price))} {btc_map['signal']} PATTERN {btc_map.get('pattern','')} {btc_map.get('reason','')}\n"
-        f"🗺 BTC COORD: {btc_map.get('coord_text','')}\n"
-        f"📈 COIN COORD: {coin_pat['pattern']} {coin_pat['reason']} | {afar['month_line']}\n"
-        f"🔍 AFAR {afar['shape']} {afar['hl_seq']} ATR {fmt(atr)}\n"
-        f"🐋 WHALE LOG: {wall['whale_log']}\n"
-        f"{dir_emoji} OVERALL {color_word} {fmt(entry)} SL {fmt(sl)} (WIDE 20%) RR {rr:.1f} Beta {beta}x\n"
-        f"🔴 Small Sell TP1 {fmt(tp1_body)}->{fmt(tp1_wick)} {d1_hold}D RED SELL | 🟢 Small Buy FLIP {fmt(tp1_body)}->{fmt(rebuy_low)} {d_flip}D GREEN BUY\n"
-        f"🔴 TP2 {fmt(tp2_body)}->{fmt(tp2_wick)} {d2_hold}D RED SELL | 🟢 FLIP {fmt(tp2_body)}->{fmt(rebuy2)} {d_flip2}D GREEN BUY\n"
-        f"🏁 TP3 {fmt(tp3)} {d3_hold}D GREEN WIN\n"
-        f"🧠 3RD ALGO {third['msg']}")
-   tg(msg)
-  except Exception as e:print(f"TG EX {e}")
+  # FAKE LOW
+  if live < y_low and live < last_l:
+      return True,"FAKE","BUY",f"FAKE LOW {fmt(live)}< YL {fmt(y_low)} {wall_bias} {imbalance:+.1f}% {third_msg} BTC {btc_signal}",y_high,y_low,y_mid,"",3,third_msg
+  if live > y_high and live > last_h:
+      return True,"FAKE","SELL",f"FAKE HIGH {fmt(live)}> YH {fmt(y_high)} {wall_bias} {imbalance:+.1f}% {third_msg} BTC {btc_signal}",y_high,y_low,y_mid,"",3,third_msg
+  return False,"","","",y_high,y_low,y_mid,"NO SETUP",0,third_msg
+ except Exception as e:
+  return False,"","","",0,0,0,f"ERR {e}",0,""
+
+def scan_once():
+    btc_trend,btc_week_change,btc_price,btc_d1,btc_afar=get_weekly_phase()
+    btc_map=map_btc_coordinates(btc_afar,btc_d1) if btc_afar else {"signal":"NO_MAP","reason":"no btc afar","pattern":"NONE","coord_text":"NO_COORD"}
+    results=[]
+    for sym in SYMBOLS:
+        try:
+            d1=kl(sym,"Day1"); d30=kl(sym,"Min30"); d15=kl(sym,"Min15"); d5=kl(sym,"Min5")
+            if not d1 or not d30: continue
+            live=get_live(sym)
+            if not live: live=d1["c"][-1]
+            rsi30=calc_rsi(d30["c"])
+            wall=get_mexc_perps_wall(sym)
+            afar1=get_afar_levels(d1,90)
+            if not afar1: continue
+            third=get_oi_funding(sym)
+            wick=detect_wick_grab(d30)
+            # ===== V201 FIRST - RSI 20/80 =====
+            v201=v201_30m_signal(d30,d1,live,rsi30,wall)
+            if v201 and v201.get("side") in ["BUY","SELL"]:
+                entry=v201["entry"]; side=v201["side"]; zone=v201["zone"]
+                real_tp1=v201["real_tp1"]; real_tp2=v201["real_tp2"]; dust_tp=v201["dust_tp"]; sl=v201["sl"]
+                afar1d=v201["afar_1d"]; afar30m=v201["afar_30m"]
+                hold1=calc_hold_days_dynamic(entry,real_tp1,afar1d["atr"]); hold2=calc_hold_days_dynamic(entry,real_tp2,afar1d["atr"])
+                beta=BETA_MAP.get(sym,2.0)
+                # Format message V201 20/80
+                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f} | {v201['reason']}\n"
+                msg+=f"🗺 BTC COORD: {btc_map.get('coord_text','')} {btc_map.get('signal','')} {btc_map.get('reason','')}\n"
+                coin_pat=map_coin_pattern(afar1d)
+                msg+=f"📈 COIN COORD: {coin_pat['reason']} | {afar1d['month_line']} | ATR {fmt(afar1d['atr'])}\n"
+                msg+=f"🔍 {afar1d['shape']} {afar1d['hl_seq']}\n"
+                msg+=f"🐋 WHALE LOG: {wall.get('whale_log','')}\n"
+                msg+=f"{'🟢' if side=='BUY' else '🔴'} OVERALL {zone} {side} {fmt(entry)} SL {fmt(sl)} RR {(abs(real_tp2-entry)/abs(entry-sl) if abs(entry-sl)>0 else 0):.1f} Beta {beta}x\n"
+                if side=="BUY":
+                    msg+=f"🔴 Small Sell DUST {fmt(dust_tp)} {ENTRY_TF} DUST SKIP | 🟢 REAL BUY TP1 {fmt(real_tp1)}->{fmt(real_tp2)} {EXIT_TF} REAL SELL\n"
+                else:
+                    msg+=f"🟢 Small Buy DUST {fmt(dust_tp)} {ENTRY_TF} DUST SKIP | 🔴 REAL SELL TP1 {fmt(real_tp1)}->{fmt(real_tp2)} {EXIT_TF} REAL BUY\n"
+                msg+=f"🏁 TP2 {fmt(real_tp2)} {hold2}D {zone} WIN\n"
+                msg+=f"🧠 3RD ALGO {third['msg']} | RSI30 {rsi30:.0f} <{RSI_BUY_MAX} BUY >{RSI_SELL_MIN} SELL"
+                results.append((sym,msg,v201))
+                continue
+            # Fallback old 5check
+            ok,typ,side,reason,yh,yl,ym,extra,score,tmsg=detect_5check(d1,d15,d5,live,btc_trend,btc_trend,btc_price,afar1,wall,wick,third,btc_map)
+            if ok:
+                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {typ} {side} {sym} | {TAG} | 3/5 FAKE\n🟢 FAKE LOW {fmt(live)}< YL {fmt(yl)} | {wall['note']} | {third['msg']} | BTC {btc_map['signal']} {btc_map['reason']}\n🗺 BTC COORD: {btc_map.get('coord_text','')}\n📈 COIN COORD: {afar1['hl_seq']} | {afar1['month_line']} | ATR {fmt(afar1['atr'])}\n🔍 AFAR {afar1['shape']} {afar1['hl_seq']} -> ATR {fmt(afar1['atr'])}\n🐋 WHALE LOG: {wall.get('whale_log','')}\n🟢 OVERALL {typ} {side} {fmt(live)} SL {fmt(yl*0.80 if side=='BUY' else yh*1.20)} (WIDE 20%) RR 0.5 Beta {BETA_MAP.get(sym,2.0)}x\n🔴 Small Sell TP1 {fmt(yh*0.8)}->{fmt(yh)} 1D RED SELL | 🟢 Small Buy FLIP {fmt(yh*0.8)}->{fmt(yl)} 1D GREEN BUY\n🔴 TP2 {fmt(yh*0.9)}->{fmt(yh)} 1D RED SELL | 🟢 FLIP {fmt(yh*0.9)}->{fmt(yl*0.9)} 3D GREEN BUY\n🏁 TP3 {fmt(yh)} 3D GREEN WIN\n🧠 3RD ALGO {third['msg']}"
+                results.append((sym,msg,None))
+        except Exception as e:
+            print(f"ERR {sym} {e}")
+            continue
+    return results, btc_price, btc_map
+
+def main():
+    import argparse; p=argparse.ArgumentParser(); p.add_argument("--once",action="store_true"); args=p.parse_args()
+    res,btc_price,btc_map=scan_once()
+    if not res:
+        print(f"[{get_time()}] No signals RSI {RSI_BUY_MAX}/{RSI_SELL_MIN} - waiting extreme")
+        return
+    for sym,msg,v201 in res[:TOP_N_PER_SCAN]:
+        tg(msg)
+        print(msg)
+        time.sleep(1)
+
 if __name__=="__main__":
- import sys
- if "--once" in sys.argv:scan();print(f"--- DONE ONCE {get_time()} SLEEP 0 ---")
- else:
-   while True:
-     try:scan()
-     except Exception as e:print(f"SCAN ERR {e}");tg(f"SCAN ERR {e}")
-     sleep_sec=900;print(f"--- SLEEP {sleep_sec}s {get_time()} ---");time.sleep(sleep_sec)
+    main()
