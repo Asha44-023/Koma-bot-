@@ -9,7 +9,8 @@ TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
 MAX_ACTIVE=15;TOP_N_PER_SCAN=10
 session=requests.Session()
-TAG="V200.17-TACTICAL-FLIPS"
+TAG="V201-CLUSTER-30M-BUY-SELL-FINAL"
+ENTRY_TF="Min30";EXIT_TF="Day1";V201_DUST_FILTER=True;V201_BOTH_SIDES=True;V201_HOLD_DAYS=5
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
 def load_json(p,d):
@@ -155,7 +156,7 @@ def get_mexc_perps_wall(symbol):
         return {"bias":"NEUTRAL","imbalance":imb,"note":f"Balanced {imb:+.1f}%","whale_log":whale_log,"big_bid":big_bid,"big_ask":big_ask}
     except Exception as e: return {"bias":"ERR","note":str(e)[:80],"imbalance":0,"whale_log":f"ERR {e}"}
 def kl(symbol,interval):
- sec_map={"Min5":300,"Min15":900,"Min60":3600,"Hour4":14400,"Day1":86400};sec=sec_map.get(interval,300);end=int(time.time());start=end-sec*500
+ sec_map={"Min5":300,"Min15":900,"Min30":1800,"Min60":3600,"Hour4":14400,"Day1":86400};sec=sec_map.get(interval,300);end=int(time.time());start=end-sec*500
  url=f"https://contract.mexc.com/api/v1/contract/kline/{symbol}?interval={interval}&start={start}&end={end}"
  for _ in range(3):
   try:
@@ -184,6 +185,18 @@ def calc_atr(d1,period=14):
 def calc_hold_days_dynamic(entry,target,atr):
  if atr==0 or atr is None:atr=abs(entry-target)/3.5 if target else entry*0.03
  dist=abs(target-entry);days=dist/atr if atr>0 else 3.5;days=max(1,round(days));return min(days,30)
+def calc_rsi(c, period=14):
+    try:
+        if len(c)<period+1: return 50
+        gains=[]; losses=[]
+        for i in range(1,len(c)):
+            diff=c[i]-c[i-1]
+            gains.append(max(diff,0)); losses.append(max(-diff,0))
+        avg_gain=sum(gains[-period:])/period; avg_loss=sum(losses[-period:])/period
+        if avg_loss==0: return 80
+        rs=avg_gain/avg_loss
+        return 100-(100/(1+rs))
+    except: return 50
 def get_afar_levels(d1,lookback=90):
  try:
   if not d1 or len(d1["h"])<lookback:lookback=len(d1["h"])-5
@@ -208,6 +221,23 @@ def get_afar_levels(d1,lookback=90):
   month_line=f"{days_to_str(highs[0]['days_ago'])} ago High {fmt(round_level(highs[0]['price']))} -> {days_to_str(lows[0]['days_ago'])} ago Low {fmt(round_level(lows[0]['price']))}" if highs and lows else "NO STRUCTURE"
   return {"major_high":major_high,"major_high_2":major_high_2,"major_low":major_low,"major_low_2":major_low_2,"recent_high":recent_high,"recent_low":recent_low,"highs":highs,"lows":lows,"mid":(major_high+major_low)/2,"shape":shape,"hl_seq":seq,"month_line":month_line,"atr":calc_atr(d1)}
  except:return None
+def v201_30m_signal(d30, d1, live, rsi_30m, perps_wall):
+    try:
+        if not d30 or not d1: return None
+        afar_1d = get_afar_levels(d1, 90)
+        afar_30m = get_afar_levels(d30, 20)
+        if not afar_1d: return None
+        y_high, y_low, y_mid, y_range = get_daily_levels(d1)
+        fear_zone = y_low * 1.10
+        greed_zone = y_high * 0.90
+        wall_bias = perps_wall.get("bias","")
+        imb = perps_wall.get("imbalance",0)
+        if live <= fear_zone and rsi_30m < 40 and (wall_bias in ["WHALE_BUY_WALL","BID_HEAVY"] or imb > 10):
+            return {"side":"BUY","zone":"FEAR","entry":live,"entry_tf":"30M","exit_tf":"1D","real_tp1":afar_1d["major_high"]*0.75,"real_tp2":afar_1d["major_high"],"dust_tp":afar_30m["recent_high"] if afar_30m else y_high*1.05,"sl":y_low*0.80,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"FEAR ZONE {fmt(live)} <= {fmt(fear_zone)} YL {fmt(y_low)} + RSI30 {rsi_30m:.0f}<40 + {wall_bias} {imb:+.1f}%"}
+        if live >= greed_zone and rsi_30m > 70 and (wall_bias in ["WHALE_SELL_WALL","ASK_HEAVY"] or imb < -15):
+            return {"side":"SELL","zone":"GREED","entry":live,"entry_tf":"30M","exit_tf":"1D","real_tp1":afar_1d["major_low"]*1.25,"real_tp2":afar_1d["major_low"],"dust_tp":afar_30m["recent_low"] if afar_30m else y_low*0.95,"sl":y_high*1.20,"afar_1d":afar_1d,"afar_30m":afar_30m,"reason":f"GREED ZONE {fmt(live)} >= {fmt(greed_zone)} YH {fmt(y_high)} + RSI30 {rsi_30m:.0f}>70 + {wall_bias} {imb:+.1f}%"}
+        return None
+    except Exception as e: return {"side":"ERR","reason":str(e)[:80]}
 def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2,float(d1["h"][-2])-float(d1["l"][-2])
 def get_weekly_phase():
  try:
@@ -299,7 +329,7 @@ def scan():
   p=get_live(sym)
   if not p:continue
   entry,is_buy,sl=float(data["entry"]),bool(data["is_buy"]),float(data["sl"]);tp1_body=data.get("tp1_body",0);tp2_body=data.get("tp2_body",0);tp3=data.get("tp3",0);atr=data.get("atr",entry*0.03);rebuy=data.get("rebuy",0);rebuy2=data.get("rebuy2",0);afar_info=data.get("afar",{})
-  d_flip=calc_hold_days_dynamic(tp1_body,rebuy,atr);d_flip2=calc_hold_days_dynamic(tp2_body,rebuy2,atr);days_held=(time.time()-data.get("ts",time.time()))/86400
+  d_flip=calc_hold_days_dynamic(entry,tp1_body,atr);d_flip2=calc_hold_days_dynamic(tp2_body,rebuy2,atr);days_held=(time.time()-data.get("ts",time.time()))/86400
   if (is_buy and p<=sl) or (not is_buy and p>=sl):
    color="🟢" if is_buy else "🔴"; dir_color="GREEN BUY" if is_buy else "RED SELL"
    print(f"AUTO DELETE {sym} price {p} hit SL {sl} removing from active.json")
@@ -325,14 +355,44 @@ def scan():
  for sym in SYMBOLS:
   try:
    if sym in ACTIVE:continue
-   d1=kl(sym,"Day1");time.sleep(0.2);d15=kl(sym,"Min15");time.sleep(0.2);d5=kl(sym,"Min5");time.sleep(0.2)
-   if not d1 or not d15:continue
+   d1=kl(sym,"Day1");time.sleep(0.2);d15=kl(sym,"Min15");time.sleep(0.2);d30=kl(sym,"Min30");time.sleep(0.2);d5=kl(sym,"Min5");time.sleep(0.2)
+   if not d1 or not d15 or not d30:continue
    live=get_live(sym)
    if not live:continue
    afar=get_afar_levels(d1,90)
    if not afar:continue
    coin_pat=map_coin_pattern(afar)
    wick=detect_wick_grab(d15);wall=get_mexc_perps_wall(sym);third=get_oi_funding(sym);time.sleep(0.2)
+   try:
+       rsi_30m = calc_rsi(d30["c"],14) if d30 else 50
+       v201_sig = v201_30m_signal(d30, d1, live, rsi_30m, wall)
+       if v201_sig and v201_sig.get("side") in ["BUY","SELL"]:
+           direction = v201_sig["side"]
+           sig_type = f"V201 CLUSTER {v201_sig['entry_tf']}->{v201_sig['exit_tf']} {v201_sig['zone']}"
+           reason = v201_sig["reason"]
+           afar = v201_sig["afar_1d"]
+           tp1_body = round_level(v201_sig["real_tp1"])
+           tp2_body = round_level(v201_sig["real_tp2"])
+           tp3 = round_level(v201_sig["real_tp2"]*1.15 if direction=="BUY" else v201_sig["real_tp2"]*0.85)
+           sl = round_level(v201_sig["sl"])
+           tp1_wick = round_level(tp1_body*1.05 if direction=="BUY" else tp1_body*0.95)
+           tp2_wick = round_level(tp2_body*1.08 if direction=="BUY" else tp2_body*0.92)
+           rebuy_low = round_level(v201_sig["afar_1d"]["recent_low"] if direction=="BUY" else v201_sig["afar_1d"]["recent_high"])
+           rebuy2 = round_level(v201_sig["afar_1d"]["major_low"]*0.98 if direction=="BUY" else v201_sig["afar_1d"]["major_high"]*1.02)
+           dust_price = v201_sig["dust_tp"]
+           reason += f" | DUST SKIP {fmt(dust_price)} | REAL TP1 {fmt(tp1_body)} TP2 {fmt(tp2_body)} (1D Cluster)"
+           atr = afar["atr"]
+           risk = abs(live-sl)/live*100
+           if risk<=35 and risk>=5:
+               reward = abs(tp1_body-live)/live*100
+               rr = reward/risk if risk>0 else 0
+               if rr>=0.5:
+                   d1_hold=calc_hold_days_dynamic(live,tp1_body,atr); d2_hold=calc_hold_days_dynamic(live,tp2_body,atr); d3_hold=calc_hold_days_dynamic(live,tp3,atr); d_flip=calc_hold_days_dynamic(tp1_body,rebuy_low,atr); d_flip2=calc_hold_days_dynamic(tp2_body,rebuy2,atr)
+                   cands.append((5, sym, direction, sig_type, live, sl, tp1_body, tp1_wick, tp2_body, tp2_wick, tp3, rr, afar, atr, rebuy_low, rebuy2, d1_hold, d2_hold, d3_hold, d_flip, d_flip2, BETA_MAP.get(sym,2.0), reason, f"V201 5/5", wall, wick, third, coin_pat))
+                   print(f"V201 CAND {sym} {direction} {fmt(live)} TP {fmt(tp1_body)} {fmt(tp2_body)} SL {fmt(sl)} RR {rr:.1f} DUST {fmt(dust_price)}")
+                   continue
+   except Exception as e:
+       print(f"V201 ERR {sym} {e}")
    ok,direction,sig_type,reason,y_h,y_l,y_mid,checks_str,checks_score,missing=detect_5check(d1,d15,d5,live,btc_trend,btc_phase,btc_price,afar,wall,wick,third,btc_map)
    if not ok:
        if wick or wall["bias"]!="NEUTRAL" or not third["ok"]:
