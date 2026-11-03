@@ -1,7 +1,7 @@
-name: Scan 10 Coins 30M V201 CLUSTER BUY-SELL FINAL
+name: Scan 10 Coins 30M V202 LIQUIDITY GRAB MAP
 on:
   schedule:
-    - cron: '0 * * * *'  # Every 1 hour - best for GitHub, avoids 1-2H throttle
+    - cron: '0 * * * *'  # Every 1 hour
   workflow_dispatch:
 jobs:
   scan:
@@ -9,7 +9,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-10coins-v201-30m-1h
+      group: scan-10coins-v202-liq-1h
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -20,20 +20,20 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests pytz
-      - name: Run bot V201 30M CLUSTER BUY-SELL 1H
+      - name: Run bot V202 LIQUIDITY GRAB MAP
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-      - name: Save state + keep alive V201 1H
+      - name: Save state + keep alive V202
         if: always()
         run: |
-          git config user.name "koma-bot-v201-1h"
-          git config user.email "bot-v201-1h@koma.local"
-          echo "V201 1H alive $(date -u) 30M BUY-SELL FINAL" > keepalive.txt
+          git config user.name "koma-bot-v202-liq"
+          git config user.email "bot-v202-liq@koma.local"
+          echo "V202 LIQUIDITY MAP alive $(date -u) BUY->UP TP SELL" > keepalive.txt
           git add active.json cooldown.json oi_history.json whale_log.json keepalive.txt || true
           if git diff --cached --quiet; then echo "No change"; exit 0; fi
-          git commit -m "V201 1H keepalive ${{ github.run_id }} [skip ci]" || true
+          git commit -m "V202 LIQUIDITY MAP keepalive ${{ github.run_id }} [skip ci]" || true
           git push || (git pull --rebase && git push) || true
