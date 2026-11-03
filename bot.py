@@ -8,7 +8,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
 session=requests.Session()
-TAG="V203.1-BETA-RSI-6LEVEL"
+TAG="V203.2-BETA-RSI-FIXED-RANGE"
 COOLDOWN_HOURS=12; TOP_N_PER_SCAN=10
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -61,12 +61,9 @@ HIERARCHY = {
 
 def get_rsi_thresholds(sym):
     beta = BETA_MAP.get(sym, 2.0)
-    if beta >= 2.4: # VELVET, GRASS, SIREN - extreme pumpers
-        return 15, 85
-    elif beta >= 2.0: # KOMA, SENT, LAB
-        return 18, 82
-    else: # BTC, DOGE, PEPE, JASMY
-        return 20, 80
+    if beta >= 2.4: return 15, 85
+    elif beta >= 2.0: return 18, 82
+    else: return 20, 80
 
 def kl(symbol,interval):
  sec_map={"Min1":60,"Min5":300,"Min15":900,"Min30":1800,"Hour1":3600,"Min60":3600,"Hour4":14400,"Day1":86400,"Week1":604800,"Month1":2592000}
@@ -235,7 +232,17 @@ def get_mexc_perps_wall(symbol):
         return {"bias":"NEUTRAL","imbalance":imb,"note":f"Bal {imb:+.1f}%","whale_log":whale_log}
     except: return {"bias":"ERR","note":"err","imbalance":0,"whale_log":"ERR"}
 
-def get_daily_levels(d1):return float(d1["h"][-2]),float(d1["l"][-2]),(float(d1["h"][-2])+float(d1["l"][-2]))/2
+def get_daily_levels(d1):
+    # FIXED RANGE LOGIC
+    y_high = float(d1["h"][-2]); y_low = float(d1["l"][-2]); y_mid = (y_high+y_low)/2
+    range_pct = (y_high - y_low) / y_low if y_low>0 else 0.05
+    if range_pct < 0.03:
+        fear_zone = y_low * 1.02
+        greed_zone = y_high * 0.98
+    else:
+        fear_zone = y_low * 1.10
+        greed_zone = y_high * 0.90
+    return y_high, y_low, y_mid, fear_zone, greed_zone, range_pct
 
 def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
     try:
@@ -243,23 +250,17 @@ def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
         monthly = h_levels.get("MONTHLY",{}).get("key"); daily = h_levels.get("DAILY",{}).get("key")
         if not daily: daily = get_afar_levels(d1,20)
         if not daily: return None
-        y_high, y_low, y_mid = get_daily_levels(d1)
-        fear_zone = y_low * 1.10; greed_zone = y_high * 0.90
+        y_high, y_low, y_mid, fear_zone, greed_zone, range_pct = get_daily_levels(d1)
         wall_bias = perps_wall.get("bias","")
         monthly_low = monthly["major_low"] if monthly else y_low*0.7
         monthly_high = monthly["major_high"] if monthly else y_high*1.5
         if live <= fear_zone and rsi_30m < buy_thr and wall_bias != "WHALE_SELL_WALL":
             if live > monthly_high*0.95: return None
-            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr}","buy_thr":buy_thr,"sell_thr":sell_thr}
+            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr} range {range_pct*100:.1f}%","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone}
         if live >= greed_zone and rsi_30m > sell_thr and wall_bias != "WHALE_BUY_WALL":
-            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr}","buy_thr":buy_thr,"sell_thr":sell_thr}
+            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr}","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone}
         return None
     except Exception as e: return None
-
-def get_weekly_phase():
- try:
-  d1=kl("BTC_USDT","Day1");c=d1["c"];week_change=(c[-1]-c[-8])/c[-8]*100 if c[-8]!=0 else 0;return "RANGE",week_change,c[-1],d1,get_afar_levels(d1,90)
- except:return "RANGE",0,77000,None,None
 
 def check_active_positions():
     updated=False
@@ -290,11 +291,10 @@ def check_active_positions():
     if updated: save_a(); save_c()
 
 def scan_once(debug=True):
-    btc_trend,btc_week_change,btc_price,btc_d1,btc_afar=get_weekly_phase()
     check_active_positions()
     results=[]
-    print(f"\n[{get_time()}] BTC {fmt(btc_price)} | {TAG} | BETA RSI: VELVET/GRASS 15/85, KOMA 18/82, BTC 20/80")
-    print("-"*90)
+    print(f"\n[{get_time()}] | {TAG} | BETA RSI: VELVET/GRASS 15/85, KOMA 18/82, BTC 20/80")
+    print("-"*95)
     for sym in SYMBOLS:
         try:
             if sym in ACTIVE: print(f"{sym} ACTIVE - skip"); continue
@@ -316,23 +316,22 @@ def scan_once(debug=True):
             buy_thr,sell_thr = get_rsi_thresholds(sym)
             v203=v203_signal(d30,d1,live,rsi30,wall,h_levels,sym)
 
-            # DEBUG PRINT - SEE IT WORKING
             if debug:
                 daily = h_levels.get("DAILY",{}).get("key")
                 monthly = h_levels.get("MONTHLY",{}).get("key")
-                y_high, y_low, y_mid = get_daily_levels(d1)
-                fear_zone = y_low*1.10; greed_zone = y_high*0.90
+                y_high, y_low, y_mid, fear_zone, greed_zone, range_pct = get_daily_levels(d1)
                 status = "NEUTRAL"
-                if live <= fear_zone: status = "NEAR FEAR ZONE"
-                if live >= greed_zone: status = "NEAR GREED ZONE"
-                print(f"\n{sym} LIVE {fmt(live)} RSI30 {rsi30:.0f} (BUY<{buy_thr}/SELL>{sell_thr}) BETA{BETA_MAP[sym]} | {status}")
+                if live <= fear_zone: status = f"BELOW FEAR {fmt(fear_zone)} => BUY ZONE"
+                elif live >= greed_zone: status = f"ABOVE GREED {fmt(greed_zone)} => SELL ZONE"
+                else: status = f"RANGE between {fmt(fear_zone)}-{fmt(greed_zone)}"
+                print(f"\n{sym} LIVE {fmt(live)} RSI30 {rsi30:.0f} (BUY<{buy_thr}/SELL>{sell_thr}) BETA{BETA_MAP[sym]} | {status} | Range {range_pct*100:.1f}%")
                 if monthly: print(f"  MONTHLY KEY {fmt(monthly['major_low'])}-{fmt(monthly['major_high'])} > DAILY {h_levels.get('DAILY',{}).get('bias','')}")
-                if daily: print(f"  DAILY KEY {fmt(daily['major_low'])}-{fmt(daily['major_high'])} {daily['shape']} {daily['hl_seq']} | Y-Low {fmt(y_low)} Fear {fmt(fear_zone)} | Y-High {fmt(y_high)} Greed {fmt(greed_zone)}")
+                if daily: print(f"  DAILY KEY {fmt(daily['major_low'])}-{fmt(daily['major_high'])} {daily['shape']} {daily['hl_seq']}")
+                print(f"  Y-Low {fmt(y_low)} Fear {fmt(fear_zone)} | Y-High {fmt(y_high)} Greed {fmt(greed_zone)}")
                 print(f"  WHALE {wall['whale_log']} OI {third['msg']}")
-                # show how far from buy/sell
-                if rsi30 < buy_thr and live <= fear_zone: print(f"  >>> READY TO BUY (if not cooldown)")
+                if rsi30 < buy_thr and live <= fear_zone: print(f"  >>> READY TO BUY")
                 elif rsi30 > sell_thr and live >= greed_zone: print(f"  >>> READY TO SELL")
-                else: print(f"  Need RSI {rsi30:.0f} -> {buy_thr} for BUY or {sell_thr} for SELL + price to zone")
+                else: print(f"  Need RSI {rsi30:.0f}->{buy_thr} BUY or ->{sell_thr} SELL + price to zone")
 
             if v203 and v203.get("side") in ["BUY","SELL"]:
                 entry=v203["entry"]; side=v203["side"]; zone=v203["zone"]; sl=v203["sl"]
@@ -352,17 +351,17 @@ def scan_once(debug=True):
         except Exception as e:
             print(f"ERR {sym} {e}")
             continue
-    return results, btc_price
+    return results
 
 def main():
     import argparse; p=argparse.ArgumentParser(); p.add_argument("--once",action="store_true"); args=p.parse_args()
-    res,btc_price=scan_once(debug=True)
+    res=scan_once(debug=True)
     if not res:
-        print(f"\n[{get_time()}] No new signals - but hierarchy printed above. Cooldown {COOLDOWN_HOURS}H")
-        print("Next signals when RSI hits beta thresholds:")
+        print(f"\n[{get_time()}] No new signals - hierarchy OK, range fix applied.")
+        print("Next BUY when:")
         for sym in SYMBOLS:
             buy_thr,sell_thr = get_rsi_thresholds(sym)
-            print(f"  {sym}: BUY RSI<{buy_thr} SELL RSI>{sell_thr}")
+            print(f"  {sym}: RSI<{buy_thr} SELL RSI>{sell_thr}")
         return
     for sym,msg,v203 in res[:TOP_N_PER_SCAN]:
         tg(msg); print("\n"+msg); time.sleep(1)
