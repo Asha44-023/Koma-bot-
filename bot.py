@@ -1,4 +1,4 @@
-import json,os,time,tempfile,requests
+import json,os,time,tempfile,requests,argparse
 from datetime import datetime
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
@@ -37,13 +37,15 @@ def fmt(p):
 def round_level(p):
  try:
   p=float(p)
+  if p==0: return 0
   if p>=1000:return round(p/50)*50
   if p>=100:return round(p/5)*5
   if p>=10:return round(p*2)/2
   if p>=1:return round(p*20)/20
-  if p>=0.1:return round(p*20)/20
+  if p>=0.1:return round(p*200)/200
   if p>=0.01:return round(p*200)/200
-  return round(p*1000)/1000
+  if p>=0.001:return round(p*10000)/10000
+  return round(p*100000000)/100000000
  except:return p
 def tg(m):
  if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:print(m);return
@@ -191,9 +193,19 @@ def get_liquidity_grab_levels_hierarchy(h_levels, live, side, atr):
             chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY > DAILY (+{((moon_tp-live)/live*100):.1f}%)")
             return {"chain":chain,"up_tp1":up_tp1,"up_tp2":up_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
         else:
-            down_tp1 = round_level(h1["major_low"]*1.2 if h1 else live - atr*1.5); down_tp2 = round_level(h4["major_low"]*1.15 if h4 else live - atr*3)
-            final_tp1 = round_level(daily_low*1.25); final_tp2 = round_level(daily_low); super_tp = round_level(weekly_low); moon_tp = round_level(monthly_low)
-            if live - down_tp1 < min_gap: down_tp1 = round_level(live - min_gap)
+            # FIXED SELL: TPs must be LOWS BELOW live, no *1.15 / *1.25
+            down_tp1 = round_level(h1["major_low"] if h1 else live - atr*1.5)
+            down_tp2 = round_level(h4["major_low"] if h4 else live - atr*3)
+            final_tp1 = round_level(daily_low)
+            final_tp2 = round_level(daily_low*0.95)
+            super_tp = round_level(weekly_low)
+            moon_tp = round_level(monthly_low)
+            if down_tp1 >= live: down_tp1 = round_level(live - min_gap)
+            if down_tp2 >= down_tp1: down_tp2 = round_level(down_tp1 - min_gap)
+            if final_tp1 >= down_tp2: final_tp1 = round_level(down_tp2 - min_gap)
+            if final_tp2 >= final_tp1: final_tp2 = round_level(final_tp1 - min_gap)
+            if super_tp >= final_tp2: super_tp = round_level(final_tp2 - min_gap)
+            if moon_tp >= super_tp: moon_tp = round_level(super_tp - min_gap*2)
             chain=[]; chain.append(f"SELL {fmt(live)} -> DOWN TP {fmt(down_tp1)} H1 KEY BUY"); chain.append(f"-> TP2 {fmt(down_tp2)} H4 KEY BUY"); chain.append(f"-> FINAL {fmt(final_tp2)} DAILY KEY BUY"); chain.append(f"-> SUPER {fmt(super_tp)} WEEKLY KEY BUY"); chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY BUY")
             return {"chain":chain,"up_tp1":live,"down_tp1":down_tp1,"down_tp2":down_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
     except Exception as e:
@@ -233,7 +245,6 @@ def get_mexc_perps_wall(symbol):
     except: return {"bias":"ERR","note":"err","imbalance":0,"whale_log":"ERR"}
 
 def get_daily_levels(d1):
-    # FIXED RANGE LOGIC
     y_high = float(d1["h"][-2]); y_low = float(d1["l"][-2]); y_mid = (y_high+y_low)/2
     range_pct = (y_high - y_low) / y_low if y_low>0 else 0.05
     if range_pct < 0.03:
@@ -300,9 +311,9 @@ def scan_once(debug=True):
             if sym in ACTIVE: print(f"{sym} ACTIVE - skip"); continue
             last_entry = COOLDOWN.get(sym)
             if last_entry and isinstance(last_entry, dict) and "last_ts" in last_entry:
-                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600: 
+                if time.time() - last_entry["last_ts"] < COOLDOWN_HOURS * 3600:
                     hrs_left = (COOLDOWN_HOURS*3600 - (time.time()-last_entry["last_ts"]))/3600
-                    if debug: print(f"{sym} COOLDOWN {hrs_left:.1f}H left"); 
+                    if debug: print(f"{sym} COOLDOWN {hrs_left:.1f}H left")
                     continue
             d1=kl(sym,"Day1"); d30=kl(sym,"Min30")
             if not d1 or not d30: print(f"{sym} NO DATA"); continue
@@ -315,56 +326,41 @@ def scan_once(debug=True):
             h_levels=get_hierarchy_levels(sym)
             buy_thr,sell_thr = get_rsi_thresholds(sym)
             v203=v203_signal(d30,d1,live,rsi30,wall,h_levels,sym)
-
             if debug:
-                daily = h_levels.get("DAILY",{}).get("key")
-                monthly = h_levels.get("MONTHLY",{}).get("key")
-                y_high, y_low, y_mid, fear_zone, greed_zone, range_pct = get_daily_levels(d1)
-                status = "NEUTRAL"
-                if live <= fear_zone: status = f"BELOW FEAR {fmt(fear_zone)} => BUY ZONE"
-                elif live >= greed_zone: status = f"ABOVE GREED {fmt(greed_zone)} => SELL ZONE"
-                else: status = f"RANGE between {fmt(fear_zone)}-{fmt(greed_zone)}"
-                print(f"\n{sym} LIVE {fmt(live)} RSI30 {rsi30:.0f} (BUY<{buy_thr}/SELL>{sell_thr}) BETA{BETA_MAP[sym]} | {status} | Range {range_pct*100:.1f}%")
-                if monthly: print(f"  MONTHLY KEY {fmt(monthly['major_low'])}-{fmt(monthly['major_high'])} > DAILY {h_levels.get('DAILY',{}).get('bias','')}")
-                if daily: print(f"  DAILY KEY {fmt(daily['major_low'])}-{fmt(daily['major_high'])} {daily['shape']} {daily['hl_seq']}")
-                print(f"  Y-Low {fmt(y_low)} Fear {fmt(fear_zone)} | Y-High {fmt(y_high)} Greed {fmt(greed_zone)}")
-                print(f"  WHALE {wall['whale_log']} OI {third['msg']}")
-                if rsi30 < buy_thr and live <= fear_zone: print(f"  >>> READY TO BUY")
-                elif rsi30 > sell_thr and live >= greed_zone: print(f"  >>> READY TO SELL")
-                else: print(f"  Need RSI {rsi30:.0f}->{buy_thr} BUY or ->{sell_thr} SELL + price to zone")
-
-            if v203 and v203.get("side") in ["BUY","SELL"]:
-                entry=v203["entry"]; side=v203["side"]; zone=v203["zone"]; sl=v203["sl"]
-                atr = h_levels.get("DAILY",{}).get("key",{}).get("atr", live*0.04)
-                liq = get_liquidity_grab_levels_hierarchy(h_levels, entry, side, atr)
-                hold2=calc_hold_days_dynamic(entry,liq["final_tp2"],atr)
-                ACTIVE[sym] = {"entry": entry, "side": side, "tp1": liq["up_tp1"] if side=="BUY" else liq.get("down_tp1",live*0.95), "tp2": liq["final_tp2"], "sl": sl, "time": get_time(), "rsi": rsi30, "zone": zone}
-                save_a(); COOLDOWN[sym] = {"last_ts": time.time(), "side": side, "entry": entry, "rsi": rsi30, "zone": zone}; save_c()
-                hier_text=""
-                for lvl_name in ["MONTHLY","WEEKLY","DAILY","H4","H1","M15"]:
-                    if lvl_name in h_levels:
-                        k = h_levels[lvl_name]["key"]; b = h_levels[lvl_name]["bias"]
-                        hier_text+=f"{lvl_name} KEY {fmt(k['major_low'])}-{fmt(k['major_high'])} > {b}\n"
-                chain_text = "\n".join(liq["chain"])
-                msg=f"🐳{'🟢' if side=='BUY' else '🔴'} {zone} {side} {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr})\n📊 HIERARCHY:\n{hier_text}🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n{chain_text}\n🏁 TP2 {fmt(liq['final_tp2'])} {hold2}D | SUPER {fmt(liq.get('super_tp',0))} | MOON {fmt(liq.get('moon_tp',0))} | SL {fmt(sl)}\n🧠 {third['msg']}"
-                results.append((sym,msg,v203))
+                print(f"{sym} live={fmt(live)} RSI30={rsi30:.1f} thr {buy_thr}/{sell_thr} wall={wall.get('bias')} oi={third.get('msg')} sig={v203['side'] if v203 else 'NONE'}")
+            if not v203: continue
+            atr=calc_atr(d1)
+            liq=get_liquidity_grab_levels_hierarchy(h_levels, live, v203["side"], atr)
+            # HIERARCHY text
+            hier_lines=[]
+            for k in ["MONTHLY","WEEKLY","DAILY","H4","H1","M15"]:
+                if k in h_levels:
+                    kk=h_levels[k]["key"]; bias=h_levels[k]["bias"]
+                    hier_lines.append(f"{k} KEY {fmt(round_level(kk['major_low']))}-{fmt(round_level(kk['major_high']))} > {bias}")
+            hier_txt="\n".join(hier_lines)
+            side=v203["side"]
+            entry=live; sl=v203["sl"]
+            if side=="BUY":
+                tp1=liq.get("up_tp1",live*1.05); tp2=liq.get("up_tp2",live*1.1); final_tp=liq.get("final_tp2",live*1.2); super_tp=liq.get("super_tp",live*1.3); moon_tp=liq.get("moon_tp",live*1.5)
+                hold=calc_hold_days_dynamic(entry,tp2,atr)
+                msg=f"🐳🟢 FEAR RSI{buy_thr} BETA{sym} BUY {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr})\n📊 HIERARCHY:\n{hier_txt}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n" + "\n".join(liq["chain"]) + f"\n🏁 TP2 {fmt(tp2)} {hold}D | SUPER {fmt(super_tp)} | MOON {fmt(moon_tp)} | SL {fmt(sl)}\n🧠 {third.get('msg','')}"
+            else:
+                tp1=liq.get("down_tp1",live*0.95); tp2=liq.get("down_tp2",live*0.9); final_tp=liq.get("final_tp2",live*0.8); super_tp=liq.get("super_tp",live*0.7); moon_tp=liq.get("moon_tp",live*0.5)
+                hold=calc_hold_days_dynamic(entry,tp2,atr)
+                msg=f"🐳🔴 GREED RSI{sell_thr} BETA{sym} SELL {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr})\n📊 HIERARCHY:\n{hier_txt}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n" + "\n".join(liq["chain"]) + f"\n🏁 TP2 {fmt(tp2)} {hold}D | SUPER {fmt(super_tp)} | MOON {fmt(moon_tp)} | SL {fmt(sl)}\n🧠 {third.get('msg','')}"
+            tg(msg); print(msg)
+            ACTIVE[sym]={"entry":entry,"side":side,"tp1":tp1,"tp2":tp2,"sl":sl,"ts":time.time()}
+            results.append(sym)
+            if len(results)>=TOP_N_PER_SCAN: break
         except Exception as e:
-            print(f"ERR {sym} {e}")
-            continue
+            print(f"{sym} ERR {e}"); continue
+    save_a(); save_c()
+    print(f"DONE {len(results)} signals: {results}")
     return results
 
-def main():
-    import argparse; p=argparse.ArgumentParser(); p.add_argument("--once",action="store_true"); args=p.parse_args()
-    res=scan_once(debug=True)
-    if not res:
-        print(f"\n[{get_time()}] No new signals - hierarchy OK, range fix applied.")
-        print("Next BUY when:")
-        for sym in SYMBOLS:
-            buy_thr,sell_thr = get_rsi_thresholds(sym)
-            print(f"  {sym}: RSI<{buy_thr} SELL RSI>{sell_thr}")
-        return
-    for sym,msg,v203 in res[:TOP_N_PER_SCAN]:
-        tg(msg); print("\n"+msg); time.sleep(1)
-
 if __name__=="__main__":
-    main()
+    ap=argparse.ArgumentParser(); ap.add_argument("--once",action="store_true"); ap.add_argument("--reset",action="store_true")
+    args=ap.parse_args()
+    if args.reset:
+        ACTIVE.clear(); COOLDOWN.clear(); save_a(); save_c()
+    scan_once(debug=True)
