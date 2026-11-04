@@ -165,6 +165,16 @@ def get_hierarchy_levels(sym):
         except: continue
     return levels
 
+# --- NEW: ICT ALIGNMENT ---
+def alignment_score(h_levels):
+    # DAILY + H4 + H1 = bias for trade, per ICT post: Daily bias, H4 narrative, H1 POI
+    bull=0; bear=0
+    for k in ["DAILY","H4","H1"]:
+        b=h_levels.get(k,{}).get("bias","")
+        if "BULL" in b: bull+=1
+        if "BEAR" in b: bear+=1
+    return bull, bear
+
 def get_liquidity_grab_levels_hierarchy(h_levels, live, side, atr):
     try:
         if not atr or atr==0: atr=live*0.04
@@ -193,7 +203,6 @@ def get_liquidity_grab_levels_hierarchy(h_levels, live, side, atr):
             chain.append(f"-> MOON {fmt(moon_tp)} MONTHLY KEY > DAILY (+{((moon_tp-live)/live*100):.1f}%)")
             return {"chain":chain,"up_tp1":up_tp1,"up_tp2":up_tp2,"final_tp1":final_tp1,"final_tp2":final_tp2,"super_tp":super_tp,"moon_tp":moon_tp,"atr":atr}
         else:
-            # FIXED SELL: TPs must be LOWS BELOW live, no *1.15 / *1.25
             down_tp1 = round_level(h1["major_low"] if h1 else live - atr*1.5)
             down_tp2 = round_level(h4["major_low"] if h4 else live - atr*3)
             final_tp1 = round_level(daily_low)
@@ -265,11 +274,15 @@ def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
         wall_bias = perps_wall.get("bias","")
         monthly_low = monthly["major_low"] if monthly else y_low*0.7
         monthly_high = monthly["major_high"] if monthly else y_high*1.5
+        # ICT ALIGNMENT - DAILY+H4+H1 must agree 2/3
+        bull, bear = alignment_score(h_levels)
         if live <= fear_zone and rsi_30m < buy_thr and wall_bias != "WHALE_SELL_WALL":
             if live > monthly_high*0.95: return None
-            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr} range {range_pct*100:.1f}%","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone}
+            if bull < 2: return None  # BLOCK: not enough bullish alignment
+            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr} range {range_pct*100:.1f}% ALIGN {bull}/3 BULL","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
         if live >= greed_zone and rsi_30m > sell_thr and wall_bias != "WHALE_BUY_WALL":
-            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr}","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone}
+            if bear < 2: return None  # BLOCK: not enough bearish alignment - this blocks that BTC SELL
+            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr} ALIGN {bear}/3 BEAR","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
         return None
     except Exception as e: return None
 
@@ -325,13 +338,13 @@ def scan_once(debug=True):
             if not third.get("ok",True): print(f"{sym} OI BLOCK {third['msg']}"); continue
             h_levels=get_hierarchy_levels(sym)
             buy_thr,sell_thr = get_rsi_thresholds(sym)
+            bull,bear=alignment_score(h_levels)
             v203=v203_signal(d30,d1,live,rsi30,wall,h_levels,sym)
             if debug:
-                print(f"{sym} live={fmt(live)} RSI30={rsi30:.1f} thr {buy_thr}/{sell_thr} wall={wall.get('bias')} oi={third.get('msg')} sig={v203['side'] if v203 else 'NONE'}")
+                print(f"{sym} live={fmt(live)} RSI30={rsi30:.1f} thr {buy_thr}/{sell_thr} wall={wall.get('bias')} oi={third.get('msg')} ALIGN BULL {bull}/3 BEAR {bear}/3 sig={v203['side'] if v203 else 'NONE (blocked by alignment)'}")
             if not v203: continue
             atr=calc_atr(d1)
             liq=get_liquidity_grab_levels_hierarchy(h_levels, live, v203["side"], atr)
-            # HIERARCHY text
             hier_lines=[]
             for k in ["MONTHLY","WEEKLY","DAILY","H4","H1","M15"]:
                 if k in h_levels:
@@ -343,11 +356,11 @@ def scan_once(debug=True):
             if side=="BUY":
                 tp1=liq.get("up_tp1",live*1.05); tp2=liq.get("up_tp2",live*1.1); final_tp=liq.get("final_tp2",live*1.2); super_tp=liq.get("super_tp",live*1.3); moon_tp=liq.get("moon_tp",live*1.5)
                 hold=calc_hold_days_dynamic(entry,tp2,atr)
-                msg=f"🐳🟢 FEAR RSI{buy_thr} BETA{sym} BUY {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr})\n📊 HIERARCHY:\n{hier_txt}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n" + "\n".join(liq["chain"]) + f"\n🏁 TP2 {fmt(tp2)} {hold}D | SUPER {fmt(super_tp)} | MOON {fmt(moon_tp)} | SL {fmt(sl)}\n🧠 {third.get('msg','')}"
+                msg=f"🐳🟢 FEAR RSI{buy_thr} BETA{sym} BUY {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr}) ALIGN {bull}/3 BULL\n📊 HIERARCHY:\n{hier_txt}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n" + "\n".join(liq["chain"]) + f"\n🏁 TP2 {fmt(tp2)} {hold}D | SUPER {fmt(super_tp)} | MOON {fmt(moon_tp)} | SL {fmt(sl)}\n🧠 {third.get('msg','')}"
             else:
                 tp1=liq.get("down_tp1",live*0.95); tp2=liq.get("down_tp2",live*0.9); final_tp=liq.get("final_tp2",live*0.8); super_tp=liq.get("super_tp",live*0.7); moon_tp=liq.get("moon_tp",live*0.5)
                 hold=calc_hold_days_dynamic(entry,tp2,atr)
-                msg=f"🐳🔴 GREED RSI{sell_thr} BETA{sym} SELL {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr})\n📊 HIERARCHY:\n{hier_txt}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n" + "\n".join(liq["chain"]) + f"\n🏁 TP2 {fmt(tp2)} {hold}D | SUPER {fmt(super_tp)} | MOON {fmt(moon_tp)} | SL {fmt(sl)}\n🧠 {third.get('msg','')}"
+                msg=f"🐳🔴 GREED RSI{sell_thr} BETA{sym} SELL {sym} | {TAG} | RSI30 {rsi30:.0f} (thr {buy_thr}/{sell_thr}) ALIGN {bear}/3 BEAR\n📊 HIERARCHY:\n{hier_txt}\n🐋 {wall.get('whale_log','')}\n💧 LIQUIDITY MAP 6 LEVELS:\n" + "\n".join(liq["chain"]) + f"\n🏁 TP2 {fmt(tp2)} {hold}D | SUPER {fmt(super_tp)} | MOON {fmt(moon_tp)} | SL {fmt(sl)}\n🧠 {third.get('msg','')}"
             tg(msg); print(msg)
             ACTIVE[sym]={"entry":entry,"side":side,"tp1":tp1,"tp2":tp2,"sl":sl,"ts":time.time()}
             results.append(sym)
