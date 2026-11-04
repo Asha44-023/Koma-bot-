@@ -1,7 +1,7 @@
-name: Scan 10 Coins 30M V203.3 BETA-RSI SWEEP
+name: Scan 10 Coins 1H V203.3 BETA-RSI SWEEP
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       reset_cooldowns:
