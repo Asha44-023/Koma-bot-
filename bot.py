@@ -8,7 +8,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json";WHALE_LOG="whale_log.json"
 session=requests.Session()
-TAG="V203.2-BETA-RSI-FIXED-RANGE"
+TAG="V203.3-BETA-RSI-SWEEP"
 COOLDOWN_HOURS=12; TOP_N_PER_SCAN=10
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -261,7 +261,35 @@ def get_daily_levels(d1):
         greed_zone = y_high * 0.90
     return y_high, y_low, y_mid, fear_zone, greed_zone, range_pct
 
-def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
+def detect_liquidity_sweep(d_m15, live, side):
+    try:
+        if not d_m15 or len(d_m15["c"]) < 25:
+            return False, "NO M15 DATA"
+        h = d_m15["h"]; l = d_m15["l"]; c = d_m15["c"]
+        lookback_l = l[-22:-2]
+        lookback_h = h[-22:-2]
+        recent_low = min(lookback_l)
+        recent_high = max(lookback_h)
+        last_lows = l[-3:]
+        last_highs = h[-3:]
+        last_closes = c[-3:]
+        if side == "BUY":
+            swept = any(x < recent_low for x in last_lows)
+            reclaimed = last_closes[-1] > recent_low and live > recent_low
+            if swept and reclaimed:
+                return True, f"SWEEP BUY wick {fmt(min(last_lows))} < low {fmt(recent_low)} reclaim {fmt(live)}"
+            return False, f"NO SWEEP low {fmt(recent_low)} live {fmt(live)}"
+        if side == "SELL":
+            swept = any(x > recent_high for x in last_highs)
+            reclaimed = last_closes[-1] < recent_high and live < recent_high
+            if swept and reclaimed:
+                return True, f"SWEEP SELL wick {fmt(max(last_highs))} > high {fmt(recent_high)} reclaim {fmt(live)}"
+            return False, f"NO SWEEP high {fmt(recent_high)} live {fmt(live)}"
+        return False, "NO SIDE"
+    except Exception as e:
+        return False, f"SWEEP ERR {e}"
+
+def v203_signal(d30, d1, d_m15, live, rsi_30m, perps_wall, h_levels, sym):
     try:
         buy_thr,sell_thr = get_rsi_thresholds(sym)
         monthly = h_levels.get("MONTHLY",{}).get("key"); daily = h_levels.get("DAILY",{}).get("key")
@@ -275,10 +303,18 @@ def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
         if live <= fear_zone and rsi_30m < buy_thr and wall_bias != "WHALE_SELL_WALL":
             if live > monthly_high*0.95: return None
             if bull < 2: return None
-            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr} range {range_pct*100:.1f}% ALIGN {bull}/3 BULL","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
+            swept, sweep_msg = detect_liquidity_sweep(d_m15, live, "BUY")
+            if not swept:
+                print(f"{sym} SWEEP BLOCK BUY - {sweep_msg}")
+                return None
+            return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym} + SWEEP","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203.3 SWEEP {sweep_msg} | RSI {rsi_30m:.0f}<{buy_thr} range {range_pct*100:.1f}% ALIGN {bull}/3 BULL","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
         if live >= greed_zone and rsi_30m > sell_thr and wall_bias != "WHALE_BUY_WALL":
             if bear < 2: return None
-            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr} ALIGN {bear}/3 BEAR","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
+            swept, sweep_msg = detect_liquidity_sweep(d_m15, live, "SELL")
+            if not swept:
+                print(f"{sym} SWEEP BLOCK SELL - {sweep_msg}")
+                return None
+            return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym} + SWEEP","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203.3 SWEEP {sweep_msg} | RSI {rsi_30m:.0f}>{sell_thr} ALIGN {bear}/3 BEAR","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
         return None
     except Exception as e: return None
 
@@ -324,7 +360,7 @@ def scan_once(debug=True):
                     hrs_left = (COOLDOWN_HOURS*3600 - (time.time()-last_entry["last_ts"]))/3600
                     if debug: print(f"{sym} COOLDOWN {hrs_left:.1f}H left")
                     continue
-            d1=kl(sym,"Day1"); d30=kl(sym,"Min30")
+            d1=kl(sym,"Day1"); d30=kl(sym,"Min30"); d_m15=kl(sym,"Min15")
             if not d1 or not d30: print(f"{sym} NO DATA"); continue
             live=get_live(sym)
             if not live: live=d1["c"][-1]
@@ -335,7 +371,7 @@ def scan_once(debug=True):
             h_levels=get_hierarchy_levels(sym)
             buy_thr,sell_thr = get_rsi_thresholds(sym)
             bull,bear=alignment_score(h_levels)
-            v203=v203_signal(d30,d1,live,rsi30,wall,h_levels,sym)
+            v203=v203_signal(d30,d1,d_m15,live,rsi30,wall,h_levels,sym)
             if debug:
                 if v203:
                     sig_txt = f"SIGNAL {v203['side']}"
