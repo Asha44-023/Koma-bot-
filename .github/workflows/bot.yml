@@ -1,7 +1,7 @@
 name: Scan 10 Coins 30M V203.2 BETA-RSI FIXED
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       reset_cooldowns:
