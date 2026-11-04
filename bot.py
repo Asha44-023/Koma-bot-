@@ -66,7 +66,6 @@ def get_rsi_thresholds(sym):
     if beta >= 2.4: return 15, 85
     elif beta >= 2.0: return 18, 82
     else: return 20, 80
-
 def kl(symbol,interval):
  sec_map={"Min1":60,"Min5":300,"Min15":900,"Min30":1800,"Hour1":3600,"Min60":3600,"Hour4":14400,"Day1":86400,"Week1":604800,"Month1":2592000}
  sec=sec_map.get(interval,300)
@@ -165,9 +164,7 @@ def get_hierarchy_levels(sym):
         except: continue
     return levels
 
-# --- NEW: ICT ALIGNMENT ---
 def alignment_score(h_levels):
-    # DAILY + H4 + H1 = bias for trade, per ICT post: Daily bias, H4 narrative, H1 POI
     bull=0; bear=0
     for k in ["DAILY","H4","H1"]:
         b=h_levels.get(k,{}).get("bias","")
@@ -274,14 +271,13 @@ def v203_signal(d30, d1, live, rsi_30m, perps_wall, h_levels, sym):
         wall_bias = perps_wall.get("bias","")
         monthly_low = monthly["major_low"] if monthly else y_low*0.7
         monthly_high = monthly["major_high"] if monthly else y_high*1.5
-        # ICT ALIGNMENT - DAILY+H4+H1 must agree 2/3
         bull, bear = alignment_score(h_levels)
         if live <= fear_zone and rsi_30m < buy_thr and wall_bias != "WHALE_SELL_WALL":
             if live > monthly_high*0.95: return None
-            if bull < 2: return None  # BLOCK: not enough bullish alignment
+            if bull < 2: return None
             return {"side":"BUY","zone":f"FEAR RSI{buy_thr} BETA{sym}","entry":live,"sl":y_low*0.80,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_low)} > DAILY HL | RSI {rsi_30m:.0f}<{buy_thr} range {range_pct*100:.1f}% ALIGN {bull}/3 BULL","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
         if live >= greed_zone and rsi_30m > sell_thr and wall_bias != "WHALE_BUY_WALL":
-            if bear < 2: return None  # BLOCK: not enough bearish alignment - this blocks that BTC SELL
+            if bear < 2: return None
             return {"side":"SELL","zone":f"GREED RSI{sell_thr} BETA{sym}","entry":live,"sl":y_high*1.20,"h_levels":h_levels,"reason":f"V203.2 MONTHLY {fmt(monthly_high)} < DAILY LH | RSI {rsi_30m:.0f}>{sell_thr} ALIGN {bear}/3 BEAR","buy_thr":buy_thr,"sell_thr":sell_thr,"fear_zone":fear_zone,"greed_zone":greed_zone,"bull":bull,"bear":bear}
         return None
     except Exception as e: return None
@@ -341,7 +337,13 @@ def scan_once(debug=True):
             bull,bear=alignment_score(h_levels)
             v203=v203_signal(d30,d1,live,rsi30,wall,h_levels,sym)
             if debug:
-                print(f"{sym} live={fmt(live)} RSI30={rsi30:.1f} thr {buy_thr}/{sell_thr} wall={wall.get('bias')} oi={third.get('msg')} ALIGN BULL {bull}/3 BEAR {bear}/3 sig={v203['side'] if v203 else 'NONE (blocked by alignment)'}")
+                if v203:
+                    sig_txt = f"SIGNAL {v203['side']}"
+                elif rsi30 < buy_thr or rsi30 > sell_thr:
+                    sig_txt = "BLOCKED BY ALIGNMENT"
+                else:
+                    sig_txt = "NO SIGNAL - RSI mid-range"
+                print(f"{sym} live={fmt(live)} RSI30={rsi30:.1f} thr {buy_thr}/{sell_thr} wall={wall.get('bias')} oi={third.get('msg')} ALIGN BULL {bull}/3 BEAR {bear}/3 {sig_txt}")
             if not v203: continue
             atr=calc_atr(d1)
             liq=get_liquidity_grab_levels_hierarchy(h_levels, live, v203["side"], atr)
