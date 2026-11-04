@@ -1,18 +1,1 @@
-{
-  "daily_pnl": 0.0,
-  "last_day": "2026-11-04",
-  "PEPE_USDT": {
-    "last_ts": 1793791744.8370848,
-    "side": "SELL",
-    "entry": 5.102e-06,
-    "rsi": 81.8243858052778,
-    "zone": "GREED RSI80 BETAPEPE_USDT"
-  },
-  "DOGE_USDT": {
-    "last_ts": 1793791748.6245425,
-    "side": "SELL",
-    "entry": 0.07538,
-    "rsi": 86.20689655172455,
-    "zone": "GREED RSI80 BETADOGE_USDT"
-  }
-}
+{}
