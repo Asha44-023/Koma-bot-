@@ -1,4 +1,4 @@
-name: Scan 10 Coins 30M V203.2 BETA-RSI FIXED
+name: Scan 10 Coins 30M V203.3 BETA-RSI SWEEP
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: scan-10coins-v203-2-beta-rsi-fixed
+      group: scan-10coins-v203-3-beta-rsi-sweep
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
           echo '{}' > active.json
           echo "Cooldowns wiped"
 
-      - name: Run bot V203.2 BETA-RSI FIXED RANGE
+      - name: Run bot V203.3 BETA-RSI SWEEP
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
@@ -48,13 +48,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
 
-      - name: Save state + keep alive V203.2
+      - name: Save state + keep alive V203.3
         if: always()
         run: |
-          git config user.name "koma-bot-v203-2-fixed"
-          git config user.email "bot-v203-2@koma.local"
-          echo "V203.2 FIXED RANGE alive $(date -u) 15/85 PUMPERS tight-range 1.02 fix" > keepalive.txt
+          git config user.name "koma-bot-v203-3-sweep"
+          git config user.email "bot-v203-3@koma.local"
+          echo "V203.3 SWEEP alive $(date -u) LIQUIDITY SWEEP FILTER" > keepalive.txt
           git add active.json cooldown.json oi_history.json whale_log.json keepalive.txt || true
           if git diff --cached --quiet; then echo "No change"; exit 0; fi
-          git commit -m "V203.2 FIXED RANGE LIVE ${{ github.run_id }} 15-85" || true
+          git commit -m "V203.3 SWEEP LIVE ${{ github.run_id }} SWEEP-FILTER" || true
           git push || (git pull --rebase && git push) || true
