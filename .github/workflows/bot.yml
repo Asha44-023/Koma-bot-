@@ -1,8 +1,18 @@
 name: Scan 10 Coins 30M V203.2 BETA-RSI FIXED
 on:
   schedule:
-    - cron: '5 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
+    inputs:
+      reset_cooldowns:
+        description: 'Reset all cooldowns to {}'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -10,16 +20,26 @@ jobs:
       contents: write
     concurrency:
       group: scan-10coins-v203-2-beta-rsi-fixed
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - run: pip install requests pytz
+
+      - name: Reset cooldowns if requested
+        if: ${{ inputs.reset_cooldowns == 'true' }}
+        run: |
+          echo '{}' > cooldown.json
+          echo '{}' > active.json
+          echo "Cooldowns wiped"
+
       - name: Run bot V203.2 BETA-RSI FIXED RANGE
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
@@ -27,6 +47,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
+
       - name: Save state + keep alive V203.2
         if: always()
         run: |
