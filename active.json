@@ -1,1 +1,22 @@
-{}
+{
+  "PEPE_USDT": {
+    "entry": 5.102e-06,
+    "side": "SELL",
+    "tp1": 0.0,
+    "tp2": 0.0,
+    "sl": 6.0009599999999995e-06,
+    "time": "2026-11-04 14:29 EAT",
+    "rsi": 81.8243858052778,
+    "zone": "GREED RSI80 BETAPEPE_USDT"
+  },
+  "DOGE_USDT": {
+    "entry": 0.07538,
+    "side": "SELL",
+    "tp1": 0.07,
+    "tp2": 0.07,
+    "sl": 0.091584,
+    "time": "2026-11-04 14:29 EAT",
+    "rsi": 86.20689655172455,
+    "zone": "GREED RSI80 BETADOGE_USDT"
+  }
+}
