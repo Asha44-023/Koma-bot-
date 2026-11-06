@@ -32,6 +32,8 @@ def fmt(p):
   if p<1:return f"{p:.6f}".rstrip('0').rstrip('.')
   return f"{p:.4f}".rstrip('0').rstrip('.')
  except:return "0"
+
+# ================= FIXED ROUND_LEVEL - TPs WON'T COLLAPSE =================
 def round_level(p):
  try:
   p=float(p)
@@ -39,11 +41,12 @@ def round_level(p):
   if p>=1000:return round(p/50)*50
   if p>=100:return round(p/5)*5
   if p>=10:return round(p*2)/2
-  if p>=1:return round(p*20)/20
-  if p>=0.1:return round(p*200)/200
-  if p>=0.01:return round(p*200)/200
-  if p>=0.001:return round(p*10000)/10000
-  return round(p*100000000)/100000000
+  if p>=1:return round(p*100)/100
+  if p>=0.1:return round(p*1000)/1000
+  if p>=0.01:return round(p*10000)/10000
+  if p>=0.001:return round(p*100000)/100000
+  if p>=0.0001:return round(p*1000000)/1000000
+  return round(p*10000000)/10000000
  except:return p
 
 def tg(m):
@@ -174,7 +177,6 @@ def get_5m_trigger(d5, side):
         return False, "no side", 0, 0
     except Exception as e: return False, f"5M err {e}", 0, 0
 
-# ================= FIXED TP LOGIC =================
 def v204_signal(sym, live):
     d4h=kl(sym,"Hour4"); d30=kl(sym,"Min30"); d5=kl(sym,"Min5")
     if not d4h or not d30 or not d5: return None, "missing TF data"
@@ -185,7 +187,6 @@ def v204_signal(sym, live):
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
-
     def fix_tp_buy(tp1_raw):
         if tp1_raw and tp1_raw > live + atr*0.5:
             return round_level(tp1_raw)
@@ -194,7 +195,6 @@ def v204_signal(sym, live):
         if tp1_raw and tp1_raw < live - atr*0.5:
             return round_level(tp1_raw)
         return round_level(live - atr*2)
-
     if direction=="RANGE":
         if in_demand:
             ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
