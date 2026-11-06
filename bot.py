@@ -111,7 +111,6 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ================= V204 FIXED 4H - LOOSER, NO MORE NEUTRAL STUCK =================
 def get_4h_direction(d4h):
     try:
         if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
@@ -175,45 +174,57 @@ def get_5m_trigger(d5, side):
         return False, "no side", 0, 0
     except Exception as e: return False, f"5M err {e}", 0, 0
 
+# ================= FIXED TP LOGIC =================
 def v204_signal(sym, live):
     d4h=kl(sym,"Hour4"); d30=kl(sym,"Min30"); d5=kl(sym,"Min5")
     if not d4h or not d30 or not d5: return None, "missing TF data"
     direction, dir_reason = get_4h_direction(d4h)
     demand, supply = get_30m_zones(d30)
     atr = calc_atr(d30)
+    if atr==0: atr=live*0.02
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
+
+    def fix_tp_buy(tp1_raw):
+        if tp1_raw and tp1_raw > live + atr*0.5:
+            return round_level(tp1_raw)
+        return round_level(live + atr*2)
+    def fix_tp_sell(tp1_raw):
+        if tp1_raw and tp1_raw < live - atr*0.5:
+            return round_level(tp1_raw)
+        return round_level(live - atr*2)
+
     if direction=="RANGE":
         if in_demand:
             ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
             if ok:
-                tp1 = supply["high"] if supply else live+atr*2
-                tp2 = live+atr*4; tp3 = tp2+atr*2
-                return {"side":"BUY","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"RANGE + Demand + {msg} | 4H {dir_reason}"}, f"RANGE BUY {msg}"
+                tp1 = fix_tp_buy(supply["high"] if supply else 0)
+                tp2 = round_level(live+atr*4); tp3 = round_level(tp2+atr*2)
+                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Demand + {msg} | 4H {dir_reason}"}, f"RANGE BUY {msg}"
             return None, f"RANGE in Demand, waiting 5M: {msg}"
         if in_supply:
             ok, msg, sl, trig = get_5m_trigger(d5,"SELL")
             if ok:
-                tp1 = demand["low"] if demand else live-atr*2
-                tp2 = live-atr*4; tp3 = tp2-atr*2
-                return {"side":"SELL","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"RANGE + Supply + {msg} | 4H {dir_reason}"}, f"RANGE SELL {msg}"
+                tp1 = fix_tp_sell(demand["low"] if demand else 0)
+                tp2 = round_level(live-atr*4); tp3 = round_level(tp2-atr*2)
+                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason}"}, f"RANGE SELL {msg}"
             return None, f"RANGE in Supply, waiting 5M: {msg}"
         return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
     if direction=="BULLISH":
         if not in_demand: return None, f"BULLISH {dir_reason} | not in Demand live {fmt(live)}"
         ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
         if not ok: return None, f"BULLISH in Demand, waiting 5M: {msg}"
-        tp1 = supply["high"] if supply else live+atr*2
-        tp2 = live+atr*4; tp3 = tp2+atr*2
-        return {"side":"BUY","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason}"}, f"BULLISH BUY {msg}"
+        tp1 = fix_tp_buy(supply["high"] if supply else 0)
+        tp2 = round_level(live+atr*4); tp3 = round_level(tp2+atr*2)
+        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason}"}, f"BULLISH BUY {msg}"
     if direction=="BEARISH":
         if not in_supply: return None, f"BEARISH {dir_reason} | not in Supply live {fmt(live)}"
         ok, msg, sl, trig = get_5m_trigger(d5,"SELL")
         if not ok: return None, f"BEARISH in Supply, waiting 5M: {msg}"
-        tp1 = demand["low"] if demand else live-atr*2
-        tp2 = live-atr*4; tp3 = tp2-atr*2
-        return {"side":"SELL","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason}"}, f"BEARISH SELL {msg}"
+        tp1 = fix_tp_sell(demand["low"] if demand else 0)
+        tp2 = round_level(live-atr*4); tp3 = round_level(tp2-atr*2)
+        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason}"}, f"BEARISH SELL {msg}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
 def check_active_positions_v204():
