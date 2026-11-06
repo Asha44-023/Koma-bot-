@@ -5,12 +5,9 @@ EAT=pytz.timezone("Africa/Nairobi")
 SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","JASMY_USDT","LAB_USDT","VELVET_USDT","PEPE_USDT","DOGE_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
-ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";OI_FILE="oi_history.json"
+ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 session=requests.Session()
 TAG="V204-VIDEO-4H-30M-5M"
-COOLDOWN_HOURS=12
-
-# --- COLORS FOR TERMINAL ---
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -28,7 +25,6 @@ def atomic_save(path,data):
   except:pass;raise
 ACTIVE=load_json(ACTIVE_FILE,{});COOLDOWN=load_json(COOLDOWN_FILE,{});COOLDOWN.setdefault("daily_pnl",0.0);COOLDOWN.setdefault("last_day",get_today())
 def save_a():atomic_save(ACTIVE_FILE,ACTIVE)
-def save_c():atomic_save(COOLDOWN_FILE,COOLDOWN)
 def fmt(p):
  try:
   p=float(p)
@@ -55,7 +51,6 @@ def tg(m):
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m,"parse_mode":"HTML"},timeout=15)
  except:pass
 
-# --- FORMATTED MESSAGES: GREEN BUY / RED SELL + TP / SL ---
 def format_signal_msg(sig, sym):
     if sig["side"]=="BUY":
         return (f"🟢🟢🟢 <b>BUY {sym}</b> 🟢🟢🟢\n"
@@ -68,7 +63,7 @@ def format_signal_msg(sig, sym):
     else:
         return (f"🔴🔴🔴 <b>SELL {sym}</b> 🔴🔴🔴\n"
                 f"Entry: <b>{fmt(sig['entry'])}</b>\n"
-                f"🛑 SL: <b>{fmt(sig['sl'])}</b> ({((sig['entry']-sig['sl'])/sig['entry']*100):+.2f}% risk)\n"
+                f"🛑 SL: <b>{fmt(sig['sl'])}</b>\n"
                 f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['entry']-sig['tp1'])/sig['entry']*100):+.2f}%)\n"
                 f"🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['entry']-sig['tp2'])/sig['entry']*100):+.2f}%)\n"
                 f"🎯 TP3: <b>{fmt(sig['tp3'])}</b> ({((sig['entry']-sig['tp3'])/sig['entry']*100):+.2f}%)\n"
@@ -116,28 +111,29 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ================= V204 VIDEO LOGIC =================
+# ================= V204 FIXED 4H - LOOSER, NO MORE NEUTRAL STUCK =================
 def get_4h_direction(d4h):
     try:
         if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
-        h=d4h["h"]; l=d4h["l"]
+        h=d4h["h"]; l=d4h["l"]; c=d4h["c"]
         highs=[]; lows=[]
         for i in range(3,len(h)-3):
             if h[i]==max(h[i-3:i+4]): highs.append(h[i])
             if l[i]==min(l[i-3:i+4]): lows.append(l[i])
-        highs=highs[-4:]; lows=lows[-4:]
-        if len(highs)<3 or len(lows)<2: return "NEUTRAL","not enough pivots"
-        h1,h2,h3=highs[-3],highs[-2],highs[-1]
+        highs=highs[-3:]; lows=lows[-3:]
+        if len(highs)<2 or len(lows)<2: return "NEUTRAL","not enough pivots"
+        h1,h2=highs[-2],highs[-1]
         l1,l2=lows[-2],lows[-1]
-        if abs(h3-h1)/h1 < 0.015 and abs(l2-l1)/l1 < 0.015:
-            return "RANGE", f"Range H {fmt(h3)} L {fmt(l2)}"
-        if h3>h2>h1 and l2>l1:
-            return "BULLISH", f"HH {fmt(h1)}->{fmt(h2)}->{fmt(h3)} HL {fmt(l1)}->{fmt(l2)}"
-        if len(lows)>=3:
-            l0,l1b,l2b=lows[-3],lows[-2],lows[-1]
-            if l2b<l1b<l0 and h3<h2<h1:
-                return "BEARISH", f"LL {fmt(l0)}->{fmt(l1b)}->{fmt(l2b)} LH {fmt(h1)}->{fmt(h2)}->{fmt(h3)}"
-        return "NEUTRAL", f"mixed H {fmt(h3)} L {fmt(l2)}"
+        if abs(h2-h1)/h1 < 0.02 and abs(l2-l1)/l1 < 0.02:
+            return "RANGE", f"Range H {fmt(h2)} L {fmt(l2)}"
+        if h2>h1 and l2>l1:
+            return "BULLISH", f"HH {fmt(h1)}->{fmt(h2)} HL {fmt(l1)}->{fmt(l2)}"
+        if h2<h1 and l2<l1:
+            return "BEARISH", f"LH {fmt(h1)}->{fmt(h2)} LL {fmt(l1)}->{fmt(l2)}"
+        avg=sum(c[-20:])/20
+        if c[-1] > avg*1.01: return "BULLISH", f"Price above avg {fmt(avg)}"
+        if c[-1] < avg*0.99: return "BEARISH", f"Price below avg {fmt(avg)}"
+        return "RANGE", f"Sideways H {fmt(h2)} L {fmt(l2)}"
     except Exception as e: return "NEUTRAL", f"err {e}"
 
 def get_30m_zones(d30):
@@ -188,48 +184,36 @@ def v204_signal(sym, live):
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
-
-    # --- TP / SL LOGIC ---
-    # BUY: SL = 5M HL - 0.3%, TP1 = next Supply, TP2 = 4H High, TP3 = TP2 + 1x ATR
-    # SELL: SL = 5M LH + 0.3%, TP1 = next Demand, TP2 = 4H Low, TP3 = TP2 - 1x ATR
-
     if direction=="RANGE":
         if in_demand:
             ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
             if ok:
                 tp1 = supply["high"] if supply else live+atr*2
-                tp2 = live+atr*4
-                tp3 = tp2+atr*2
+                tp2 = live+atr*4; tp3 = tp2+atr*2
                 return {"side":"BUY","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"RANGE + Demand + {msg} | 4H {dir_reason}"}, f"RANGE BUY {msg}"
             return None, f"RANGE in Demand, waiting 5M: {msg}"
         if in_supply:
             ok, msg, sl, trig = get_5m_trigger(d5,"SELL")
             if ok:
                 tp1 = demand["low"] if demand else live-atr*2
-                tp2 = live-atr*4
-                tp3 = tp2-atr*2
+                tp2 = live-atr*4; tp3 = tp2-atr*2
                 return {"side":"SELL","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"RANGE + Supply + {msg} | 4H {dir_reason}"}, f"RANGE SELL {msg}"
             return None, f"RANGE in Supply, waiting 5M: {msg}"
         return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
-
     if direction=="BULLISH":
         if not in_demand: return None, f"BULLISH {dir_reason} | not in Demand live {fmt(live)}"
         ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
         if not ok: return None, f"BULLISH in Demand, waiting 5M: {msg}"
         tp1 = supply["high"] if supply else live+atr*2
-        tp2 = live+atr*4
-        tp3 = tp2+atr*2
+        tp2 = live+atr*4; tp3 = tp2+atr*2
         return {"side":"BUY","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason}"}, f"BULLISH BUY {msg}"
-
     if direction=="BEARISH":
         if not in_supply: return None, f"BEARISH {dir_reason} | not in Supply live {fmt(live)}"
         ok, msg, sl, trig = get_5m_trigger(d5,"SELL")
         if not ok: return None, f"BEARISH in Supply, waiting 5M: {msg}"
         tp1 = demand["low"] if demand else live-atr*2
-        tp2 = live-atr*4
-        tp3 = tp2-atr*2
+        tp2 = live-atr*4; tp3 = tp2-atr*2
         return {"side":"SELL","entry":live,"sl":sl,"tp1":round_level(tp1),"tp2":round_level(tp2),"tp3":round_level(tp3),"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason}"}, f"BEARISH SELL {msg}"
-
     return None, f"NEUTRAL {dir_reason} | no trade"
 
 def check_active_positions_v204():
@@ -238,7 +222,7 @@ def check_active_positions_v204():
             info=ACTIVE[sym]
             if not isinstance(info, dict): continue
             entry=float(info.get("entry",0)); side=info.get("side","BUY"); sl=float(info.get("sl",0))
-            tp1=float(info.get("tp1",0)); tp2=float(info.get("tp2",0)); tp3=float(info.get("tp3",0))
+            tp1=float(info.get("tp1",0))
             live=get_live(sym)
             if not live: continue
             d4h=kl(sym,"Hour4")
@@ -247,14 +231,13 @@ def check_active_positions_v204():
             if side=="BUY" and direction=="BEARISH": flip=True
             if side=="SELL" and direction=="BULLISH": flip=True
             sl_hit = (live <= sl) if side=="BUY" else (live >= sl)
-            tp_hit = ""
             if side=="BUY" and live>=tp1 and not info.get("tp1_hit"):
-                tp_hit="TP1 HIT - move SL to entry"; info["tp1_hit"]=True; info["sl"]=entry; save_a()
+                info["tp1_hit"]=True; info["sl"]=entry; save_a()
+                print(f"{GREEN}TP1 HIT {sym} {side} @ {fmt(live)} - SL moved to entry{RESET}")
+                tg(f"✅ <b>TP1 HIT {sym} {side}</b> @ {fmt(live)}\nSL moved to entry {fmt(entry)}")
             if side=="SELL" and live<=tp1 and not info.get("tp1_hit"):
-                tp_hit="TP1 HIT - move SL to entry"; info["tp1_hit"]=True; info["sl"]=entry; save_a()
-            if tp_hit:
-                color=GREEN if side=="BUY" else RED
-                print(f"{color}TP1 HIT {sym} {side} @ {fmt(live)} - SL moved to entry{RESET}")
+                info["tp1_hit"]=True; info["sl"]=entry; save_a()
+                print(f"{GREEN}TP1 HIT {sym} {side} @ {fmt(live)} - SL moved to entry{RESET}")
                 tg(f"✅ <b>TP1 HIT {sym} {side}</b> @ {fmt(live)}\nSL moved to entry {fmt(entry)}")
             if flip or sl_hit:
                 reason = "4H FLIP EXIT" if flip else "SL HIT EXIT"
@@ -277,7 +260,6 @@ def run_once():
             d4h=kl(sym,"Hour4")
             direction, dir_reason = get_4h_direction(d4h)
             if sig:
-                # GREEN for BUY, RED for SELL in terminal
                 color = GREEN if sig["side"]=="BUY" else RED
                 emoji = "🟢 BUY" if sig["side"]=="BUY" else "🔴 SELL"
                 print(f"{color}{BOLD}{emoji} {sym} @ {fmt(sig['entry'])} | SL {fmt(sig['sl'])} | TP1 {fmt(sig['tp1'])} | TP2 {fmt(sig['tp2'])} | TP3 {fmt(sig['tp3'])} | {debug}{RESET}")
