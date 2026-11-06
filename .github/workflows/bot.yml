@@ -1,60 +1,32 @@
-name: Scan 10 Coins 1H V203.3 BETA-RSI SWEEP
+name: Scan V204
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '5 * * * *'
   workflow_dispatch:
-    inputs:
-      reset_cooldowns:
-        description: 'Reset all cooldowns to {}'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-
 jobs:
   scan:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     concurrency:
-      group: scan-10coins-v203-3-beta-rsi-sweep
-      cancel-in-progress: false
+      group: v204
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - run: pip install requests pytz
-
-      - name: Reset cooldowns if requested
-        if: ${{ inputs.reset_cooldowns == 'true' }}
-        run: |
-          echo '{}' > cooldown.json
-          echo '{}' > active.json
-          echo "Cooldowns wiped"
-
-      - name: Run bot V203.3 BETA-RSI SWEEP
+      - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py --once
-
-      - name: Save state + keep alive V203.3
+      - name: Save
         if: always()
         run: |
-          git config user.name "koma-bot-v203-3-sweep"
-          git config user.email "bot-v203-3@koma.local"
-          echo "V203.3 SWEEP alive $(date -u) LIQUIDITY SWEEP FILTER" > keepalive.txt
-          git add active.json cooldown.json oi_history.json whale_log.json keepalive.txt || true
-          if git diff --cached --quiet; then echo "No change"; exit 0; fi
-          git commit -m "V203.3 SWEEP LIVE ${{ github.run_id }} SWEEP-FILTER" || true
-          git push || (git pull --rebase && git push) || true
+          git config user.name "bot"
+          git config user.email "bot@bot.local"
+          git add active.json cooldown.json || true
+          git commit -m "V204 run" || true
+          git push || true
