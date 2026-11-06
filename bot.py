@@ -7,7 +7,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 session=requests.Session()
-TAG="V204-VIDEO-4H-30M-5M"
+TAG="V205-BTC-FILTER-4H-30M-5M"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -33,7 +33,6 @@ def fmt(p):
   return f"{p:.4f}".rstrip('0').rstrip('.')
  except:return "0"
 
-# ================= FIXED ROUND_LEVEL - TPs WON'T COLLAPSE =================
 def round_level(p):
  try:
   p=float(p)
@@ -227,6 +226,15 @@ def v204_signal(sym, live):
         return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason}"}, f"BEARISH SELL {msg}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
+# ================= BTC FILTER - STANDARD =================
+def btc_confirms(alt_side, btc_dir):
+    # BTC trades alone, no filter
+    # Alt BUY needs BTC BULLISH or RANGE - never BEARISH
+    # Alt SELL needs BTC BEARISH or RANGE - never BULLISH
+    if alt_side=="BUY" and btc_dir=="BEARISH": return False
+    if alt_side=="SELL" and btc_dir=="BULLISH": return False
+    return True
+
 def check_active_positions_v204():
     for sym in list(ACTIVE.keys()):
         try:
@@ -259,8 +267,12 @@ def check_active_positions_v204():
         except Exception as e: print(f"exit check err {sym} {e}")
 
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H / 30M / 5M VIDEO LOGIC{RESET}")
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H / 30M / 5M + BTC FILTER{RESET}")
     print("-"*100)
+    # Get BTC direction ONCE for filter
+    btc_d4h=kl("BTC_USDT","Hour4")
+    btc_dir, btc_reason = get_4h_direction(btc_d4h)
+    print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v204()
     signals=[]
     for sym in SYMBOLS:
@@ -271,9 +283,14 @@ def run_once():
             d4h=kl(sym,"Hour4")
             direction, dir_reason = get_4h_direction(d4h)
             if sig:
+                # === BTC FILTER APPLIED HERE ===
+                if sym != "BTC_USDT":
+                    if not btc_confirms(sig["side"], btc_dir):
+                        print(f"{YELLOW}SKIP {sym} {sig['side']} - BTC {btc_dir} not confirming | {debug}{RESET}")
+                        continue
                 color = GREEN if sig["side"]=="BUY" else RED
                 emoji = "🟢 BUY" if sig["side"]=="BUY" else "🔴 SELL"
-                print(f"{color}{BOLD}{emoji} {sym} @ {fmt(sig['entry'])} | SL {fmt(sig['sl'])} | TP1 {fmt(sig['tp1'])} | TP2 {fmt(sig['tp2'])} | TP3 {fmt(sig['tp3'])} | {debug}{RESET}")
+                print(f"{color}{BOLD}{emoji} {sym} @ {fmt(sig['entry'])} | SL {fmt(sig['sl'])} | TP1 {fmt(sig['tp1'])} | TP2 {fmt(sig['tp2'])} | TP3 {fmt(sig['tp3'])} | BTC {btc_dir} OK | {debug}{RESET}")
                 tg(format_signal_msg(sig, sym))
                 signals.append(sym)
                 ACTIVE[sym]={"side":sig["side"],"entry":sig["entry"],"sl":sig["sl"],"tp1":sig["tp1"],"tp2":sig["tp2"],"tp3":sig["tp3"],"time":get_time()}
