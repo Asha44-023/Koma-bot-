@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '5 * * * *'
   workflow_dispatch:
+    inputs:
+      reset_cooldowns:
+        description: 'Clear active trades'
+        type: boolean
+        default: false
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -19,9 +24,13 @@ jobs:
       - run: pip install requests pytz
       - name: Run bot
         env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT: ${{ secrets.TG_CHAT }}
-        run: python bot.py --once
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ inputs.reset_cooldowns }}" = "true" ]; then echo '{}' > active.json; echo '{}' > cooldown.json; fi
+          python bot.py --once
       - name: Save
         if: always()
         run: |
