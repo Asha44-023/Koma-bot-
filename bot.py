@@ -7,7 +7,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 session=requests.Session()
-TAG="V205-BTC-FILTER-4H-30M-5M"
+TAG="V206-2TO2-SWEEP-LIQTP"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -113,6 +113,7 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
+# ================= V206: 2 TO 2 =================
 def get_4h_direction(d4h):
     try:
         if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
@@ -122,19 +123,21 @@ def get_4h_direction(d4h):
             if h[i]==max(h[i-3:i+4]): highs.append(h[i])
             if l[i]==min(l[i-3:i+4]): lows.append(l[i])
         highs=highs[-3:]; lows=lows[-3:]
-        if len(highs)<2 or len(lows)<2: return "NEUTRAL","not enough pivots"
-        h1,h2=highs[-2],highs[-1]
-        l1,l2=lows[-2],lows[-1]
-        if abs(h2-h1)/h1 < 0.02 and abs(l2-l1)/l1 < 0.02:
-            return "RANGE", f"Range H {fmt(h2)} L {fmt(l2)}"
-        if h2>h1 and l2>l1:
-            return "BULLISH", f"HH {fmt(h1)}->{fmt(h2)} HL {fmt(l1)}->{fmt(l2)}"
-        if h2<h1 and l2<l1:
-            return "BEARISH", f"LH {fmt(h1)}->{fmt(h2)} LL {fmt(l1)}->{fmt(l2)}"
+        if len(highs)<3 or len(lows)<3: return "NEUTRAL","not enough pivots need 3"
+        h1,h2,h3=highs[-3],highs[-2],highs[-1]
+        l1,l2,l3=lows[-3],lows[-2],lows[-1]
+        # RANGE check first - flat pivots
+        if abs(h3-h1)/h1 < 0.02 and abs(l3-l1)/l1 < 0.02:
+            return "RANGE", f"Range H {fmt(h3)} L {fmt(l3)}"
+        # 2 TO 2: need 2 increments = 3 pivots in same direction
+        if h3>h2>h1 and l3>l2>l1:
+            return "BULLISH", f"2TO2 HH {fmt(h1)}->{fmt(h2)}->{fmt(h3)} HL {fmt(l1)}->{fmt(l2)}->{fmt(l3)}"
+        if h3<h2<h1 and l3<l2<l1:
+            return "BEARISH", f"2TO2 LH {fmt(h1)}->{fmt(h2)}->{fmt(h3)} LL {fmt(l1)}->{fmt(l2)}->{fmt(l3)}"
         avg=sum(c[-20:])/20
         if c[-1] > avg*1.01: return "BULLISH", f"Price above avg {fmt(avg)}"
         if c[-1] < avg*0.99: return "BEARISH", f"Price below avg {fmt(avg)}"
-        return "RANGE", f"Sideways H {fmt(h2)} L {fmt(l2)}"
+        return "RANGE", f"Sideways H {fmt(h3)} L {fmt(l3)}"
     except Exception as e: return "NEUTRAL", f"err {e}"
 
 def get_30m_zones(d30):
@@ -153,30 +156,72 @@ def get_30m_zones(d30):
         return demand, supply
     except: return None, None
 
+# ================= V206: LIQUIDITY POOLS FOR TP =================
+def get_liq_pools(sym, live):
+    # Returns (pools_above_sorted, pools_below_sorted)
+    pools=[]
+    try:
+        d1h=kl(sym,"Hour1"); d1=kl(sym,"Day1")
+        if d1h:
+            h=d1h["h"]; l=d1h["l"]
+            # Equal highs / lows on 1H - pivots within 0.15%
+            for i in range(3,len(h)-3):
+                if h[i]==max(h[i-3:i+4]):
+                    pools.append(h[i])
+                if l[i]==min(l[i-3:i+4]):
+                    pools.append(l[i])
+            # Session high/low = last 24 x 1H candles
+            if len(h)>=24:
+                pools.append(max(h[-24:])); pools.append(min(l[-24:]))
+        if d1 and len(d1["h"])>=3:
+            pools.append(d1["h"][-2]); pools.append(d1["l"][-2]) # Prev day H/L
+            pools.append(d1["h"][-1]); pools.append(d1["l"][-1]) # Today H/L
+    except: pass
+    # Dedupe close levels, keep unique
+    uniq=[]
+    for p in sorted(set(pools)):
+        if not uniq or abs(p-uniq[-1])/uniq[-1] > 0.0015:
+            uniq.append(p)
+    above=[p for p in uniq if p > live*1.001]
+    below=[p for p in uniq if p < live*0.999]
+    below=sorted(below, reverse=True)
+    return above, below
+
+# ================= V206: 5M TRIGGER + SWEEP TIMING =================
 def get_5m_trigger(d5, side):
     try:
-        if not d5 or len(d5["c"])<20: return False, "no 5M data", 0, 0
+        if not d5 or len(d5["c"])<20: return False, "no 5M data", 0, 0, False
         h=d5["h"]; l=d5["l"]; c=d5["c"]
         if side=="BUY":
             low1=min(l[-10:-5]); low2=min(l[-5:])
-            if not (low2 > low1): return False, f"no HL {fmt(low1)}->{fmt(low2)}", 0, 0
+            if not (low2 > low1): return False, f"no HL {fmt(low1)}->{fmt(low2)}", 0, 0, False
             breakout = max(h[-6:-1])
+            # SWEEP check: did price wick below low1/low2 then close back above?
+            sweep=False; sweep_low=min(l[-6:])
+            if sweep_low < low2 and c[-1] > low2:
+                sweep=True
             if c[-1] > breakout:
-                sl = low2 * 0.997
-                return True, f"HL {fmt(low1)}->{fmt(low2)} break {fmt(breakout)}", sl, breakout
-            return False, f"HL ok, waiting break > {fmt(breakout)} live {fmt(c[-1])}", 0, 0
+                # SL beyond sweep wick if swept, else below HL
+                sl = sweep_low * 0.997 if sweep else low2 * 0.997
+                tag="SWEEP" if sweep else "BREAK"
+                return True, f"{tag} HL {fmt(low1)}->{fmt(low2)} break {fmt(breakout)} sweepLow {fmt(sweep_low)}", sl, breakout, sweep
+            return False, f"HL ok, waiting break > {fmt(breakout)} live {fmt(c[-1])}", 0, 0, False
         if side=="SELL":
             high1=max(h[-10:-5]); high2=max(h[-5:])
-            if not (high2 < high1): return False, f"no LH {fmt(high1)}->{fmt(high2)}", 0, 0
+            if not (high2 < high1): return False, f"no LH {fmt(high1)}->{fmt(high2)}", 0, 0, False
             breakdown = min(l[-6:-1])
+            sweep=False; sweep_high=max(h[-6:])
+            if sweep_high > high2 and c[-1] < high2:
+                sweep=True
             if c[-1] < breakdown:
-                sl = high2 * 1.003
-                return True, f"LH {fmt(high1)}->{fmt(high2)} break {fmt(breakdown)}", sl, breakdown
-            return False, f"LH ok, waiting break < {fmt(breakdown)} live {fmt(c[-1])}", 0, 0
-        return False, "no side", 0, 0
-    except Exception as e: return False, f"5M err {e}", 0, 0
+                sl = sweep_high * 1.003 if sweep else high2 * 1.003
+                tag="SWEEP" if sweep else "BREAK"
+                return True, f"{tag} LH {fmt(high1)}->{fmt(high2)} break {fmt(breakdown)} sweepHigh {fmt(sweep_high)}", sl, breakdown, sweep
+            return False, f"LH ok, waiting break < {fmt(breakdown)} live {fmt(c[-1])}", 0, 0, False
+        return False, "no side", 0, 0, False
+    except Exception as e: return False, f"5M err {e}", 0, 0, False
 
-def v204_signal(sym, live):
+def v206_signal(sym, live):
     d4h=kl(sym,"Hour4"); d30=kl(sym,"Min30"); d5=kl(sym,"Min5")
     if not d4h or not d30 or not d5: return None, "missing TF data"
     direction, dir_reason = get_4h_direction(d4h)
@@ -186,56 +231,60 @@ def v204_signal(sym, live):
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
-    def fix_tp_buy(tp1_raw):
-        if tp1_raw and tp1_raw > live + atr*0.5:
-            return round_level(tp1_raw)
-        return round_level(live + atr*2)
-    def fix_tp_sell(tp1_raw):
-        if tp1_raw and tp1_raw < live - atr*0.5:
-            return round_level(tp1_raw)
-        return round_level(live - atr*2)
+    # TP from liquidity pools
+    above, below = get_liq_pools(sym, live)
+    def tp_buy():
+        if len(above)>=1: tp1=round_level(above[0])
+        else: tp1=round_level(live+atr*2)
+        if len(above)>=2: tp2=round_level(above[1])
+        else: tp2=round_level(tp1+atr*2)
+        tp3=round_level(tp2+atr*2)
+        # ensure at least 0.5 ATR away
+        if tp1 < live+atr*0.5: tp1=round_level(live+atr*2)
+        return tp1,tp2,tp3
+    def tp_sell():
+        if len(below)>=1: tp1=round_level(below[0])
+        else: tp1=round_level(live-atr*2)
+        if len(below)>=2: tp2=round_level(below[1])
+        else: tp2=round_level(tp1-atr*2)
+        tp3=round_level(tp2-atr*2)
+        if tp1 > live-atr*0.5: tp1=round_level(live-atr*2)
+        return tp1,tp2,tp3
     if direction=="RANGE":
         if in_demand:
-            ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
+            ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
             if ok:
-                tp1 = fix_tp_buy(supply["high"] if supply else 0)
-                tp2 = round_level(live+atr*4); tp3 = round_level(tp2+atr*2)
-                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Demand + {msg} | 4H {dir_reason}"}, f"RANGE BUY {msg}"
+                tp1,tp2,tp3=tp_buy()
+                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Demand + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"RANGE BUY {msg}"
             return None, f"RANGE in Demand, waiting 5M: {msg}"
         if in_supply:
-            ok, msg, sl, trig = get_5m_trigger(d5,"SELL")
+            ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL")
             if ok:
-                tp1 = fix_tp_sell(demand["low"] if demand else 0)
-                tp2 = round_level(live-atr*4); tp3 = round_level(tp2-atr*2)
-                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason}"}, f"RANGE SELL {msg}"
+                tp1,tp2,tp3=tp_sell()
+                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"RANGE SELL {msg}"
             return None, f"RANGE in Supply, waiting 5M: {msg}"
         return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
     if direction=="BULLISH":
         if not in_demand: return None, f"BULLISH {dir_reason} | not in Demand live {fmt(live)}"
-        ok, msg, sl, trig = get_5m_trigger(d5,"BUY")
+        ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
         if not ok: return None, f"BULLISH in Demand, waiting 5M: {msg}"
-        tp1 = fix_tp_buy(supply["high"] if supply else 0)
-        tp2 = round_level(live+atr*4); tp3 = round_level(tp2+atr*2)
-        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason}"}, f"BULLISH BUY {msg}"
+        tp1,tp2,tp3=tp_buy()
+        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"BULLISH BUY {msg}"
     if direction=="BEARISH":
         if not in_supply: return None, f"BEARISH {dir_reason} | not in Supply live {fmt(live)}"
-        ok, msg, sl, trig = get_5m_trigger(d5,"SELL")
+        ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL")
         if not ok: return None, f"BEARISH in Supply, waiting 5M: {msg}"
-        tp1 = fix_tp_sell(demand["low"] if demand else 0)
-        tp2 = round_level(live-atr*4); tp3 = round_level(tp2-atr*2)
-        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason}"}, f"BEARISH SELL {msg}"
+        tp1,tp2,tp3=tp_sell()
+        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"BEARISH SELL {msg}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
 # ================= BTC FILTER - STANDARD =================
 def btc_confirms(alt_side, btc_dir):
-    # BTC trades alone, no filter
-    # Alt BUY needs BTC BULLISH or RANGE - never BEARISH
-    # Alt SELL needs BTC BEARISH or RANGE - never BULLISH
     if alt_side=="BUY" and btc_dir=="BEARISH": return False
     if alt_side=="SELL" and btc_dir=="BULLISH": return False
     return True
 
-def check_active_positions_v204():
+def check_active_positions_v206():
     for sym in list(ACTIVE.keys()):
         try:
             info=ACTIVE[sym]
@@ -267,23 +316,21 @@ def check_active_positions_v204():
         except Exception as e: print(f"exit check err {sym} {e}")
 
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H / 30M / 5M + BTC FILTER{RESET}")
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + LIQ TP + BTC FILTER{RESET}")
     print("-"*100)
-    # Get BTC direction ONCE for filter
     btc_d4h=kl("BTC_USDT","Hour4")
     btc_dir, btc_reason = get_4h_direction(btc_d4h)
     print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
-    check_active_positions_v204()
+    check_active_positions_v206()
     signals=[]
     for sym in SYMBOLS:
         try:
             live=get_live(sym)
             if not live: continue
-            sig, debug = v204_signal(sym, live)
+            sig, debug = v206_signal(sym, live)
             d4h=kl(sym,"Hour4")
             direction, dir_reason = get_4h_direction(d4h)
             if sig:
-                # === BTC FILTER APPLIED HERE ===
                 if sym != "BTC_USDT":
                     if not btc_confirms(sig["side"], btc_dir):
                         print(f"{YELLOW}SKIP {sym} {sig['side']} - BTC {btc_dir} not confirming | {debug}{RESET}")
