@@ -7,7 +7,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 session=requests.Session()
-TAG="V206-2TO2-SWEEP-LIQTP"
+TAG="V206-2TO2-SWEEP-LIQTP-VARY"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -113,7 +113,7 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ================= V206: 2 TO 2 =================
+# ================= V206: 2 TO 2 - NO AVG FALLBACK =================
 def get_4h_direction(d4h):
     try:
         if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
@@ -126,18 +126,13 @@ def get_4h_direction(d4h):
         if len(highs)<3 or len(lows)<3: return "NEUTRAL","not enough pivots need 3"
         h1,h2,h3=highs[-3],highs[-2],highs[-1]
         l1,l2,l3=lows[-3],lows[-2],lows[-1]
-        # RANGE check first - flat pivots
         if abs(h3-h1)/h1 < 0.02 and abs(l3-l1)/l1 < 0.02:
             return "RANGE", f"Range H {fmt(h3)} L {fmt(l3)}"
-        # 2 TO 2: need 2 increments = 3 pivots in same direction
         if h3>h2>h1 and l3>l2>l1:
             return "BULLISH", f"2TO2 HH {fmt(h1)}->{fmt(h2)}->{fmt(h3)} HL {fmt(l1)}->{fmt(l2)}->{fmt(l3)}"
         if h3<h2<h1 and l3<l2<l1:
             return "BEARISH", f"2TO2 LH {fmt(h1)}->{fmt(h2)}->{fmt(h3)} LL {fmt(l1)}->{fmt(l2)}->{fmt(l3)}"
-        avg=sum(c[-20:])/20
-        if c[-1] > avg*1.01: return "BULLISH", f"Price above avg {fmt(avg)}"
-        if c[-1] < avg*0.99: return "BEARISH", f"Price below avg {fmt(avg)}"
-        return "RANGE", f"Sideways H {fmt(h3)} L {fmt(l3)}"
+        return "RANGE", f"Sideways H {fmt(h3)} L {fmt(l3)} - no 2TO2"
     except Exception as e: return "NEUTRAL", f"err {e}"
 
 def get_30m_zones(d30):
@@ -158,29 +153,28 @@ def get_30m_zones(d30):
 
 # ================= V206: LIQUIDITY POOLS FOR TP =================
 def get_liq_pools(sym, live):
-    # Returns (pools_above_sorted, pools_below_sorted)
     pools=[]
     try:
         d1h=kl(sym,"Hour1"); d1=kl(sym,"Day1")
         if d1h:
             h=d1h["h"]; l=d1h["l"]
-            # Equal highs / lows on 1H - pivots within 0.15%
             for i in range(3,len(h)-3):
                 if h[i]==max(h[i-3:i+4]):
                     pools.append(h[i])
                 if l[i]==min(l[i-3:i+4]):
                     pools.append(l[i])
-            # Session high/low = last 24 x 1H candles
             if len(h)>=24:
                 pools.append(max(h[-24:])); pools.append(min(l[-24:]))
         if d1 and len(d1["h"])>=3:
-            pools.append(d1["h"][-2]); pools.append(d1["l"][-2]) # Prev day H/L
-            pools.append(d1["h"][-1]); pools.append(d1["l"][-1]) # Today H/L
+            pools.append(d1["h"][-2]); pools.append(d1["l"][-2])
+            pools.append(d1["h"][-1]); pools.append(d1["l"][-1])
+            if len(d1["h"])>=8:
+                pools.append(max(d1["h"][-7:])); pools.append(min(d1["l"][-7:]))
     except: pass
-    # Dedupe close levels, keep unique
     uniq=[]
     for p in sorted(set(pools)):
-        if not uniq or abs(p-uniq[-1])/uniq[-1] > 0.0015:
+        # 0.5% dedupe - fixes TP1 0.0491 / TP2 0.049 problem
+        if not uniq or abs(p-uniq[-1])/uniq[-1] > 0.005:
             uniq.append(p)
     above=[p for p in uniq if p > live*1.001]
     below=[p for p in uniq if p < live*0.999]
@@ -196,12 +190,10 @@ def get_5m_trigger(d5, side):
             low1=min(l[-10:-5]); low2=min(l[-5:])
             if not (low2 > low1): return False, f"no HL {fmt(low1)}->{fmt(low2)}", 0, 0, False
             breakout = max(h[-6:-1])
-            # SWEEP check: did price wick below low1/low2 then close back above?
             sweep=False; sweep_low=min(l[-6:])
             if sweep_low < low2 and c[-1] > low2:
                 sweep=True
             if c[-1] > breakout:
-                # SL beyond sweep wick if swept, else below HL
                 sl = sweep_low * 0.997 if sweep else low2 * 0.997
                 tag="SWEEP" if sweep else "BREAK"
                 return True, f"{tag} HL {fmt(low1)}->{fmt(low2)} break {fmt(breakout)} sweepLow {fmt(sweep_low)}", sl, breakout, sweep
@@ -231,37 +223,58 @@ def v206_signal(sym, live):
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
-    # TP from liquidity pools
     above, below = get_liq_pools(sym, live)
+    # ===== TPs VARY BY COIN - ATR% =====
+    # BTC followers: ATR% < 1% = quiet, tight TPs
+    # Normal: 1-3% = medium TPs
+    # Runners: > 3% = wide TPs, let 20%+ run
+    atr_pct = (atr/live*100) if live>0 else 0
+    if atr_pct < 1.0:
+        tp2_mult, tp3_mult, label = 2.0, 3.0, "FOLLOWER"
+    elif atr_pct < 3.0:
+        tp2_mult, tp3_mult, label = 3.0, 5.0, "NORMAL"
+    else:
+        tp2_mult, tp3_mult, label = 4.0, 8.0, "RUNNER"
     def tp_buy():
-        if len(above)>=1: tp1=round_level(above[0])
-        else: tp1=round_level(live+atr*2)
-        if len(above)>=2: tp2=round_level(above[1])
-        else: tp2=round_level(tp1+atr*2)
-        tp3=round_level(tp2+atr*2)
-        # ensure at least 0.5 ATR away
+        tp1 = round_level(above[0]) if len(above)>=1 else round_level(live+atr*2)
         if tp1 < live+atr*0.5: tp1=round_level(live+atr*2)
+        tp2 = None
+        for p in above:
+            if p > tp1 + atr*1.0:
+                tp2=round_level(p); break
+        if tp2 is None: tp2=round_level(tp1+atr*tp2_mult)
+        tp3 = None
+        for p in above:
+            if p > tp2 + atr*1.0:
+                tp3=round_level(p); break
+        if tp3 is None: tp3=round_level(tp2+atr*tp3_mult)
         return tp1,tp2,tp3
     def tp_sell():
-        if len(below)>=1: tp1=round_level(below[0])
-        else: tp1=round_level(live-atr*2)
-        if len(below)>=2: tp2=round_level(below[1])
-        else: tp2=round_level(tp1-atr*2)
-        tp3=round_level(tp2-atr*2)
+        tp1 = round_level(below[0]) if len(below)>=1 else round_level(live-atr*2)
         if tp1 > live-atr*0.5: tp1=round_level(live-atr*2)
+        tp2 = None
+        for p in below:
+            if p < tp1 - atr*1.0:
+                tp2=round_level(p); break
+        if tp2 is None: tp2=round_level(tp1-atr*tp2_mult)
+        tp3 = None
+        for p in below:
+            if p < tp2 - atr*1.0:
+                tp3=round_level(p); break
+        if tp3 is None: tp3=round_level(tp2-atr*tp3_mult)
         return tp1,tp2,tp3
     if direction=="RANGE":
         if in_demand:
             ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
             if ok:
                 tp1,tp2,tp3=tp_buy()
-                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Demand + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"RANGE BUY {msg}"
+                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Demand + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"RANGE BUY {msg} | {label}"
             return None, f"RANGE in Demand, waiting 5M: {msg}"
         if in_supply:
             ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL")
             if ok:
                 tp1,tp2,tp3=tp_sell()
-                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"RANGE SELL {msg}"
+                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"RANGE SELL {msg} | {label}"
             return None, f"RANGE in Supply, waiting 5M: {msg}"
         return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
     if direction=="BULLISH":
@@ -269,13 +282,13 @@ def v206_signal(sym, live):
         ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
         if not ok: return None, f"BULLISH in Demand, waiting 5M: {msg}"
         tp1,tp2,tp3=tp_buy()
-        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"BULLISH BUY {msg}"
+        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"BULLISH BUY {msg} | {label}"
     if direction=="BEARISH":
         if not in_supply: return None, f"BEARISH {dir_reason} | not in Supply live {fmt(live)}"
         ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL")
         if not ok: return None, f"BEARISH in Supply, waiting 5M: {msg}"
         tp1,tp2,tp3=tp_sell()
-        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason} | TP=Next Liq"}, f"BEARISH SELL {msg}"
+        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"BEARISH SELL {msg} | {label}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
 # ================= BTC FILTER - STANDARD =================
@@ -316,7 +329,7 @@ def check_active_positions_v206():
         except Exception as e: print(f"exit check err {sym} {e}")
 
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + LIQ TP + BTC FILTER{RESET}")
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + LIQ TP VARY + BTC FILTER{RESET}")
     print("-"*100)
     btc_d4h=kl("BTC_USDT","Hour4")
     btc_dir, btc_reason = get_4h_direction(btc_d4h)
