@@ -7,7 +7,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 session=requests.Session()
-TAG="V206-2TO2-SWEEP-LIQTP-VARY"
+TAG="V207-2TO2-SWEEP-LIQTP-RUNNER"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -45,7 +45,8 @@ def round_level(p):
   if p>=0.01:return round(p*10000)/10000
   if p>=0.001:return round(p*100000)/100000
   if p>=0.0001:return round(p*1000000)/1000000
-  return round(p*10000000)/10000000
+  if p>=0.00001:return round(p*10000000)/10000000
+  return round(p*100000000)/100000000
  except:return p
 
 def tg(m):
@@ -58,17 +59,17 @@ def format_signal_msg(sig, sym):
         return (f"🟢🟢🟢 <b>BUY {sym}</b> 🟢🟢🟢\n"
                 f"Entry: <b>{fmt(sig['entry'])}</b>\n"
                 f"🛑 SL: <b>{fmt(sig['sl'])}</b> ({((sig['sl']-sig['entry'])/sig['entry']*100):+.2f}%)\n"
-                f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['tp1']-sig['entry'])/sig['entry']*100):+.2f}%)\n"
-                f"🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['tp2']-sig['entry'])/sig['entry']*100):+.2f}%)\n"
-                f"🎯 TP3: <b>{fmt(sig['tp3'])}</b> ({((sig['tp3']-sig['entry'])/sig['entry']*100):+.2f}%)\n"
+                f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['tp1']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 50%\n"
+                f"🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['tp2']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 30%\n"
+                f"🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['tp3']-sig['entry'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n"
                 f"{sig['reason']}\n[{get_time()}] | {TAG}")
     else:
         return (f"🔴🔴🔴 <b>SELL {sym}</b> 🔴🔴🔴\n"
                 f"Entry: <b>{fmt(sig['entry'])}</b>\n"
                 f"🛑 SL: <b>{fmt(sig['sl'])}</b>\n"
-                f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['entry']-sig['tp1'])/sig['entry']*100):+.2f}%)\n"
-                f"🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['entry']-sig['tp2'])/sig['entry']*100):+.2f}%)\n"
-                f"🎯 TP3: <b>{fmt(sig['tp3'])}</b> ({((sig['entry']-sig['tp3'])/sig['entry']*100):+.2f}%)\n"
+                f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['entry']-sig['tp1'])/sig['entry']*100):+.2f}%) - Close 50%\n"
+                f"🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['entry']-sig['tp2'])/sig['entry']*100):+.2f}%) - Close 30%\n"
+                f"🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['entry']-sig['tp3'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n"
                 f"{sig['reason']}\n[{get_time()}] | {TAG}")
 
 def format_exit_msg(sym, side, live, reason, pnl, entry, sl):
@@ -113,7 +114,6 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ================= V206: 2 TO 2 - NO AVG FALLBACK =================
 def get_4h_direction(d4h):
     try:
         if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
@@ -151,7 +151,6 @@ def get_30m_zones(d30):
         return demand, supply
     except: return None, None
 
-# ================= V206: LIQUIDITY POOLS FOR TP =================
 def get_liq_pools(sym, live):
     pools=[]
     try:
@@ -173,7 +172,6 @@ def get_liq_pools(sym, live):
     except: pass
     uniq=[]
     for p in sorted(set(pools)):
-        # 0.5% dedupe - fixes TP1 0.0491 / TP2 0.049 problem
         if not uniq or abs(p-uniq[-1])/uniq[-1] > 0.005:
             uniq.append(p)
     above=[p for p in uniq if p > live*1.001]
@@ -181,7 +179,6 @@ def get_liq_pools(sym, live):
     below=sorted(below, reverse=True)
     return above, below
 
-# ================= V206: 5M TRIGGER + SWEEP TIMING =================
 def get_5m_trigger(d5, side):
     try:
         if not d5 or len(d5["c"])<20: return False, "no 5M data", 0, 0, False
@@ -224,10 +221,6 @@ def v206_signal(sym, live):
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
     above, below = get_liq_pools(sym, live)
-    # ===== TPs VARY BY COIN - ATR% =====
-    # BTC followers: ATR% < 1% = quiet, tight TPs
-    # Normal: 1-3% = medium TPs
-    # Runners: > 3% = wide TPs, let 20%+ run
     atr_pct = (atr/live*100) if live>0 else 0
     if atr_pct < 1.0:
         tp2_mult, tp3_mult, label = 2.0, 3.0, "FOLLOWER"
@@ -236,32 +229,40 @@ def v206_signal(sym, live):
     else:
         tp2_mult, tp3_mult, label = 4.0, 8.0, "RUNNER"
     def tp_buy():
+        min_gap = max(live*0.008, atr*1.0)
         tp1 = round_level(above[0]) if len(above)>=1 else round_level(live+atr*2)
         if tp1 < live+atr*0.5: tp1=round_level(live+atr*2)
         tp2 = None
         for p in above:
-            if p > tp1 + atr*1.0:
+            if p > tp1 + min_gap:
                 tp2=round_level(p); break
         if tp2 is None: tp2=round_level(tp1+atr*tp2_mult)
+        if tp2 <= tp1: tp2 = round_level(tp1 + min_gap)
+        runner_target = max(tp2 + atr*tp3_mult, live*1.04)
         tp3 = None
         for p in above:
-            if p > tp2 + atr*1.0:
+            if p > tp2 + min_gap and p >= runner_target*0.9:
                 tp3=round_level(p); break
-        if tp3 is None: tp3=round_level(tp2+atr*tp3_mult)
+        if tp3 is None: tp3=round_level(runner_target)
+        if tp3 <= tp2: tp3 = round_level(tp2 + min_gap)
         return tp1,tp2,tp3
     def tp_sell():
+        min_gap = max(live*0.008, atr*1.0)
         tp1 = round_level(below[0]) if len(below)>=1 else round_level(live-atr*2)
         if tp1 > live-atr*0.5: tp1=round_level(live-atr*2)
         tp2 = None
         for p in below:
-            if p < tp1 - atr*1.0:
+            if p < tp1 - min_gap:
                 tp2=round_level(p); break
         if tp2 is None: tp2=round_level(tp1-atr*tp2_mult)
+        if tp2 >= tp1: tp2 = round_level(tp1 - min_gap)
+        runner_target = min(tp2 - atr*tp3_mult, live*0.96)
         tp3 = None
         for p in below:
-            if p < tp2 - atr*1.0:
+            if p < tp2 - min_gap and p <= runner_target*1.1:
                 tp3=round_level(p); break
-        if tp3 is None: tp3=round_level(tp2-atr*tp3_mult)
+        if tp3 is None: tp3=round_level(runner_target)
+        if tp3 >= tp2: tp3 = round_level(tp2 - min_gap)
         return tp1,tp2,tp3
     if direction=="RANGE":
         if in_demand:
@@ -275,8 +276,7 @@ def v206_signal(sym, live):
             if ok:
                 tp1,tp2,tp3=tp_sell()
                 return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"RANGE SELL {msg} | {label}"
-            return None, f"RANGE in Supply, waiting 5M: {msg}"
-        return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
+            return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
     if direction=="BULLISH":
         if not in_demand: return None, f"BULLISH {dir_reason} | not in Demand live {fmt(live)}"
         ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
@@ -291,7 +291,6 @@ def v206_signal(sym, live):
         return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"BEARISH SELL {msg} | {label}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
-# ================= BTC FILTER - STANDARD =================
 def btc_confirms(alt_side, btc_dir):
     if alt_side=="BUY" and btc_dir=="BEARISH": return False
     if alt_side=="SELL" and btc_dir=="BULLISH": return False
