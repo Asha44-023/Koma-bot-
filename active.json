@@ -1,13 +1,4 @@
 {
-  "GRASS_USDT": {
-    "side": "BUY",
-    "entry": 0.482,
-    "sl": 0.4747714,
-    "tp1": 0.499,
-    "tp2": 0.51,
-    "tp3": 0.522,
-    "time": "2026-11-09 03:47 EAT"
-  },
   "VELVET_USDT": {
     "side": "SELL",
     "entry": 0.04882,
