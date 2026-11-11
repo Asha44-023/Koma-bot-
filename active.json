@@ -19,16 +19,6 @@
     "time": "2026-11-08 23:44 EAT",
     "tp1_hit": true
   },
-  "KOMA_USDT": {
-    "side": "SELL",
-    "entry": 0.012901,
-    "sl": 0.012901,
-    "tp1": 0.0128,
-    "tp2": 0.0124,
-    "tp3": 0.0115,
-    "time": "2026-11-11 05:58 EAT",
-    "tp1_hit": true
-  },
   "SIREN_USDT": {
     "side": "BUY",
     "entry": 0.02626,
