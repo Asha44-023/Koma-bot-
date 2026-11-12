@@ -1,4 +1,4 @@
-name: Scan V208
+name: Scan V209
 on:
   schedule:
     - cron: '5,35 * * * *'
@@ -14,7 +14,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: v208
+      group: v209
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +36,7 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.local"
-          git add active.json cooldown.json || true
-          git commit -m "V208 run" || true
+          git pull --rebase || true
+          git add active.json cooldown.json movers_history.json || true
+          git commit -m "V209 run" || true
           git push || true
