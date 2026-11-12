@@ -2,12 +2,13 @@ import json,os,time,tempfile,requests,argparse
 from datetime import datetime
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
-SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","JASMY_USDT","LAB_USDT","VELVET_USDT","PEPE_USDT","DOGE_USDT"]
+# BASE LIST - your steady coins
+BASE_SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","JASMY_USDT","LAB_USDT","VELVET_USDT","PEPE_USDT","DOGE_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
 session=requests.Session()
-TAG="V207-2TO2-SWEEP-LIQTP-RUNNER"
+TAG="V208-SR-MOVERS-2TO2"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -55,8 +56,9 @@ def tg(m):
  except:pass
 
 def format_signal_msg(sig, sym):
+    mover_tag = f" 🔥 MOVER {sig.get('mover_label','')}" if sig.get('is_mover') else ""
     if sig["side"]=="BUY":
-        return (f"🟢🟢🟢 <b>BUY {sym}</b> 🟢🟢🟢\n"
+        return (f"🟢🟢🟢 <b>BUY {sym}</b>{mover_tag} 🟢🟢🟢\n"
                 f"Entry: <b>{fmt(sig['entry'])}</b>\n"
                 f"🛑 SL: <b>{fmt(sig['sl'])}</b> ({((sig['sl']-sig['entry'])/sig['entry']*100):+.2f}%)\n"
                 f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['tp1']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 50%\n"
@@ -64,7 +66,7 @@ def format_signal_msg(sig, sym):
                 f"🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['tp3']-sig['entry'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n"
                 f"{sig['reason']}\n[{get_time()}] | {TAG}")
     else:
-        return (f"🔴🔴🔴 <b>SELL {sym}</b> 🔴🔴🔴\n"
+        return (f"🔴🔴🔴 <b>SELL {sym}</b>{mover_tag} 🔴🔴🔴\n"
                 f"Entry: <b>{fmt(sig['entry'])}</b>\n"
                 f"🛑 SL: <b>{fmt(sig['sl'])}</b>\n"
                 f"🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['entry']-sig['tp1'])/sig['entry']*100):+.2f}%) - Close 50%\n"
@@ -114,6 +116,76 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
+# ===== NEW V208: MEXC MOVERS SCANNER =====
+def get_mexc_movers():
+    """Returns dict {symbol: label} for top 3 gainers + top 3 losers"""
+    movers={}
+    try:
+        r=session.get("https://contract.mexc.com/api/v1/contract/ticker",timeout=15).json()
+        data=r.get("data",[])
+        if not isinstance(data,list): return movers
+        parsed=[]
+        for it in data:
+            try:
+                sym=it.get("symbol","")
+                if not sym.endswith("_USDT"): continue
+                if sym in BASE_SYMBOLS: continue
+                # MEXC fields vary: riseFallRate / riseFallRate / priceChangePercent
+                chg=float(it.get("riseFallRate", it.get("riseFallRate24", it.get("priceChangePercent", 0))) or 0)
+                # riseFallRate is like 0.45 = 45% ; if >10 assume already %
+                if abs(chg) < 5 and abs(chg) > 0: chg = chg*100 if abs(chg) < 2 else chg
+                vol=float(it.get("volume24", it.get("vol24", it.get("volume", 0))) or 0)
+                # volume is in contracts, approximate USD via lastPrice
+                lp=float(it.get("lastPrice",0) or 0)
+                vol_usd=vol*lp
+                parsed.append((sym,chg,vol_usd))
+            except: continue
+        # Filter volume > 1M USD
+        parsed=[x for x in parsed if x[2] > 1000000]
+        gainers=[x for x in parsed if 35 <= x[1] <= 100]
+        losers=[x for x in parsed if -50 <= x[1] <= -30]
+        gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:3]
+        losers=sorted(losers, key=lambda x: x[1])[:3]
+        for sym,chg,_ in gainers: movers[sym]=f"+{chg:.1f}% GAINER"
+        for sym,chg,_ in losers: movers[sym]=f"{chg:.1f}% LOSER"
+        print(f"{CYAN}MOVERS: {movers}{RESET}")
+    except Exception as e: print(f"movers err {e}")
+    return movers
+
+# ===== NEW V208: REAL S/R WITH 2+ TOUCHES =====
+def get_sr_levels(sym):
+    """Returns (supports, resistances) - list of (price, touches) sorted by touches"""
+    supports=[]; resistances=[]
+    try:
+        d1h=kl(sym,"Hour1"); d4h=kl(sym,"Hour4")
+        for d in [d1h,d4h]:
+            if not d: continue
+            h=d["h"]; l=d["l"]; c=d["c"]
+            atr=calc_atr(d) or c[-1]*0.02
+            # Find pivots
+            piv_high=[]; piv_low=[]
+            for i in range(3,len(h)-3):
+                if h[i]==max(h[i-3:i+4]): piv_high.append(h[i])
+                if l[i]==min(l[i-3:i+4]): piv_low.append(l[i])
+            # Cluster pivots within 0.5 ATR, count touches
+            def cluster(pivots):
+                out=[]
+                pivots=sorted(pivots)
+                for p in pivots:
+                    found=False
+                    for j,(price,touches) in enumerate(out):
+                        if abs(p-price)/price < 0.005: # within 0.5%
+                            out[j]=(price,touches+1); found=True; break
+                    if not found: out.append((p,1))
+                return [(p,t) for p,t in out if t>=2]  # ONLY 2+ touches = real S/R
+            supports+=cluster(piv_low)
+            resistances+=cluster(piv_high)
+        # Dedupe
+        supports=sorted(list(set(supports)), reverse=True)[:5]
+        resistances=sorted(list(set(resistances)))[:5]
+    except Exception as e: print(f"SR err {sym} {e}")
+    return supports, resistances
+
 def get_4h_direction(d4h):
     try:
         if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
@@ -158,10 +230,8 @@ def get_liq_pools(sym, live):
         if d1h:
             h=d1h["h"]; l=d1h["l"]
             for i in range(3,len(h)-3):
-                if h[i]==max(h[i-3:i+4]):
-                    pools.append(h[i])
-                if l[i]==min(l[i-3:i+4]):
-                    pools.append(l[i])
+                if h[i]==max(h[i-3:i+4]): pools.append(h[i])
+                if l[i]==min(l[i-3:i+4]): pools.append(l[i])
             if len(h)>=24:
                 pools.append(max(h[-24:])); pools.append(min(l[-24:]))
         if d1 and len(d1["h"])>=3:
@@ -172,26 +242,26 @@ def get_liq_pools(sym, live):
     except: pass
     uniq=[]
     for p in sorted(set(pools)):
-        if not uniq or abs(p-uniq[-1])/uniq[-1] > 0.005:
-            uniq.append(p)
+        if not uniq or abs(p-uniq[-1])/uniq[-1] > 0.005: uniq.append(p)
     above=[p for p in uniq if p > live*1.001]
     below=[p for p in uniq if p < live*0.999]
     below=sorted(below, reverse=True)
     return above, below
 
-def get_5m_trigger(d5, side):
+def get_5m_trigger(d5, side, atr, is_mover):
     try:
         if not d5 or len(d5["c"])<20: return False, "no 5M data", 0, 0, False
         h=d5["h"]; l=d5["l"]; c=d5["c"]
+        # Movers get wider SL buffer: 1.0 ATR vs 0.5 ATR for normal
+        sl_buffer = 1.0 if is_mover else 0.5
         if side=="BUY":
             low1=min(l[-10:-5]); low2=min(l[-5:])
             if not (low2 > low1): return False, f"no HL {fmt(low1)}->{fmt(low2)}", 0, 0, False
             breakout = max(h[-6:-1])
             sweep=False; sweep_low=min(l[-6:])
-            if sweep_low < low2 and c[-1] > low2:
-                sweep=True
+            if sweep_low < low2 and c[-1] > low2: sweep=True
             if c[-1] > breakout:
-                sl = sweep_low * 0.997 if sweep else low2 * 0.997
+                sl = sweep_low - atr*sl_buffer*0.2 if sweep else low2 - atr*sl_buffer*0.2
                 tag="SWEEP" if sweep else "BREAK"
                 return True, f"{tag} HL {fmt(low1)}->{fmt(low2)} break {fmt(breakout)} sweepLow {fmt(sweep_low)}", sl, breakout, sweep
             return False, f"HL ok, waiting break > {fmt(breakout)} live {fmt(c[-1])}", 0, 0, False
@@ -200,17 +270,16 @@ def get_5m_trigger(d5, side):
             if not (high2 < high1): return False, f"no LH {fmt(high1)}->{fmt(high2)}", 0, 0, False
             breakdown = min(l[-6:-1])
             sweep=False; sweep_high=max(h[-6:])
-            if sweep_high > high2 and c[-1] < high2:
-                sweep=True
+            if sweep_high > high2 and c[-1] < high2: sweep=True
             if c[-1] < breakdown:
-                sl = sweep_high * 1.003 if sweep else high2 * 1.003
+                sl = sweep_high + atr*sl_buffer*0.2 if sweep else high2 + atr*sl_buffer*0.2
                 tag="SWEEP" if sweep else "BREAK"
                 return True, f"{tag} LH {fmt(high1)}->{fmt(high2)} break {fmt(breakdown)} sweepHigh {fmt(sweep_high)}", sl, breakdown, sweep
             return False, f"LH ok, waiting break < {fmt(breakdown)} live {fmt(c[-1])}", 0, 0, False
         return False, "no side", 0, 0, False
     except Exception as e: return False, f"5M err {e}", 0, 0, False
 
-def v206_signal(sym, live):
+def v206_signal(sym, live, is_mover=False, mover_label=""):
     d4h=kl(sym,"Hour4"); d30=kl(sym,"Min30"); d5=kl(sym,"Min5")
     if not d4h or not d30 or not d5: return None, "missing TF data"
     direction, dir_reason = get_4h_direction(d4h)
@@ -220,9 +289,26 @@ def v206_signal(sym, live):
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
+    # ===== V208 S/R FILTER =====
+    supports, resistances = get_sr_levels(sym)
+    # Find nearest S/R
+    nearest_support = max([p for p,_ in supports if p <= live*1.01], default=None)
+    nearest_resist = min([p for p,_ in resistances if p >= live*0.99], default=None)
+    # Must be within 0.5 ATR of a real S/R for movers, 1.0 ATR for normal (stricter for movers)
+    sr_tol = atr*0.5 if is_mover else atr*1.0
+    at_support = nearest_support and abs(live-nearest_support) <= sr_tol
+    at_resist = nearest_resist and abs(live-nearest_resist) <= sr_tol
+    # For movers: GAINER must be at resistance to SELL, LOSER must be at support to BUY
+    if is_mover:
+        if "GAINER" in mover_label and not at_resist:
+            return None, f"MOVER GAINER not at Resistance {fmt(nearest_resist) if nearest_resist else 'none'} live {fmt(live)} - skip"
+        if "LOSER" in mover_label and not at_support:
+            return None, f"MOVER LOSER not at Support {fmt(nearest_support) if nearest_support else 'none'} live {fmt(live)} - skip"
     above, below = get_liq_pools(sym, live)
     atr_pct = (atr/live*100) if live>0 else 0
-    if atr_pct < 1.0:
+    if is_mover:
+        tp2_mult, tp3_mult, label = 2.0, 3.0, "MOVER-FAST"
+    elif atr_pct < 1.0:
         tp2_mult, tp3_mult, label = 2.0, 3.0, "FOLLOWER"
     elif atr_pct < 3.0:
         tp2_mult, tp3_mult, label = 3.0, 5.0, "NORMAL"
@@ -230,65 +316,78 @@ def v206_signal(sym, live):
         tp2_mult, tp3_mult, label = 4.0, 8.0, "RUNNER"
     def tp_buy():
         min_gap = max(live*0.008, atr*1.0)
+        # MOVER: TP1 = 5-8% fast, NOT next liq far away
+        if is_mover:
+            tp1 = round_level(live*1.06)
+            # But don't go past nearest resistance
+            if nearest_resist and tp1 > nearest_resist*0.98: tp1 = round_level(nearest_resist*0.98)
+            tp2 = round_level(tp1 + atr*tp2_mult)
+            tp3 = round_level(tp2 + atr*tp3_mult)
+            return tp1,tp2,tp3
         tp1 = round_level(above[0]) if len(above)>=1 else round_level(live+atr*2)
         if tp1 < live+atr*0.5: tp1=round_level(live+atr*2)
+        # V208: TP1 must NOT go past next resistance
+        if nearest_resist and tp1 > nearest_resist*0.99: tp1 = round_level(nearest_resist*0.99)
         tp2 = None
         for p in above:
-            if p > tp1 + min_gap:
-                tp2=round_level(p); break
+            if p > tp1 + min_gap: tp2=round_level(p); break
         if tp2 is None: tp2=round_level(tp1+atr*tp2_mult)
         if tp2 <= tp1: tp2 = round_level(tp1 + min_gap)
         runner_target = max(tp2 + atr*tp3_mult, live*1.04)
         tp3 = None
         for p in above:
-            if p > tp2 + min_gap and p >= runner_target*0.9:
-                tp3=round_level(p); break
+            if p > tp2 + min_gap and p >= runner_target*0.9: tp3=round_level(p); break
         if tp3 is None: tp3=round_level(runner_target)
         if tp3 <= tp2: tp3 = round_level(tp2 + min_gap)
         return tp1,tp2,tp3
     def tp_sell():
         min_gap = max(live*0.008, atr*1.0)
+        if is_mover:
+            tp1 = round_level(live*0.94)
+            if nearest_support and tp1 < nearest_support*1.02: tp1 = round_level(nearest_support*1.02)
+            tp2 = round_level(tp1 - atr*tp2_mult)
+            tp3 = round_level(tp2 - atr*tp3_mult)
+            return tp1,tp2,tp3
         tp1 = round_level(below[0]) if len(below)>=1 else round_level(live-atr*2)
         if tp1 > live-atr*0.5: tp1=round_level(live-atr*2)
+        if nearest_support and tp1 < nearest_support*1.01: tp1 = round_level(nearest_support*1.01)
         tp2 = None
         for p in below:
-            if p < tp1 - min_gap:
-                tp2=round_level(p); break
+            if p < tp1 - min_gap: tp2=round_level(p); break
         if tp2 is None: tp2=round_level(tp1-atr*tp2_mult)
         if tp2 >= tp1: tp2 = round_level(tp1 - min_gap)
         runner_target = min(tp2 - atr*tp3_mult, live*0.96)
         tp3 = None
         for p in below:
-            if p < tp2 - min_gap and p <= runner_target*1.1:
-                tp3=round_level(p); break
+            if p < tp2 - min_gap and p <= runner_target*1.1: tp3=round_level(p); break
         if tp3 is None: tp3=round_level(runner_target)
         if tp3 >= tp2: tp3 = round_level(tp2 - min_gap)
         return tp1,tp2,tp3
     if direction=="RANGE":
-        if in_demand:
-            ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
+        if in_demand or at_support:
+            ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY",atr,is_mover)
             if ok:
                 tp1,tp2,tp3=tp_buy()
-                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Demand + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"RANGE BUY {msg} | {label}"
-            return None, f"RANGE in Demand, waiting 5M: {msg}"
-        if in_supply:
-            ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL")
+                return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"RANGE + Demand/Support {fmt(nearest_support) if nearest_support else ''} + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"RANGE BUY {msg} | {label} {mover_label}"
+            return None, f"RANGE in Demand/Support, waiting 5M: {msg} | SR Sup {fmt(nearest_support) if nearest_support else 'none'}"
+        if in_supply or at_resist:
+            ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL",atr,is_mover)
             if ok:
                 tp1,tp2,tp3=tp_sell()
-                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"RANGE + Supply + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"RANGE SELL {msg} | {label}"
-            return None, f"RANGE {dir_reason} | not in zone live {fmt(live)}"
+                return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"RANGE + Supply/Resist {fmt(nearest_resist) if nearest_resist else ''} + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"RANGE SELL {msg} | {label} {mover_label}"
+            return None, f"RANGE {dir_reason} | not in zone live {fmt(live)} SR R {fmt(nearest_resist) if nearest_resist else 'none'} S {fmt(nearest_support) if nearest_support else 'none'}"
     if direction=="BULLISH":
-        if not in_demand: return None, f"BULLISH {dir_reason} | not in Demand live {fmt(live)}"
-        ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY")
-        if not ok: return None, f"BULLISH in Demand, waiting 5M: {msg}"
+        if not (in_demand or at_support): return None, f"BULLISH {dir_reason} | not in Demand/Support live {fmt(live)} Sup {fmt(nearest_support) if nearest_support else 'none'}"
+        ok, msg, sl, trig, sweep = get_5m_trigger(d5,"BUY",atr,is_mover)
+        if not ok: return None, f"BULLISH in Demand/Support, waiting 5M: {msg}"
         tp1,tp2,tp3=tp_buy()
-        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BULLISH + Demand + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"BULLISH BUY {msg} | {label}"
+        return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"BULLISH + Demand/Support + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"BULLISH BUY {msg} | {label} {mover_label}"
     if direction=="BEARISH":
-        if not in_supply: return None, f"BEARISH {dir_reason} | not in Supply live {fmt(live)}"
-        ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL")
-        if not ok: return None, f"BEARISH in Supply, waiting 5M: {msg}"
+        if not (in_supply or at_resist): return None, f"BEARISH {dir_reason} | not in Supply/Resist live {fmt(live)} Res {fmt(nearest_resist) if nearest_resist else 'none'}"
+        ok, msg, sl, trig, sweep = get_5m_trigger(d5,"SELL",atr,is_mover)
+        if not ok: return None, f"BEARISH in Supply/Resist, waiting 5M: {msg}"
         tp1,tp2,tp3=tp_sell()
-        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":f"BEARISH + Supply + {msg} | 4H {dir_reason} | TP=Next Liq {label} ATR%{atr_pct:.2f}"}, f"BEARISH SELL {msg} | {label}"
+        return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"BEARISH + Supply/Resist + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"BEARISH SELL {msg} | {label} {mover_label}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
 def btc_confirms(alt_side, btc_dir):
@@ -328,18 +427,24 @@ def check_active_positions_v206():
         except Exception as e: print(f"exit check err {sym} {e}")
 
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + LIQ TP VARY + BTC FILTER{RESET}")
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + MOVERS{RESET}")
     print("-"*100)
     btc_d4h=kl("BTC_USDT","Hour4")
     btc_dir, btc_reason = get_4h_direction(btc_d4h)
     print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v206()
+    # V208: Build dynamic list
+    movers = get_mexc_movers()
+    SYMBOLS = BASE_SYMBOLS + [s for s in movers.keys() if s not in BASE_SYMBOLS]
+    print(f"{CYAN}Scanning {len(SYMBOLS)} coins: {SYMBOLS}{RESET}")
     signals=[]
     for sym in SYMBOLS:
         try:
             live=get_live(sym)
             if not live: continue
-            sig, debug = v206_signal(sym, live)
+            is_mover = sym in movers
+            mover_label = movers.get(sym,"")
+            sig, debug = v206_signal(sym, live, is_mover=is_mover, mover_label=mover_label)
             d4h=kl(sym,"Hour4")
             direction, dir_reason = get_4h_direction(d4h)
             if sig:
