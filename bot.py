@@ -2,7 +2,6 @@ import json,os,time,tempfile,requests,argparse
 from datetime import datetime
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
-# BASE LIST - your steady coins
 BASE_SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","JASMY_USDT","LAB_USDT","VELVET_USDT","PEPE_USDT","DOGE_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
@@ -116,45 +115,49 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ===== NEW V208: MEXC MOVERS SCANNER =====
+# ===== V208 FIXED: MEXC MOVERS SCANNER =====
 def get_mexc_movers():
-    """Returns dict {symbol: label} for top 3 gainers + top 3 losers"""
     movers={}
     try:
         r=session.get("https://contract.mexc.com/api/v1/contract/ticker",timeout=15).json()
         data=r.get("data",[])
-        if not isinstance(data,list): return movers
+        if isinstance(data,dict): data=[data]
+        if not isinstance(data,list):
+            print(f"MOVERS DEBUG: ticker data type {type(data)}")
+            return movers
+        if data:
+            print(f"MOVERS DEBUG sample: {str(data[0])[:400]}")
         parsed=[]
         for it in data:
             try:
                 sym=it.get("symbol","")
                 if not sym.endswith("_USDT"): continue
                 if sym in BASE_SYMBOLS: continue
-                # MEXC fields vary: riseFallRate / riseFallRate / priceChangePercent
-                chg=float(it.get("riseFallRate", it.get("riseFallRate24", it.get("priceChangePercent", 0))) or 0)
-                # riseFallRate is like 0.45 = 45% ; if >10 assume already %
-                if abs(chg) < 5 and abs(chg) > 0: chg = chg*100 if abs(chg) < 2 else chg
-                vol=float(it.get("volume24", it.get("vol24", it.get("volume", 0))) or 0)
-                # volume is in contracts, approximate USD via lastPrice
-                lp=float(it.get("lastPrice",0) or 0)
+                chg_raw = it.get("riseFallRate", it.get("riseFallRate24", it.get("priceChangePercent", it.get("change24", 0))))
+                chg=float(chg_raw or 0)
+                if abs(chg) <= 2:
+                    chg = chg*100
+                vol_raw = it.get("volume24", it.get("vol24", it.get("volume", it.get("turnover24", 0))))
+                lp=float(it.get("lastPrice", it.get("last_price", 0)) or 0)
+                vol=float(vol_raw or 0)
                 vol_usd=vol*lp
+                if vol_usd==0:
+                    vol_usd=float(it.get("amount24", 0) or 0)
                 parsed.append((sym,chg,vol_usd))
             except: continue
-        # Filter volume > 1M USD
-        parsed=[x for x in parsed if x[2] > 1000000]
+        print(f"MOVERS DEBUG parsed {len(parsed)} coins, top changes: {sorted(parsed, key=lambda x: x[1], reverse=True)[:3]}")
+        parsed=[x for x in parsed if x[2] > 200000]
         gainers=[x for x in parsed if 35 <= x[1] <= 100]
         losers=[x for x in parsed if -50 <= x[1] <= -30]
         gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:3]
         losers=sorted(losers, key=lambda x: x[1])[:3]
         for sym,chg,_ in gainers: movers[sym]=f"+{chg:.1f}% GAINER"
         for sym,chg,_ in losers: movers[sym]=f"{chg:.1f}% LOSER"
-        print(f"{CYAN}MOVERS: {movers}{RESET}")
+        print(f"MOVERS: {movers}")
     except Exception as e: print(f"movers err {e}")
     return movers
 
-# ===== NEW V208: REAL S/R WITH 2+ TOUCHES =====
 def get_sr_levels(sym):
-    """Returns (supports, resistances) - list of (price, touches) sorted by touches"""
     supports=[]; resistances=[]
     try:
         d1h=kl(sym,"Hour1"); d4h=kl(sym,"Hour4")
@@ -162,25 +165,22 @@ def get_sr_levels(sym):
             if not d: continue
             h=d["h"]; l=d["l"]; c=d["c"]
             atr=calc_atr(d) or c[-1]*0.02
-            # Find pivots
             piv_high=[]; piv_low=[]
             for i in range(3,len(h)-3):
                 if h[i]==max(h[i-3:i+4]): piv_high.append(h[i])
                 if l[i]==min(l[i-3:i+4]): piv_low.append(l[i])
-            # Cluster pivots within 0.5 ATR, count touches
             def cluster(pivots):
                 out=[]
                 pivots=sorted(pivots)
                 for p in pivots:
                     found=False
                     for j,(price,touches) in enumerate(out):
-                        if abs(p-price)/price < 0.005: # within 0.5%
+                        if abs(p-price)/price < 0.005:
                             out[j]=(price,touches+1); found=True; break
                     if not found: out.append((p,1))
-                return [(p,t) for p,t in out if t>=2]  # ONLY 2+ touches = real S/R
+                return [(p,t) for p,t in out if t>=2]
             supports+=cluster(piv_low)
             resistances+=cluster(piv_high)
-        # Dedupe
         supports=sorted(list(set(supports)), reverse=True)[:5]
         resistances=sorted(list(set(resistances)))[:5]
     except Exception as e: print(f"SR err {sym} {e}")
@@ -252,7 +252,6 @@ def get_5m_trigger(d5, side, atr, is_mover):
     try:
         if not d5 or len(d5["c"])<20: return False, "no 5M data", 0, 0, False
         h=d5["h"]; l=d5["l"]; c=d5["c"]
-        # Movers get wider SL buffer: 1.0 ATR vs 0.5 ATR for normal
         sl_buffer = 1.0 if is_mover else 0.5
         if side=="BUY":
             low1=min(l[-10:-5]); low2=min(l[-5:])
@@ -289,16 +288,12 @@ def v206_signal(sym, live, is_mover=False, mover_label=""):
     in_demand=False; in_supply=False
     if demand and demand["low"]*0.995 <= live <= demand["high"]*1.005: in_demand=True
     if supply and supply["low"]*0.995 <= live <= supply["high"]*1.005: in_supply=True
-    # ===== V208 S/R FILTER =====
     supports, resistances = get_sr_levels(sym)
-    # Find nearest S/R
     nearest_support = max([p for p,_ in supports if p <= live*1.01], default=None)
     nearest_resist = min([p for p,_ in resistances if p >= live*0.99], default=None)
-    # Must be within 0.5 ATR of a real S/R for movers, 1.0 ATR for normal (stricter for movers)
     sr_tol = atr*0.5 if is_mover else atr*1.0
     at_support = nearest_support and abs(live-nearest_support) <= sr_tol
     at_resist = nearest_resist and abs(live-nearest_resist) <= sr_tol
-    # For movers: GAINER must be at resistance to SELL, LOSER must be at support to BUY
     if is_mover:
         if "GAINER" in mover_label and not at_resist:
             return None, f"MOVER GAINER not at Resistance {fmt(nearest_resist) if nearest_resist else 'none'} live {fmt(live)} - skip"
@@ -316,17 +311,14 @@ def v206_signal(sym, live, is_mover=False, mover_label=""):
         tp2_mult, tp3_mult, label = 4.0, 8.0, "RUNNER"
     def tp_buy():
         min_gap = max(live*0.008, atr*1.0)
-        # MOVER: TP1 = 5-8% fast, NOT next liq far away
         if is_mover:
             tp1 = round_level(live*1.06)
-            # But don't go past nearest resistance
             if nearest_resist and tp1 > nearest_resist*0.98: tp1 = round_level(nearest_resist*0.98)
             tp2 = round_level(tp1 + atr*tp2_mult)
             tp3 = round_level(tp2 + atr*tp3_mult)
             return tp1,tp2,tp3
         tp1 = round_level(above[0]) if len(above)>=1 else round_level(live+atr*2)
         if tp1 < live+atr*0.5: tp1=round_level(live+atr*2)
-        # V208: TP1 must NOT go past next resistance
         if nearest_resist and tp1 > nearest_resist*0.99: tp1 = round_level(nearest_resist*0.99)
         tp2 = None
         for p in above:
@@ -433,7 +425,6 @@ def run_once():
     btc_dir, btc_reason = get_4h_direction(btc_d4h)
     print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v206()
-    # V208: Build dynamic list
     movers = get_mexc_movers()
     SYMBOLS = BASE_SYMBOLS + [s for s in movers.keys() if s not in BASE_SYMBOLS]
     print(f"{CYAN}Scanning {len(SYMBOLS)} coins: {SYMBOLS}{RESET}")
