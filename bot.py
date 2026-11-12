@@ -81,7 +81,7 @@ def format_exit_msg(sym, side, live, reason, pnl, entry, sl):
             f"Exit: <b>{fmt(live)}</b> | Entry: {fmt(entry)} | SL: {fmt(sl)}\n"
             f"Reason: {reason}\nPnL: <b>{pnl:+.2f}%</b>")
 
-def kl(symbol,interval):
+def kl(symbol,interval,min_candles=30):
  sec_map={"Min1":60,"Min5":300,"Min15":900,"Min30":1800,"Hour1":3600,"Min60":3600,"Hour4":14400,"Day1":86400,"Week1":604800,"Month1":2592000}
  sec=sec_map.get(interval,300); api_interval=interval
  if interval=="Month1": api_interval="Day1"; sec=86400
@@ -97,7 +97,7 @@ def kl(symbol,interval):
    if not d or "open" not in d:continue
    res={"o":[float(x) for x in d["open"]],"h":[float(x) for x in d["high"]],"l":[float(x) for x in d["low"]],"c":[float(x) for x in d["close"]],"v":[float(x) for x in d.get("vol",[0]*len(d["close"]))]}
    for k in res:res[k]=res[k][:-1]
-   if len(res["c"])<30:continue
+   if len(res["c"])<min_candles:continue
    return res
   except:time.sleep(1)
  return None
@@ -117,7 +117,6 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ===== V209: MOVERS 30% + YESTERDAY REVERSAL =====
 def get_mexc_movers():
     movers={}
     try:
@@ -147,11 +146,9 @@ def get_mexc_movers():
         for sym,chg,_ in gainers: movers[sym]=f"+{chg:.1f}% GAINER"
         for sym,chg,_ in losers: movers[sym]=f"{chg:.1f}% LOSER"
         print(f"MOVERS TODAY: {movers}")
-        # Save today's movers for tomorrow - this is the key
         try:
             hist=load_json(HISTORY_FILE,{})
             hist[get_today()]=movers
-            # Keep only last 3 days to avoid file growing
             for k in list(hist.keys()):
                 if k < get_2days_ago(): del hist[k]
             atomic_save(HISTORY_FILE,hist)
@@ -166,10 +163,8 @@ def get_yesterday_movers():
         y=hist.get(get_yesterday(),{})
         d2=hist.get(get_2days_ago(),{})
         out={}
-        # Yesterday first - strongest reversal
         for sym,label in y.items():
             out[sym]=f"YESTERDAY {label} -> REVERSAL"
-        # 2 days ago for losers that pump on day 2 - you said losers pump day 1-2
         for sym,label in d2.items():
             if sym not in out and "LOSER" in label:
                 out[sym]=f"2DAYS AGO {label} -> BOUNCE"
@@ -181,7 +176,7 @@ def get_yesterday_movers():
 def get_sr_levels(sym):
     supports=[]; resistances=[]
     try:
-        d1h=kl(sym,"Hour1"); d4h=kl(sym,"Hour4")
+        d1h=kl(sym,"Hour1",min_candles=20); d4h=kl(sym,"Hour4",min_candles=15)
         for d in [d1h,d4h]:
             if not d: continue
             h=d["h"]; l=d["l"]; c=d["c"]
@@ -207,16 +202,22 @@ def get_sr_levels(sym):
     except Exception as e: print(f"SR err {sym} {e}")
     return supports, resistances
 
-def get_4h_direction(d4h):
+def get_4h_direction(d4h, is_mover=False):
     try:
-        if not d4h or len(d4h["c"]) < 30: return "NEUTRAL", "no data"
+        if not d4h or len(d4h["c"]) < 15:
+            # FIX FLOAT: new coin with short history - treat as RANGE, let S/R decide
+            if is_mover: return "RANGE", f"Short history {len(d4h['c']) if d4h else 0} candles - MOVER RANGE"
+            return "NEUTRAL", "no data"
         h=d4h["h"]; l=d4h["l"]; c=d4h["c"]
         highs=[]; lows=[]
         for i in range(3,len(h)-3):
             if h[i]==max(h[i-3:i+4]): highs.append(h[i])
             if l[i]==min(l[i-3:i+4]): lows.append(l[i])
         highs=highs[-3:]; lows=lows[-3:]
-        if len(highs)<3 or len(lows)<3: return "NEUTRAL","not enough pivots need 3"
+        if len(highs)<3 or len(lows)<3:
+            # FIX JCT: crashed in straight line, no pivots = exhausted = RANGE
+            if is_mover: return "RANGE", f"Exhausted crash/pump no pivots H {fmt(max(h))} L {fmt(min(l))} - MOVER RANGE"
+            return "NEUTRAL","not enough pivots need 3"
         h1,h2,h3=highs[-3],highs[-2],highs[-1]
         l1,l2,l3=lows[-3],lows[-2],lows[-1]
         if abs(h3-h1)/h1 < 0.02 and abs(l3-l1)/l1 < 0.02:
@@ -230,7 +231,7 @@ def get_4h_direction(d4h):
 
 def get_30m_zones(d30):
     try:
-        if not d30 or len(d30["c"])<50: return None, None
+        if not d30 or len(d30["c"])<20: return None, None
         h=d30["h"]; l=d30["l"]; c=d30["c"]
         demand=None; supply=None
         for i in range(len(c)-2, 2, -1):
@@ -247,7 +248,7 @@ def get_30m_zones(d30):
 def get_liq_pools(sym, live):
     pools=[]
     try:
-        d1h=kl(sym,"Hour1"); d1=kl(sym,"Day1")
+        d1h=kl(sym,"Hour1",min_candles=20); d1=kl(sym,"Day1",min_candles=5)
         if d1h:
             h=d1h["h"]; l=d1h["l"]
             for i in range(3,len(h)-3):
@@ -300,9 +301,9 @@ def get_5m_trigger(d5, side, atr, is_mover):
     except Exception as e: return False, f"5M err {e}", 0, 0, False
 
 def v206_signal(sym, live, is_mover=False, mover_label=""):
-    d4h=kl(sym,"Hour4"); d30=kl(sym,"Min30"); d5=kl(sym,"Min5")
+    d4h=kl(sym,"Hour4",min_candles=15 if is_mover else 30); d30=kl(sym,"Min30",min_candles=20 if is_mover else 30); d5=kl(sym,"Min5",min_candles=20)
     if not d4h or not d30 or not d5: return None, "missing TF data"
-    direction, dir_reason = get_4h_direction(d4h)
+    direction, dir_reason = get_4h_direction(d4h, is_mover=is_mover)
     demand, supply = get_30m_zones(d30)
     atr = calc_atr(d30)
     if atr==0: atr=live*0.02
@@ -398,7 +399,12 @@ def v206_signal(sym, live, is_mover=False, mover_label=""):
         return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"BEARISH + Supply/Resist + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"BEARISH SELL {msg} | {label} {mover_label}"
     return None, f"NEUTRAL {dir_reason} | no trade"
 
-def btc_confirms(alt_side, btc_dir):
+def btc_confirms(alt_side, btc_dir, mover_label=""):
+    # FIX: Yesterday loser bounce should NOT be blocked by BTC bearish - that's the reversal play
+    if "YESTERDAY" in mover_label and "LOSER" in mover_label and alt_side=="BUY":
+        return True
+    if "YESTERDAY" in mover_label and "GAINER" in mover_label and alt_side=="SELL":
+        return True
     if alt_side=="BUY" and btc_dir=="BEARISH": return False
     if alt_side=="SELL" and btc_dir=="BULLISH": return False
     return True
@@ -412,8 +418,8 @@ def check_active_positions_v206():
             tp1=float(info.get("tp1",0))
             live=get_live(sym)
             if not live: continue
-            d4h=kl(sym,"Hour4")
-            direction,_ = get_4h_direction(d4h)
+            d4h=kl(sym,"Hour4",min_candles=15)
+            direction,_ = get_4h_direction(d4h, is_mover=True)
             flip=False
             if side=="BUY" and direction=="BEARISH": flip=True
             if side=="SELL" and direction=="BULLISH": flip=True
@@ -441,11 +447,8 @@ def run_once():
     btc_dir, btc_reason = get_4h_direction(btc_d4h)
     print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v206()
-    # 1. Yesterday movers - trade these TODAY (reversal day)
     yesterday_movers = get_yesterday_movers()
-    # 2. Today's movers - save for tomorrow, also scan today for both directions
     today_movers = get_mexc_movers()
-    # Merge: yesterday takes priority in label, today adds new ones
     movers = {}
     movers.update(today_movers)
     for sym,label in yesterday_movers.items():
@@ -464,11 +467,11 @@ def run_once():
             is_mover = sym in movers
             mover_label = movers.get(sym,"")
             sig, debug = v206_signal(sym, live, is_mover=is_mover, mover_label=mover_label)
-            d4h=kl(sym,"Hour4")
-            direction, dir_reason = get_4h_direction(d4h)
+            d4h=kl(sym,"Hour4",min_candles=15 if is_mover else 30)
+            direction, dir_reason = get_4h_direction(d4h, is_mover=is_mover)
             if sig:
                 if sym != "BTC_USDT":
-                    if not btc_confirms(sig["side"], btc_dir):
+                    if not btc_confirms(sig["side"], btc_dir, mover_label):
                         print(f"{YELLOW}SKIP {sym} {sig['side']} - BTC {btc_dir} not confirming | {debug}{RESET}")
                         continue
                 color = GREEN if sig["side"]=="BUY" else RED
