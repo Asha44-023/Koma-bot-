@@ -1,17 +1,19 @@
 import json,os,time,tempfile,requests,argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
 BASE_SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","JASMY_USDT","LAB_USDT","VELVET_USDT","PEPE_USDT","DOGE_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
-ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json"
+ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";HISTORY_FILE="movers_history.json"
 session=requests.Session()
-TAG="V208-SR-MOVERS-2TO2"
+TAG="V209-YESTERDAY-REVERSAL"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
 def get_today():return datetime.now(EAT).strftime("%Y-%m-%d")
+def get_yesterday():return (datetime.now(EAT)-timedelta(days=1)).strftime("%Y-%m-%d")
+def get_2days_ago():return (datetime.now(EAT)-timedelta(days=2)).strftime("%Y-%m-%d")
 def load_json(p,d):
  try:
   with open(p,"r") as f:v=json.load(f);return v if isinstance(v,type(d)) else d
@@ -115,47 +117,66 @@ def calc_atr(d1,period=14):
   return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
  except:return 0.0
 
-# ===== V208 FIXED: MEXC MOVERS SCANNER =====
+# ===== V209: MOVERS 30% + YESTERDAY REVERSAL =====
 def get_mexc_movers():
     movers={}
     try:
         r=session.get("https://contract.mexc.com/api/v1/contract/ticker",timeout=15).json()
         data=r.get("data",[])
         if isinstance(data,dict): data=[data]
-        if not isinstance(data,list):
-            print(f"MOVERS DEBUG: ticker data type {type(data)}")
-            return movers
-        if data:
-            print(f"MOVERS DEBUG sample: {str(data[0])[:400]}")
+        if not isinstance(data,list): return movers
         parsed=[]
         for it in data:
             try:
                 sym=it.get("symbol","")
                 if not sym.endswith("_USDT"): continue
                 if sym in BASE_SYMBOLS: continue
-                chg_raw = it.get("riseFallRate", it.get("riseFallRate24", it.get("priceChangePercent", it.get("change24", 0))))
-                chg=float(chg_raw or 0)
-                if abs(chg) <= 2:
-                    chg = chg*100
-                vol_raw = it.get("volume24", it.get("vol24", it.get("volume", it.get("turnover24", 0))))
-                lp=float(it.get("lastPrice", it.get("last_price", 0)) or 0)
-                vol=float(vol_raw or 0)
-                vol_usd=vol*lp
+                chg=float(it.get("riseFallRate",0) or 0)
+                if abs(chg) <= 2: chg = chg*100
+                vol_usd=float(it.get("amount24",0) or 0)
                 if vol_usd==0:
-                    vol_usd=float(it.get("amount24", 0) or 0)
+                    lp=float(it.get("lastPrice",0) or 0)
+                    vol_usd=float(it.get("volume24",0) or 0)*lp
                 parsed.append((sym,chg,vol_usd))
             except: continue
-        print(f"MOVERS DEBUG parsed {len(parsed)} coins, top changes: {sorted(parsed, key=lambda x: x[1], reverse=True)[:3]}")
         parsed=[x for x in parsed if x[2] > 200000]
-        gainers=[x for x in parsed if 35 <= x[1] <= 100]
+        gainers=[x for x in parsed if 30 <= x[1] <= 150]
         losers=[x for x in parsed if -50 <= x[1] <= -30]
         gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:3]
         losers=sorted(losers, key=lambda x: x[1])[:3]
         for sym,chg,_ in gainers: movers[sym]=f"+{chg:.1f}% GAINER"
         for sym,chg,_ in losers: movers[sym]=f"{chg:.1f}% LOSER"
-        print(f"MOVERS: {movers}")
+        print(f"MOVERS TODAY: {movers}")
+        # Save today's movers for tomorrow - this is the key
+        try:
+            hist=load_json(HISTORY_FILE,{})
+            hist[get_today()]=movers
+            # Keep only last 3 days to avoid file growing
+            for k in list(hist.keys()):
+                if k < get_2days_ago(): del hist[k]
+            atomic_save(HISTORY_FILE,hist)
+            print(f"MOVERS SAVED for tomorrow: {movers}")
+        except Exception as e: print(f"history save err {e}")
     except Exception as e: print(f"movers err {e}")
     return movers
+
+def get_yesterday_movers():
+    try:
+        hist=load_json(HISTORY_FILE,{})
+        y=hist.get(get_yesterday(),{})
+        d2=hist.get(get_2days_ago(),{})
+        out={}
+        # Yesterday first - strongest reversal
+        for sym,label in y.items():
+            out[sym]=f"YESTERDAY {label} -> REVERSAL"
+        # 2 days ago for losers that pump on day 2 - you said losers pump day 1-2
+        for sym,label in d2.items():
+            if sym not in out and "LOSER" in label:
+                out[sym]=f"2DAYS AGO {label} -> BOUNCE"
+        print(f"MOVERS YESTERDAY: {out}")
+        return out
+    except Exception as e:
+        print(f"yesterday err {e}"); return {}
 
 def get_sr_levels(sym):
     supports=[]; resistances=[]
@@ -294,11 +315,6 @@ def v206_signal(sym, live, is_mover=False, mover_label=""):
     sr_tol = atr*0.5 if is_mover else atr*1.0
     at_support = nearest_support and abs(live-nearest_support) <= sr_tol
     at_resist = nearest_resist and abs(live-nearest_resist) <= sr_tol
-    if is_mover:
-        if "GAINER" in mover_label and not at_resist:
-            return None, f"MOVER GAINER not at Resistance {fmt(nearest_resist) if nearest_resist else 'none'} live {fmt(live)} - skip"
-        if "LOSER" in mover_label and not at_support:
-            return None, f"MOVER LOSER not at Support {fmt(nearest_support) if nearest_support else 'none'} live {fmt(live)} - skip"
     above, below = get_liq_pools(sym, live)
     atr_pct = (atr/live*100) if live>0 else 0
     if is_mover:
@@ -419,13 +435,25 @@ def check_active_positions_v206():
         except Exception as e: print(f"exit check err {sym} {e}")
 
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + MOVERS{RESET}")
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + YESTERDAY REVERSAL{RESET}")
     print("-"*100)
     btc_d4h=kl("BTC_USDT","Hour4")
     btc_dir, btc_reason = get_4h_direction(btc_d4h)
     print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v206()
-    movers = get_mexc_movers()
+    # 1. Yesterday movers - trade these TODAY (reversal day)
+    yesterday_movers = get_yesterday_movers()
+    # 2. Today's movers - save for tomorrow, also scan today for both directions
+    today_movers = get_mexc_movers()
+    # Merge: yesterday takes priority in label, today adds new ones
+    movers = {}
+    movers.update(today_movers)
+    for sym,label in yesterday_movers.items():
+        if sym in movers:
+            movers[sym]=movers[sym]+f" + {label}"
+        else:
+            movers[sym]=label
+    print(f"MOVERS COMBINED: {movers}")
     SYMBOLS = BASE_SYMBOLS + [s for s in movers.keys() if s not in BASE_SYMBOLS]
     print(f"{CYAN}Scanning {len(SYMBOLS)} coins: {SYMBOLS}{RESET}")
     signals=[]
