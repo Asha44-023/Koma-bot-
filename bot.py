@@ -2,12 +2,12 @@ import json,os,time,tempfile,requests,argparse
 from datetime import datetime, timedelta
 import pytz
 EAT=pytz.timezone("Africa/Nairobi")
-BASE_SYMBOLS=["BTC_USDT","KOMA_USDT","GRASS_USDT","SENT_USDT","SIREN_USDT","JASMY_USDT","LAB_USDT","VELVET_USDT","PEPE_USDT","DOGE_USDT"]
+BASE_SYMBOLS=["BTC_USDT"]
 TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";HISTORY_FILE="movers_history.json"
 session=requests.Session()
-TAG="V210-FIXED"
+TAG="V211-DYNAMIC"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -110,7 +110,7 @@ def get_mexc_movers():
             try:
                 sym=it.get("symbol","")
                 if not sym.endswith("_USDT"): continue
-                if sym in BASE_SYMBOLS: continue
+                # V211: NO skip list - scan ALL coins
                 chg=float(it.get("riseFallRate",0) or 0)
                 if -2.5 < chg < 2.5 and chg != 0:
                     chg = chg*100
@@ -118,16 +118,18 @@ def get_mexc_movers():
                 if vol_usd==0:
                     lp=float(it.get("lastPrice",0) or 0)
                     vol_usd=float(it.get("volume24",0) or 0)*lp
+                # V211: volume filter to avoid fake pumps
+                if vol_usd < 500000: continue
                 parsed.append((sym,chg,vol_usd))
             except: continue
-        parsed=[x for x in parsed if x[2] > 200000]
-        gainers=[x for x in parsed if 30 <= x[1] <= 150]
-        losers=[x for x in parsed if -50 <= x[1] <= -30]
-        gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:3]
-        losers=sorted(losers, key=lambda x: x[1])[:3]
+        # V211: 30% both sides, wider range
+        gainers=[x for x in parsed if 30 <= x[1] <= 300]
+        losers=[x for x in parsed if -80 <= x[1] <= -30]
+        gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:5]
+        losers=sorted(losers, key=lambda x: x[1])[:5]
         for sym,chg,_ in gainers: movers[sym]=f"+{chg:.1f}% GAINER"
         for sym,chg,_ in losers: movers[sym]=f"{chg:.1f}% LOSER"
-        print(f"MOVERS TODAY: {movers}")
+        print(f"MOVERS TODAY DYNAMIC: {movers}")
         try:
             hist=load_json(HISTORY_FILE,{})
             hist[get_today()]=movers
@@ -377,7 +379,7 @@ def check_active_positions_v206():
                 print(f"{RED}EXIT {sym} {reason} PnL {pnl:.2f}%{RESET}"); tg(format_exit_msg(sym, side, live, reason, pnl, entry, sl)); del ACTIVE[sym]; save_a()
         except Exception as e: print(f"exit check err {sym} {e}")
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + YESTERDAY REVERSAL{RESET}"); print("-"*100)
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + DYNAMIC 30% MOVERS{RESET}"); print("-"*100)
     btc_d4h=kl("BTC_USDT","Hour4"); btc_dir, btc_reason = get_4h_direction(btc_d4h); print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v206()
     yesterday_movers = get_yesterday_movers(); today_movers = get_mexc_movers()
@@ -386,8 +388,11 @@ def run_once():
         if sym in movers: movers[sym]=movers[sym]+f" + {label}"
         else: movers[sym]=label
     print(f"MOVERS COMBINED: {movers}")
-    SYMBOLS = BASE_SYMBOLS + [s for s in movers.keys() if s not in BASE_SYMBOLS]
-    print(f"{CYAN}Scanning {len(SYMBOLS)} coins: {SYMBOLS}{RESET}")
+    # V211 DYNAMIC: No fixed list. Only scan movers + BTC for filter.
+    SYMBOLS = list(movers.keys())
+    if "BTC_USDT" not in SYMBOLS:
+        SYMBOLS = ["BTC_USDT"] + SYMBOLS
+    print(f"{CYAN}Scanning DYNAMIC {len(SYMBOLS)} coins: {SYMBOLS}{RESET}")
     signals=[]
     for sym in SYMBOLS:
         try:
