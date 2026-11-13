@@ -7,7 +7,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";HISTORY_FILE="movers_history.json"
 session=requests.Session()
-TAG="V211-DYNAMIC"
+TAG="V211B-MOVER-BTC"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -110,7 +110,6 @@ def get_mexc_movers():
             try:
                 sym=it.get("symbol","")
                 if not sym.endswith("_USDT"): continue
-                # V211: NO skip list - scan ALL coins
                 chg=float(it.get("riseFallRate",0) or 0)
                 if -2.5 < chg < 2.5 and chg != 0:
                     chg = chg*100
@@ -118,11 +117,9 @@ def get_mexc_movers():
                 if vol_usd==0:
                     lp=float(it.get("lastPrice",0) or 0)
                     vol_usd=float(it.get("volume24",0) or 0)*lp
-                # V211: volume filter to avoid fake pumps
                 if vol_usd < 500000: continue
                 parsed.append((sym,chg,vol_usd))
             except: continue
-        # V211: 30% both sides, wider range
         gainers=[x for x in parsed if 30 <= x[1] <= 300]
         losers=[x for x in parsed if -80 <= x[1] <= -30]
         gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:5]
@@ -347,7 +344,10 @@ def v206_signal(sym, live, is_mover=False, mover_label=""):
         tp1,tp2,tp3=tp_sell()
         return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"BEARISH + Supply/Resist + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"BEARISH SELL {msg} | {label} {mover_label}"
     return None, f"NEUTRAL {dir_reason} | no trade"
-def btc_confirms(alt_side, btc_dir, mover_label=""):
+# V211B CHANGE - ONLY THIS FUNCTION CHANGED
+def btc_confirms(alt_side, btc_dir, mover_label="", is_mover=False):
+    # Movers don't follow BTC - ignore BTC filter for them
+    if is_mover: return True
     if "YESTERDAY" in mover_label and "LOSER" in mover_label and alt_side=="BUY": return True
     if "YESTERDAY" in mover_label and "GAINER" in mover_label and alt_side=="SELL": return True
     if alt_side=="BUY" and btc_dir=="BEARISH": return False
@@ -379,7 +379,7 @@ def check_active_positions_v206():
                 print(f"{RED}EXIT {sym} {reason} PnL {pnl:.2f}%{RESET}"); tg(format_exit_msg(sym, side, live, reason, pnl, entry, sl)); del ACTIVE[sym]; save_a()
         except Exception as e: print(f"exit check err {sym} {e}")
 def run_once():
-    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + DYNAMIC 30% MOVERS{RESET}"); print("-"*100)
+    print(f"{CYAN}[{get_time()}] | {TAG} | 4H 2TO2 / 30M / 5M SWEEP + S/R + DYNAMIC 30% MOVERS + MOVER IGNORES BTC{RESET}"); print("-"*100)
     btc_d4h=kl("BTC_USDT","Hour4"); btc_dir, btc_reason = get_4h_direction(btc_d4h); print(f"{CYAN}BTC 4H = {btc_dir} | {btc_reason}{RESET}")
     check_active_positions_v206()
     yesterday_movers = get_yesterday_movers(); today_movers = get_mexc_movers()
@@ -388,7 +388,6 @@ def run_once():
         if sym in movers: movers[sym]=movers[sym]+f" + {label}"
         else: movers[sym]=label
     print(f"MOVERS COMBINED: {movers}")
-    # V211 DYNAMIC: No fixed list. Only scan movers + BTC for filter.
     SYMBOLS = list(movers.keys())
     if "BTC_USDT" not in SYMBOLS:
         SYMBOLS = ["BTC_USDT"] + SYMBOLS
@@ -405,7 +404,8 @@ def run_once():
             d4h=kl(sym,"Hour4",min_candles=15 if is_mover else 30); direction, dir_reason = get_4h_direction(d4h, is_mover=is_mover)
             if sig:
                 if sym != "BTC_USDT":
-                    if not btc_confirms(sig["side"], btc_dir, mover_label):
+                    # V211B: pass is_mover so movers ignore BTC
+                    if not btc_confirms(sig["side"], btc_dir, mover_label, is_mover=is_mover):
                         print(f"{YELLOW}SKIP {sym} {sig['side']} - BTC {btc_dir} not confirming | {debug}{RESET}"); continue
                 color = GREEN if sig["side"]=="BUY" else RED; emoji = "🟢 BUY" if sig["side"]=="BUY" else "🔴 SELL"
                 print(f"{color}{BOLD}{emoji} {sym} @ {fmt(sig['entry'])} | SL {fmt(sig['sl'])} | TP1 {fmt(sig['tp1'])} | TP2 {fmt(sig['tp2'])} | TP3 {fmt(sig['tp3'])} | BTC {btc_dir} OK | {debug}{RESET}")
