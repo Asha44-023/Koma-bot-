@@ -7,7 +7,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";HISTORY_FILE="movers_history.json"
 session=requests.Session()
-TAG="V209-YESTERDAY-REVERSAL"
+TAG="V210-FIXED"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -52,13 +52,14 @@ def round_level(p):
 def tg(m):
  if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:print(m);return
  try:session.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN.strip()}/sendMessage",json={"chat_id":str(TELEGRAM_CHAT).strip(),"text":m,"parse_mode":"HTML"},timeout=15)
- except:pass
+ except Exception as e:print(f"tg err {e}")
 def format_signal_msg(sig, sym):
     mover_tag = f" 🔥 MOVER {sig.get('mover_label','')}" if sig.get('is_mover') else ""
+    sl_pct = (sig['sl']-sig['entry'])/sig['entry']*100 if sig["side"]=="BUY" else (sig['entry']-sig['sl'])/sig['entry']*100
     if sig["side"]=="BUY":
-        return (f"🟢🟢🟢 <b>BUY {sym}</b>{mover_tag} 🟢🟢🟢\nEntry: <b>{fmt(sig['entry'])}</b>\n🛑 SL: <b>{fmt(sig['sl'])}</b> ({((sig['sl']-sig['entry'])/sig['entry']*100):+.2f}%)\n🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['tp1']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 50%\n🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['tp2']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 30%\n🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['tp3']-sig['entry'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n{sig['reason']}\n[{get_time()}] | {TAG}")
+        return (f"🟢🟢🟢 <b>BUY {sym}</b>{mover_tag} 🟢🟢🟢\nEntry: <b>{fmt(sig['entry'])}</b>\n🛑 SL: <b>{fmt(sig['sl'])}</b> ({sl_pct:+.2f}%)\n🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['tp1']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 50%\n🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['tp2']-sig['entry'])/sig['entry']*100):+.2f}%) - Close 30%\n🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['tp3']-sig['entry'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n{sig['reason']}\n[{get_time()}] | {TAG}")
     else:
-        return (f"🔴🔴🔴 <b>SELL {sym}</b>{mover_tag} 🔴🔴🔴\nEntry: <b>{fmt(sig['entry'])}</b>\n🛑 SL: <b>{fmt(sig['sl'])}</b>\n🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['entry']-sig['tp1'])/sig['entry']*100):+.2f}%) - Close 50%\n🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['entry']-sig['tp2'])/sig['entry']*100):+.2f}%) - Close 30%\n🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['entry']-sig['tp3'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n{sig['reason']}\n[{get_time()}] | {TAG}")
+        return (f"🔴🔴🔴 <b>SELL {sym}</b>{mover_tag} 🔴🔴🔴\nEntry: <b>{fmt(sig['entry'])}</b>\n🛑 SL: <b>{fmt(sig['sl'])}</b> ({-sl_pct:+.2f}%)\n🎯 TP1: <b>{fmt(sig['tp1'])}</b> ({((sig['entry']-sig['tp1'])/sig['entry']*100):+.2f}%) - Close 50%\n🎯 TP2: <b>{fmt(sig['tp2'])}</b> ({((sig['entry']-sig['tp2'])/sig['entry']*100):+.2f}%) - Close 30%\n🏃 TP3 RUNNER: <b>{fmt(sig['tp3'])}</b> ({((sig['entry']-sig['tp3'])/sig['entry']*100):+.2f}%) - Hold 20% + SL to BE\n{sig['reason']}\n[{get_time()}] | {TAG}")
 def format_exit_msg(sym, side, live, reason, pnl, entry, sl):
     emoji="🛑" if "SL" in reason else "⚠️"
     return (f"{emoji} <b>EXIT {sym} {side}</b>\nExit: <b>{fmt(live)}</b> | Entry: {fmt(entry)} | SL: {fmt(sl)}\nReason: {reason}\nPnL: <b>{pnl:+.2f}%</b>")
@@ -77,15 +78,17 @@ def kl(symbol,interval,min_candles=30):
    if isinstance(d,dict) and "data" in d:d=d["data"]
    if not d or "open" not in d:continue
    res={"o":[float(x) for x in d["open"]],"h":[float(x) for x in d["high"]],"l":[float(x) for x in d["low"]],"c":[float(x) for x in d["close"]],"v":[float(x) for x in d.get("vol",[0]*len(d["close"]))]}
-   for k in res:res[k]=res[k][:-1]
    if len(res["c"])<min_candles:continue
    return res
-  except:time.sleep(1)
+  except Exception as e:
+   print(f"kl err {symbol} {interval} {e}");time.sleep(1)
  return None
 def get_live(s):
  for t in [s,s.replace("_",""),s.replace("_USDT","USDT")]:
   try:
-   r=session.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={t}",timeout=5).json();data=r.get("data",r);lp=data.get("lastPrice") or data.get("last_price") or data.get("price")
+   r=session.get(f"https://contract.mexc.com/api/v1/contract/ticker?symbol={t}",timeout=5).json();data=r.get("data",r)
+   if isinstance(data,list): data=data[0] if data else {}
+   lp=data.get("lastPrice") or data.get("last_price") or data.get("price")
    if lp and float(lp)>0:return float(lp)
   except:pass
  return None
@@ -109,7 +112,8 @@ def get_mexc_movers():
                 if not sym.endswith("_USDT"): continue
                 if sym in BASE_SYMBOLS: continue
                 chg=float(it.get("riseFallRate",0) or 0)
-                if abs(chg) <= 2: chg = chg*100
+                if -2.5 < chg < 2.5 and chg != 0:
+                    chg = chg*100
                 vol_usd=float(it.get("amount24",0) or 0)
                 if vol_usd==0:
                     lp=float(it.get("lastPrice",0) or 0)
@@ -327,7 +331,6 @@ def v206_signal(sym, live, is_mover=False, mover_label=""):
                 tp1,tp2,tp3=tp_sell()
                 return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"RANGE + Supply/Resist {fmt(nearest_resist) if nearest_resist else ''} + {msg} | 4H {dir_reason} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"RANGE SELL {msg} | {label} {mover_label}"
             return None, f"RANGE {dir_reason} | not in zone live {fmt(live)} SR R {fmt(nearest_resist) if nearest_resist else 'none'} S {fmt(nearest_support) if nearest_support else 'none'}"
-        # FIX: RANGE but not in any zone - return here, don't fall through to NEUTRAL
         return None, f"RANGE {dir_reason} | not in zone live {fmt(live)} SR R {fmt(nearest_resist) if nearest_resist else 'none'} S {fmt(nearest_support) if nearest_support else 'none'}"
     if direction=="BULLISH":
         if not (in_demand or at_support): return None, f"BULLISH {dir_reason} | not in Demand/Support live {fmt(live)} Sup {fmt(nearest_support) if nearest_support else 'none'}"
@@ -353,17 +356,22 @@ def check_active_positions_v206():
         try:
             info=ACTIVE[sym]
             if not isinstance(info, dict): continue
-            entry=float(info.get("entry",0)); side=info.get("side","BUY"); sl=float(info.get("sl",0)); tp1=float(info.get("tp1",0)); live=get_live(sym)
+            entry=float(info.get("entry",0)); side=info.get("side","BUY"); sl=float(info.get("sl",0)); tp1=float(info.get("tp1",0)); tp2=float(info.get("tp2",0)); tp3=float(info.get("tp3",0)); live=get_live(sym)
             if not live: continue
             d4h=kl(sym,"Hour4",min_candles=15); direction,_ = get_4h_direction(d4h, is_mover=True)
             flip=False
             if side=="BUY" and direction=="BEARISH": flip=True
             if side=="SELL" and direction=="BULLISH": flip=True
-            sl_hit = (live <= sl) if side=="BUY" else (live >= sl)
             if side=="BUY" and live>=tp1 and not info.get("tp1_hit"):
                 info["tp1_hit"]=True; info["sl"]=entry; save_a(); print(f"{GREEN}TP1 HIT {sym} {side} @ {fmt(live)} - SL moved to entry{RESET}"); tg(f"✅ <b>TP1 HIT {sym} {side}</b> @ {fmt(live)}\nSL moved to entry {fmt(entry)}")
             if side=="SELL" and live<=tp1 and not info.get("tp1_hit"):
                 info["tp1_hit"]=True; info["sl"]=entry; save_a(); print(f"{GREEN}TP1 HIT {sym} {side} @ {fmt(live)} - SL moved to entry{RESET}"); tg(f"✅ <b>TP1 HIT {sym} {side}</b> @ {fmt(live)}\nSL moved to entry {fmt(entry)}")
+            if side=="BUY" and live>=tp2 and not info.get("tp2_hit"):
+                info["tp2_hit"]=True; save_a(); tg(f"✅ <b>TP2 HIT {sym} {side}</b> @ {fmt(live)}")
+            if side=="SELL" and live<=tp2 and not info.get("tp2_hit"):
+                info["tp2_hit"]=True; save_a(); tg(f"✅ <b>TP2 HIT {sym} {side}</b> @ {fmt(live)}")
+            sl=float(info.get("sl",sl))
+            sl_hit = (live <= sl) if side=="BUY" else (live >= sl)
             if flip or sl_hit:
                 reason = "4H FLIP EXIT" if flip else "SL HIT EXIT"; pnl=(live-entry)/entry*100 if side=="BUY" else (entry-live)/entry*100
                 print(f"{RED}EXIT {sym} {reason} PnL {pnl:.2f}%{RESET}"); tg(format_exit_msg(sym, side, live, reason, pnl, entry, sl)); del ACTIVE[sym]; save_a()
@@ -383,6 +391,8 @@ def run_once():
     signals=[]
     for sym in SYMBOLS:
         try:
+            if sym in ACTIVE:
+                print(f"{YELLOW}SKIP {sym} - already ACTIVE {ACTIVE[sym].get('side')} @ {fmt(ACTIVE[sym].get('entry',0))}{RESET}"); continue
             live=get_live(sym)
             if not live: continue
             is_mover = sym in movers; mover_label = movers.get(sym,"")
