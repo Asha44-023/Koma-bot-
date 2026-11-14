@@ -194,9 +194,8 @@ def get_liq_pools(sym, live):
     above=[p for p in uniq if p > live*1.001]; below=[p for p in uniq if p < live*0.999]; below=sorted(below, reverse=True)
     return above, below
 
-# ================= V400 - STRUCTURE FIRST =================
+# ================= V400.1 - STRUCTURE FIRST - PATCHED =================
 def get_swings(d):
-    # returns list of (idx, type, price) type = H or L
     h=d["h"]; l=d["l"]; out=[]
     for i in range(3,len(h)-3):
         if h[i]==max(h[i-3:i+4]): out.append((i,"H",h[i]))
@@ -204,7 +203,6 @@ def get_swings(d):
     return out
 
 def get_daily_bias(d1):
-    # Daily = bias only. HH/HL = BULLISH, LH/LL = BEARISH, else RANGE
     try:
         if not d1 or len(d1["c"])<10: return "RANGE","no daily data"
         sw=get_swings(d1)
@@ -217,45 +215,34 @@ def get_daily_bias(d1):
     except Exception as e: return "RANGE",f"daily err {e}"
 
 def get_4h_structure(d4h):
-    # Returns: side, sweep_price, bos_price, entry_zone, pattern_bonus, debug
-    # JR_MANAS: Sweep -> BOS -> SS -> Entry
     try:
         if not d4h or len(d4h["c"])<30: return None
         h=d4h["h"]; l=d4h["l"]; c=d4h["c"]; o=d4h["o"]; v=d4h["v"]
         sw=get_swings(d4h)
         if len(sw)<4: return None
-        # Find last BOS: price breaks last swing high (for LONG) or low (for SHORT)
-        # Scan last 40 candles for sweep + BOS
-        # LONG candidate: sweep below a prior low, then close above prior swing high
-        # SHORT candidate: sweep above a prior high, then close below prior swing low
         for side in ["BUY","SELL"]:
             if side=="BUY":
-                # last 3 lows
                 lows=[(i,p) for i,t,p in sw if t=="L"][-3:]
                 highs=[(i,p) for i,t,p in sw if t=="H"][-3:]
                 if len(lows)<2 or len(highs)<2: continue
                 prior_low=lows[-2][1]; last_low=lows[-1][1]
-                # Sweep: wick below prior low, close back above it
                 sweep_idx=None; sweep_price=None
-                for i in range(len(c)-25, len(c)):
+                # PATCHED: 60 candles, not 25
+                for i in range(max(0,len(c)-60), len(c)):
                     if l[i] < prior_low and c[i] > prior_low:
                         sweep_idx=i; sweep_price=l[i]; break
                 if sweep_idx is None: continue
-                # BOS: close above last swing high after sweep
                 bos_price=highs[-1][1]; bos_idx=None
                 for i in range(sweep_idx, len(c)):
                     if c[i] > bos_price:
                         bos_idx=i; break
                 if bos_idx is None: continue
-                # Entry zone = OB: last bearish candle before BOS impulse (low-high of that candle + base)
-                # Find last red candle before bos_idx
                 ob_low=None; ob_high=None
                 for i in range(bos_idx, max(sweep_idx, bos_idx-10), -1):
-                    if c[i] < o[i]: # bearish
+                    if c[i] < o[i]:
                         ob_low=min(l[i-1:i+2]); ob_high=max(h[i-1:i+2]); break
                 if ob_low is None:
                     ob_low=min(l[bos_idx-3:bos_idx]); ob_high=max(h[bos_idx-3:bos_idx])
-                # Pattern bonus: Double Bottom if last two lows within 0.5%
                 pattern=""
                 if abs(last_low-prior_low)/prior_low < 0.005: pattern=" + Double Bottom"
                 return {"side":"BUY","sweep":sweep_price,"bos":bos_price,"zone_low":ob_low,"zone_high":ob_high,"pattern":pattern,"debug":f"4H Sweep {fmt(sweep_price)} BOS > {fmt(bos_price)} OB {fmt(ob_low)}-{fmt(ob_high)}{pattern}"}
@@ -265,7 +252,8 @@ def get_4h_structure(d4h):
                 if len(highs)<2 or len(lows)<2: continue
                 prior_high=highs[-2][1]; last_high=highs[-1][1]
                 sweep_idx=None; sweep_price=None
-                for i in range(len(c)-25, len(c)):
+                # PATCHED: 60 candles, not 25
+                for i in range(max(0,len(c)-60), len(c)):
                     if h[i] > prior_high and c[i] < prior_high:
                         sweep_idx=i; sweep_price=h[i]; break
                 if sweep_idx is None: continue
@@ -276,7 +264,7 @@ def get_4h_structure(d4h):
                 if bos_idx is None: continue
                 ob_low=None; ob_high=None
                 for i in range(bos_idx, max(sweep_idx, bos_idx-10), -1):
-                    if c[i] > o[i]: # bullish
+                    if c[i] > o[i]:
                         ob_low=min(l[i-1:i+2]); ob_high=max(h[i-1:i+2]); break
                 if ob_low is None:
                     ob_low=min(l[bos_idx-3:bos_idx]); ob_high=max(h[bos_idx-3:bos_idx])
@@ -288,27 +276,21 @@ def get_4h_structure(d4h):
         print(f"4h struct err {e}"); return None
 
 def get_5m_trigger_v400(d5, side, zone_low, zone_high, atr, is_mover):
-    # SS = Second Sweep: price comes back to zone, sweeps zone edge, then holds inside zone
-    # Entry only on SS hold + candle body >60% + volume >1.5x
     try:
         if not d5 or len(d5["c"])<20: return False,"no 5M data",0,False
         h=d5["h"]; l=d5["l"]; c=d5["c"]; o=d5["o"]; v=d5["v"]
         live=c[-1]
-        # Must be in / near zone
         in_zone = zone_low*0.995 <= live <= zone_high*1.005
         if not in_zone: return False,f"not in Entry zone live {fmt(live)} zone {fmt(zone_low)}-{fmt(zone_high)}",0,False
-        # Candle body / volume filter
         body=abs(c[-1]-o[-1]); rng=h[-1]-l[-1] if h[-1]>l[-1] else 1
         body_pct=body/rng if rng>0 else 0
         avg_vol=sum(v[-6:-1])/5 if len(v)>=6 else 1
         vol_ok = v[-1] > avg_vol*1.5 if avg_vol>0 else False
         if body_pct < 0.6: return False,f"SS in zone but body {body_pct*100:.0f}% <60% - fakeout",0,False
         if not vol_ok: return False,f"SS in zone but vol {v[-1]:.0f} <1.5x avg {avg_vol:.0f}",0,False
-        # SS logic: for BUY, low swept below zone_low then closed back inside zone; for SELL, high swept above zone_high then closed back inside
         if side=="BUY":
             ss_low=min(l[-6:])
             sweep = ss_low < zone_low and c[-1] > zone_low
-            # HL inside zone: last low higher than previous low
             hl = min(l[-5:]) > min(l[-10:-5])
             if not (sweep or hl): return False,f"in zone, waiting SS/HL sweepLow {fmt(ss_low)} zoneLow {fmt(zone_low)}",0,False
             sl = ss_low - atr*0.2
@@ -323,32 +305,28 @@ def get_5m_trigger_v400(d5, side, zone_low, zone_high, atr, is_mover):
     except Exception as e: return False,f"5M v400 err {e}",0,False
 
 def v400_signal(sym, live, is_mover=False, mover_label="", btc_daily="RANGE"):
-    # Top-Down: Daily Bias -> 4H Sweep+BOS -> 1H SS check -> 5M Entry
     d1=kl(sym,"Day1",min_candles=15)
     d4h=kl(sym,"Hour4",min_candles=30)
     d1h=kl(sym,"Hour1",min_candles=20)
     d5=kl(sym,"Min5",min_candles=20)
     if not d1 or not d4h or not d5: return None,"missing TF data D1/4H/5M"
     daily_bias, daily_reason = get_daily_bias(d1)
-    # Movers can trade against Daily if it's a reversal play (yesterday loser bounce) - same as V211B logic
     allow_counter = is_mover and ("YESTERDAY" in mover_label or "2DAYS" in mover_label)
-    if daily_bias=="RANGE" and not allow_counter:
-        return None,f"Daily RANGE - SKIP | {daily_reason}"
+    # PATCHED: Daily RANGE = let 4H decide, don't skip
+    if daily_bias=="RANGE":
+        pass
     struct=get_4h_structure(d4h)
     if not struct: return None,f"Daily {daily_bias} | No 4H Sweep+BOS yet | {daily_reason}"
     side=struct["side"]
-    # Daily must agree with 4H, unless mover reversal
     if not allow_counter:
         if daily_bias=="BULLISH" and side!="BUY": return None,f"Daily BULLISH vs 4H {side} - conflict SKIP | {struct['debug']}"
         if daily_bias=="BEARISH" and side!="SELL": return None,f"Daily BEARISH vs 4H {side} - conflict SKIP | {struct['debug']}"
-    # BTC Daily filter for alts (movers ignore)
     if sym!="BTC_USDT" and not is_mover:
         if btc_daily=="BULLISH" and side!="BUY": return None,f"BTC Daily BULLISH blocks {side}"
         if btc_daily=="BEARISH" and side!="SELL": return None,f"BTC Daily BEARISH blocks {side}"
     d30=kl(sym,"Min30",min_candles=20)
     atr=calc_atr(d30) if d30 else live*0.02
     if atr==0: atr=live*0.02
-    # 5M SS Entry in 4H OB zone
     ok, msg, sl, swept = get_5m_trigger_v400(d5, side, struct["zone_low"], struct["zone_high"], atr, is_mover)
     if not ok: return None,f"Daily {daily_bias} | 4H {struct['debug']} | waiting 5M SS: {msg}"
     supports, resistances = get_sr_levels(sym)
@@ -402,7 +380,6 @@ def v400_signal(sym, live, is_mover=False, mover_label="", btc_daily="RANGE"):
         return tp1,tp2,tp3
     if side=="BUY":
         tp1,tp2,tp3=tp_buy()
-        # RR check: need at least 1RR to TP1, else skip
         risk=abs(live-sl) if sl>0 else atr
         if risk>0 and (tp1-live)/risk < 1.0: return None,f"BUY RR <1 to TP1 SKIP | {struct['debug']}"
         return {"side":"BUY","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"V400 Daily {daily_bias} | 4H {struct['debug']} | 5M {msg} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"V400 BUY {msg} | {label} {mover_label}"
@@ -412,7 +389,6 @@ def v400_signal(sym, live, is_mover=False, mover_label="", btc_daily="RANGE"):
         if risk>0 and (live-tp1)/risk < 1.0: return None,f"SELL RR <1 to TP1 SKIP | {struct['debug']}"
         return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"V400 Daily {daily_bias} | 4H {struct['debug']} | 5M {msg} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"V400 SELL {msg} | {label} {mover_label}"
 
-# Legacy alias so old calls don't break
 def get_4h_direction(d4h, is_mover=False):
     s=get_4h_structure(d4h)
     if not s: return "RANGE","no 4H Sweep+BOS"
