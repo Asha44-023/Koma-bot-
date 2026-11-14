@@ -194,7 +194,7 @@ def get_liq_pools(sym, live):
     above=[p for p in uniq if p > live*1.001]; below=[p for p in uniq if p < live*0.999]; below=sorted(below, reverse=True)
     return above, below
 
-# ================= V400.1 - STRUCTURE FIRST - PATCHED =================
+# ================= V400.2 - STRUCTURE FIRST + FRESHNESS =================
 def get_swings(d):
     h=d["h"]; l=d["l"]; out=[]
     for i in range(3,len(h)-3):
@@ -214,12 +214,13 @@ def get_daily_bias(d1):
         return "RANGE",f"Daily sideways H {fmt(highs[-1])} L {fmt(lows[-1])}"
     except Exception as e: return "RANGE",f"daily err {e}"
 
-def get_4h_structure(d4h):
+def get_4h_structure(d4h, live=0):
     try:
         if not d4h or len(d4h["c"])<30: return None
         h=d4h["h"]; l=d4h["l"]; c=d4h["c"]; o=d4h["o"]; v=d4h["v"]
         sw=get_swings(d4h)
         if len(sw)<4: return None
+        atr4h=calc_atr(d4h) if len(c)>14 else c[-1]*0.02
         for side in ["BUY","SELL"]:
             if side=="BUY":
                 lows=[(i,p) for i,t,p in sw if t=="L"][-3:]
@@ -227,7 +228,6 @@ def get_4h_structure(d4h):
                 if len(lows)<2 or len(highs)<2: continue
                 prior_low=lows[-2][1]; last_low=lows[-1][1]
                 sweep_idx=None; sweep_price=None
-                # PATCHED: 60 candles, not 25
                 for i in range(max(0,len(c)-60), len(c)):
                     if l[i] < prior_low and c[i] > prior_low:
                         sweep_idx=i; sweep_price=l[i]; break
@@ -237,12 +237,15 @@ def get_4h_structure(d4h):
                     if c[i] > bos_price:
                         bos_idx=i; break
                 if bos_idx is None: continue
+                if bos_idx < len(c)-12: continue
                 ob_low=None; ob_high=None
                 for i in range(bos_idx, max(sweep_idx, bos_idx-10), -1):
                     if c[i] < o[i]:
                         ob_low=min(l[i-1:i+2]); ob_high=max(h[i-1:i+2]); break
                 if ob_low is None:
                     ob_low=min(l[bos_idx-3:bos_idx]); ob_high=max(h[bos_idx-3:bos_idx])
+                if live>0 and abs(live - (ob_low+ob_high)/2) > atr4h*3:
+                    continue
                 pattern=""
                 if abs(last_low-prior_low)/prior_low < 0.005: pattern=" + Double Bottom"
                 return {"side":"BUY","sweep":sweep_price,"bos":bos_price,"zone_low":ob_low,"zone_high":ob_high,"pattern":pattern,"debug":f"4H Sweep {fmt(sweep_price)} BOS > {fmt(bos_price)} OB {fmt(ob_low)}-{fmt(ob_high)}{pattern}"}
@@ -252,7 +255,6 @@ def get_4h_structure(d4h):
                 if len(highs)<2 or len(lows)<2: continue
                 prior_high=highs[-2][1]; last_high=highs[-1][1]
                 sweep_idx=None; sweep_price=None
-                # PATCHED: 60 candles, not 25
                 for i in range(max(0,len(c)-60), len(c)):
                     if h[i] > prior_high and c[i] < prior_high:
                         sweep_idx=i; sweep_price=h[i]; break
@@ -262,12 +264,15 @@ def get_4h_structure(d4h):
                     if c[i] < bos_price:
                         bos_idx=i; break
                 if bos_idx is None: continue
+                if bos_idx < len(c)-12: continue
                 ob_low=None; ob_high=None
                 for i in range(bos_idx, max(sweep_idx, bos_idx-10), -1):
                     if c[i] > o[i]:
                         ob_low=min(l[i-1:i+2]); ob_high=max(h[i-1:i+2]); break
                 if ob_low is None:
                     ob_low=min(l[bos_idx-3:bos_idx]); ob_high=max(h[bos_idx-3:bos_idx])
+                if live>0 and abs(live - (ob_low+ob_high)/2) > atr4h*3:
+                    continue
                 pattern=""
                 if abs(last_high-prior_high)/prior_high < 0.005: pattern=" + Double Top"
                 return {"side":"SELL","sweep":sweep_price,"bos":bos_price,"zone_low":ob_low,"zone_high":ob_high,"pattern":pattern,"debug":f"4H Sweep {fmt(sweep_price)} BOS < {fmt(bos_price)} OB {fmt(ob_low)}-{fmt(ob_high)}{pattern}"}
@@ -312,10 +317,9 @@ def v400_signal(sym, live, is_mover=False, mover_label="", btc_daily="RANGE"):
     if not d1 or not d4h or not d5: return None,"missing TF data D1/4H/5M"
     daily_bias, daily_reason = get_daily_bias(d1)
     allow_counter = is_mover and ("YESTERDAY" in mover_label or "2DAYS" in mover_label)
-    # PATCHED: Daily RANGE = let 4H decide, don't skip
     if daily_bias=="RANGE":
         pass
-    struct=get_4h_structure(d4h)
+    struct=get_4h_structure(d4h, live=live)
     if not struct: return None,f"Daily {daily_bias} | No 4H Sweep+BOS yet | {daily_reason}"
     side=struct["side"]
     if not allow_counter:
@@ -390,7 +394,7 @@ def v400_signal(sym, live, is_mover=False, mover_label="", btc_daily="RANGE"):
         return {"side":"SELL","entry":live,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"is_mover":is_mover,"mover_label":mover_label,"reason":f"V400 Daily {daily_bias} | 4H {struct['debug']} | 5M {msg} | TP=Next Liq/SR {label} ATR%{atr_pct:.2f} {mover_label}"}, f"V400 SELL {msg} | {label} {mover_label}"
 
 def get_4h_direction(d4h, is_mover=False):
-    s=get_4h_structure(d4h)
+    s=get_4h_structure(d4h, live=0)
     if not s: return "RANGE","no 4H Sweep+BOS"
     return ("BULLISH" if s["side"]=="BUY" else "BEARISH"), s["debug"]
 
