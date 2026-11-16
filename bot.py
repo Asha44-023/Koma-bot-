@@ -55,11 +55,11 @@ def fmt(p):
     return s
 
 def get_movers():
-    # === PERPS ONLY - MEXC Contract Ticker ===
+    # === PERPS ONLY - MEXC Contract Ticker - FIXED FIELD NAMES ===
     r = requests.get("https://contract.mexc.com/api/v1/contract/ticker", timeout=20).json()
     data_list = r.get("data", []) if isinstance(r, dict) else r
     if not data_list:
-        print(f"MEXC PERP ERROR: {r}")
+        print(f"MEXC PERP ERROR: {str(r)[:500]}")
         return {}
     movers = {}
     for t in data_list:
@@ -69,20 +69,32 @@ def get_movers():
         sym = sym_raw.replace("_USDT","")
         if sym in ["BTC","ETH","BNB","SOL","XRP","DOGE"]: continue
         try:
-            # PERP fields: lastPrice, high24Price, low24Price, amount24, riseFallRates
-            pct_raw = t.get('riseFallRates')
-            pct = float(pct_raw) * 100 if pct_raw is not None else parse_pct(t.get('riseFallRate'))
-            price = float(t['lastPrice'])
-            high = float(t.get('high24Price', price))
-            low = float(t.get('low24Price', price))
-            vol = float(t.get('amount24', 0) or t.get('volume24', 0) or 0)
-        except: continue
-        if pct is None: continue
-        if abs(pct) >= MIN_MOVE:  # 35% now, not 20%
+            # PERP pct: riseFallRate is like 0.771 = 77.1% - singular!
+            pct_raw = t.get('riseFallRate', t.get('riseFallRates', t.get('changeRate')))
+            pct = float(pct_raw) * 100 if pct_raw is not None else 0
+
+            price = float(t.get('lastPrice', 0) or 0)
+            # PERP high/low: higher24Price / lower24Price
+            high = float(t.get('higher24Price', t.get('high24Price', t.get('highPrice', price))) or price)
+            low = float(t.get('lower24Price', t.get('low24Price', t.get('lowPrice', price))) or price)
+
+            # PERP vol: amount24 is turnover in USDT, volume24 is contracts
+            amount24 = float(t.get('amount24', 0) or 0)
+            volume24 = float(t.get('volume24', 0) or 0)
+            if amount24 > 1000:
+                vol = amount24
+            else:
+                vol = volume24 * price
+
+        except Exception as e:
+            print(f"PARSE ERR {sym_raw}: {e}")
+            continue
+        if price == 0: continue
+        if abs(pct) >= MIN_MOVE:
             movers[sym] = {"pct": pct, "price": price, "symbol": sym_raw, "high": high, "low": low, "vol": vol}
     print(f"Found {len(movers)} PERP movers >={MIN_MOVE}%")
     for k,v in sorted(movers.items(), key=lambda x: -abs(x[1]['pct']))[:20]:
-        print(f"MOVER {k}: {v['pct']:.1f}% price {v['price']} PERP Vol ${v['vol']:,.0f}")
+        print(f"MOVER {k}: {v['pct']:.1f}% price {v['price']} PERP Vol ${v['vol']:,.0f} High {v['high']} Low {v['low']}")
     return movers
 
 def run_once():
@@ -145,13 +157,9 @@ def run_once():
             continue
 
         # === VOLUME + PRICE LOGIC ===
-        # Track volume growth: if volume growth is slowing while price is still at extreme = trend dying
         prev_vol = vol_hist.get(sym, vol)
         vol_growth = vol - prev_vol
         vol_hist[sym] = vol
-        # We still allow signal, but we log it. Main filter is 5% confirmation which proves trend is dying.
-        # If volume is still exploding (vol_growth huge) + price at high, it's still strong - wait.
-        # Since we already require 5% off High/Low, that IS the proof volume is failing to hold price.
 
         from_high = (price - high) / high * 100 if high > 0 else 0
         from_low = (price - low) / low * 100 if low > 0 else 0
