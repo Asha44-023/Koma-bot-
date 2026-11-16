@@ -1,1 +1,32 @@
-{}
+{
+  "CHOMP": {
+    "sym": "CHOMP",
+    "side": "BUY",
+    "price": 0.00082,
+    "pct": -47.089999999999996,
+    "y_pct": null,
+    "mid": 0.001715,
+    "sl": 0.000738,
+    "tp1": 0.000943,
+    "tp2": 0.001025,
+    "runner": 0.001148,
+    "day": "Day1",
+    "reason": "NEW dumped -47.1% today, bounced +5.1% off Low",
+    "time": "2026-11-16T13:36:03.242683+03:00"
+  },
+  "PRSM": {
+    "sym": "PRSM",
+    "side": "BUY",
+    "price": 0.000324,
+    "pct": -36.96,
+    "y_pct": null,
+    "mid": 0.000487,
+    "sl": 0.0002916,
+    "tp1": 0.0003726,
+    "tp2": 0.000405,
+    "runner": 0.0004536,
+    "day": "Day1",
+    "reason": "NEW dumped -37.0% today, bounced +8.0% off Low",
+    "time": "2026-11-16T13:36:03.242683+03:00"
+  }
+}
