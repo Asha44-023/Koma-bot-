@@ -8,8 +8,8 @@ ACTIVE_FILE = "active.json"
 HISTORY_FILE = "movers_history.json"
 COOLDOWN_FILE = "cooldown.json"
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT_ID") or os.getenv("CHAT_ID")
 
 def load_json(path, default):
     try:
@@ -23,13 +23,21 @@ def save_json(path, data):
         json.dump(data, f, indent=2)
 
 def send_telegram(msg):
-    if not TELEGRAM_TOKEN: return
+    print(f"TELEGRAM DEBUG - Token set: {bool(TELEGRAM_TOKEN)} Chat ID set: {bool(TELEGRAM_CHAT_ID)} Chat ID: {TELEGRAM_CHAT_ID}")
+    if not TELEGRAM_TOKEN:
+        print("TELEGRAM ERROR: No TELEGRAM_BOT_TOKEN found!")
+        return
+    if not TELEGRAM_CHAT_ID:
+        print("TELEGRAM ERROR: No TELEGRAM_CHAT_ID found!")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+    try:
+        r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+        print(f"TELEGRAM RESPONSE: {r.status_code} {r.text[:400]}")
+    except Exception as e:
+        print(f"TELEGRAM EXCEPTION: {e}")
 
 def parse_pct(v):
-    # MEXC: '1.6819' = 168.19% (decimal), '0.0177' = 1.77%
-    # Old history: '+67.2% GAINER' = 67.2% (already percent, has % sign)
     if v is None: return None
     s = str(v)
     has_percent_sign = '%' in s
@@ -37,9 +45,7 @@ def parse_pct(v):
     if not m: return None
     val = float(m.group(0))
     if has_percent_sign:
-        return val  # already percent
-    # No % sign = MEXC decimal fraction, convert to percent
-    # 1.6819 -> 168.19, -0.0177 -> -1.77
+        return val
     return val * 100
 
 def get_movers():
@@ -87,7 +93,6 @@ def run_once(reset_cooldowns=False):
     print(f"Today {today_str} Yday {yesterday_str} Yday movers: {len(yesterday_movers)}")
 
     movers = get_movers()
-    # DON'T overwrite history with empty if MEXC failed
     if movers:
         history[today_str] = {k: v["pct"] for k,v in movers.items()}
         save_json(HISTORY_FILE, history)
@@ -130,7 +135,7 @@ def run_once(reset_cooldowns=False):
         active[sym] = signal
         cooldowns[sym] = datetime.now(TZ).isoformat()
         y_txt = "NEW" if is_new else f"{y_pct:.1f}% yday"
-        msg = f"{emoji} <b>V800 {side} {sym}</b> - {day_label}\n📊 Today: {today_pct:.1f}% | Yesterday: {y_txt}\n📝 {reason}\n💰 Price: {price}\n🎯 Mid: {mid}\n🛑 SL: {sl}\n✅ TP1: {tp1}\n✅ TP2: {tp2}\n🏃 Runner: {runner}"
+        msg = f"{emoji} <b>V800 {side} {sym}</b> - {day_label}\nToday: {today_pct:.1f}% | Yesterday: {y_txt}\n{reason}\nPrice: {price}\nMid: {mid}\nSL: {sl}\nTP1: {tp1}\nTP2: {tp2}\nRunner: {runner}"
         send_telegram(msg)
         print(f"{sym} {side} - {reason}")
     save_json(ACTIVE_FILE, active)
