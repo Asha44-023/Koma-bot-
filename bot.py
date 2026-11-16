@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 TZ = ZoneInfo("Africa/Nairobi")
 ACTIVE_FILE = "active.json"
 HISTORY_FILE = "movers_history.json"
-COOLDOWN_FILE = "cooldowns.json"
+COOLDOWN_FILE = "cooldown.json"
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -29,6 +29,10 @@ def send_telegram(msg):
 
 def get_movers():
     r = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=20).json()
+    print(f"MEXC raw type: {type(r)} len: {len(r) if isinstance(r, list) else r}")
+    if isinstance(r, dict):
+        print(f"MEXC ERROR: {r}")
+        return {}
     movers = {}
     for t in r:
         sym = t['symbol']
@@ -42,6 +46,9 @@ def get_movers():
         except: continue
         if abs(pct) >= 20:
             movers[sym.replace("USDT","")] = {"pct": pct, "price": price, "symbol": sym, "high": high, "low": low}
+    print(f"Found {len(movers)} movers >=20%")
+    for k,v in movers.items():
+        print(f"MOVER {k}: {v['pct']:.1f}% price {v['price']}")
     return movers
 
 def run_once(reset_cooldowns=False):
@@ -51,6 +58,9 @@ def run_once(reset_cooldowns=False):
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
     yesterday_str = (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
     yesterday_movers = history.get(yesterday_str, {})
+    print(f"Today {today_str} Yesterday {yesterday_str} Yday movers: {len(yesterday_movers)}")
+    print(f"Yday sample: {list(yesterday_movers.items())[:5]}")
+    print(f"Active loaded: {len(active)} Cooldowns loaded: {len(cooldowns)}")
 
     movers = get_movers()
     history[today_str] = {k: v["pct"] for k,v in movers.items()}
@@ -71,30 +81,22 @@ def run_once(reset_cooldowns=False):
         reason = ""
 
         # ===== SELL LOGIC - Fake Pump -> Dump =====
-        # NEW: pumped today, allow
         if is_new and today_pct > 30:
             side = "SELL"; reason = "NEW pump"
-        # RUNNER: pumped 2 days, has to dump - BEST SELL
         elif not is_new and today_pct > 30 and y_pct > 30:
             side = "SELL"; day_label = "Runner"; reason = f"RUNNER {y_pct:.1f}% yday + {today_pct:.1f}% today"
-        # PUMP THEN DUMP: pumped yday, dumping today
         elif not is_new and today_pct < -20 and y_pct > 30:
             side = "SELL"; reason = f"PUMP THEN DUMP {y_pct:.1f}% yday"
-        # NEW pump then already fading - price below mid
         elif is_new and today_pct > 20 and price < mid:
             side = "SELL"; reason = "NEW pump fading below mid"
 
         # ===== BUY LOGIC - Dump -> Bounce =====
-        # NEW: dumped too much in 1 day, bounce coming - BEST BUY
         if side is None and is_new and today_pct < -25:
             side = "BUY"; reason = f"NEW dumped {today_pct:.1f}% today, bounce"
-        # DUMPED 2 DAYS: exhausted, bounce coming
         elif side is None and not is_new and today_pct < -20 and y_pct < -20:
             side = "BUY"; reason = f"DUMPED 2 DAYS {y_pct:.1f}% yday + {today_pct:.1f}% today, exhausted"
-        # BOUNCE: dumped yday, pumping today
         elif side is None and not is_new and today_pct > 20 and y_pct < -30:
             side = "BUY"; day_label = "Bounce"; reason = f"BOUNCE after {y_pct:.1f}% yday dump"
-        # DUMP THEN BOUNCING - price above mid
         elif side is None and not is_new and today_pct < -20 and y_pct < -20 and price > mid:
             side = "BUY"; reason = "Dump exhausted, above mid"
 
@@ -102,7 +104,6 @@ def run_once(reset_cooldowns=False):
             print(f"{sym} SKIP - {today_pct:.1f}% today, {y_pct} yday - no BUY/SELL setup")
             continue
 
-        # TP/SL
         if side == "SELL":
             sl = round(price * 1.10, 8)
             tp1 = round(price * 0.85, 8)
