@@ -1,5 +1,5 @@
 # V800 - Scan V800 - MEXC - BUY + SELL - Yesterday Check + Real Mid
-import json, os, requests
+import json, os, re, requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -27,6 +27,18 @@ def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
 
+def parse_pct(v):
+    # Handles: 67.2, "67.2", "+67.2% GAINER", "-55% LOSER", 0.67
+    if v is None: return None
+    if isinstance(v, (int, float)):
+        # MEXC sometimes gives 0.67 for 67%
+        if abs(v) < 2 and v != 0:
+            return v * 100
+        return float(v)
+    m = re.search(r'-?\d+\.?\d*', str(v))
+    if not m: return None
+    return float(m.group(0))
+
 def get_movers():
     r = requests.get("https://api.mexc.com/api/v3/ticker/24hr", timeout=20).json()
     print(f"MEXC raw type: {type(r)} len: {len(r) if isinstance(r, list) else r}")
@@ -35,17 +47,25 @@ def get_movers():
         return {}
     movers = {}
     for t in r:
-        sym = t['symbol']
-        if not sym.endswith("USDT"): continue
-        if sym in ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","DOGEUSDT"]: continue
+        sym_raw = t.get('symbol','')
+        # MEXC: RARE_USDT, also handle RAREUSDT
+        if "_USDT" in sym_raw:
+            sym = sym_raw.replace("_USDT","")
+        elif sym_raw.endswith("USDT"):
+            sym = sym_raw.replace("USDT","")
+        else:
+            continue
+        if sym in ["BTC","ETH","BNB","SOL","XRP","DOGE"]: continue
         try:
-            pct = float(t['priceChangePercent'])
+            pct = parse_pct(t.get('priceChangePercent'))
             price = float(t['lastPrice'])
             high = float(t['highPrice'])
             low = float(t['lowPrice'])
-        except: continue
+        except Exception as e:
+            continue
+        if pct is None: continue
         if abs(pct) >= 20:
-            movers[sym.replace("USDT","")] = {"pct": pct, "price": price, "symbol": sym, "high": high, "low": low}
+            movers[sym] = {"pct": pct, "price": price, "symbol": sym_raw, "high": high, "low": low}
     print(f"Found {len(movers)} movers >=20%")
     for k,v in movers.items():
         print(f"MOVER {k}: {v['pct']:.1f}% price {v['price']}")
@@ -57,7 +77,12 @@ def run_once(reset_cooldowns=False):
     history = load_json(HISTORY_FILE, {})
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
     yesterday_str = (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
-    yesterday_movers = history.get(yesterday_str, {})
+    # History can be {date: {SYM: 67.2}} OR {date: {SYM_USDT: "+67.2% GAINER"}} - handle both
+    raw_yday = history.get(yesterday_str, {})
+    yesterday_movers = {}
+    for k,v in raw_yday.items():
+        clean_k = k.replace("_USDT","").replace("USDT","")
+        yesterday_movers[clean_k] = parse_pct(v)
     print(f"Today {today_str} Yesterday {yesterday_str} Yday movers: {len(yesterday_movers)}")
     print(f"Yday sample: {list(yesterday_movers.items())[:5]}")
     print(f"Active loaded: {len(active)} Cooldowns loaded: {len(cooldowns)}")
@@ -80,7 +105,7 @@ def run_once(reset_cooldowns=False):
         day_label = "Day1" if is_new else "Day2+"
         reason = ""
 
-        # ===== SELL LOGIC - Fake Pump -> Dump =====
+        # ===== SELL =====
         if is_new and today_pct > 30:
             side = "SELL"; reason = "NEW pump"
         elif not is_new and today_pct > 30 and y_pct > 30:
@@ -90,15 +115,13 @@ def run_once(reset_cooldowns=False):
         elif is_new and today_pct > 20 and price < mid:
             side = "SELL"; reason = "NEW pump fading below mid"
 
-        # ===== BUY LOGIC - Dump -> Bounce =====
+        # ===== BUY =====
         if side is None and is_new and today_pct < -25:
             side = "BUY"; reason = f"NEW dumped {today_pct:.1f}% today, bounce"
         elif side is None and not is_new and today_pct < -20 and y_pct < -20:
             side = "BUY"; reason = f"DUMPED 2 DAYS {y_pct:.1f}% yday + {today_pct:.1f}% today, exhausted"
         elif side is None and not is_new and today_pct > 20 and y_pct < -30:
             side = "BUY"; day_label = "Bounce"; reason = f"BOUNCE after {y_pct:.1f}% yday dump"
-        elif side is None and not is_new and today_pct < -20 and y_pct < -20 and price > mid:
-            side = "BUY"; reason = "Dump exhausted, above mid"
 
         if side is None:
             print(f"{sym} SKIP - {today_pct:.1f}% today, {y_pct} yday - no BUY/SELL setup")
