@@ -1,4 +1,4 @@
-# V800 - SAFER - Volume + Confirmation - MEXC - BUY + SELL
+# V800 - FIXED - Cooldown expires + History fix
 import json, os, re, requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -85,8 +85,26 @@ def run_once(reset_cooldowns=False):
     active = load_json(ACTIVE_FILE, {})
     cooldowns = load_json(COOLDOWN_FILE, {}) if not reset_cooldowns else {}
     history = load_json(HISTORY_FILE, {})
-    today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-    yesterday_str = (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+    now = datetime.now(TZ)
+    today_str = now.strftime("%Y-%m-%d")
+    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # FIX 1 - Cooldown expires after 24h, don't block forever
+    fresh_cooldowns = {}
+    for k, v in cooldowns.items():
+        try:
+            t = datetime.fromisoformat(str(v).replace("Z","+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=TZ)
+            if (now - t).total_seconds() < 24*3600:
+                fresh_cooldowns[k] = v
+            else:
+                print(f"Cooldown expired for {k}, can signal again")
+        except:
+            fresh_cooldowns[k] = v
+    cooldowns = fresh_cooldowns
+    print(f"Active cooldowns after cleanup: {len(cooldowns)} - {list(cooldowns.keys())[:10]}")
+
     raw_yday = history.get(yesterday_str, {}) if isinstance(history, dict) else {}
     yesterday_movers = {}
     if isinstance(raw_yday, dict):
@@ -94,15 +112,21 @@ def run_once(reset_cooldowns=False):
             clean_k = k.replace("_USDT","").replace("USDT","")
             yesterday_movers[clean_k] = parse_pct(v)
     print(f"Today {today_str} Yday {yesterday_str} Yday movers: {len(yesterday_movers)}")
+
     movers = get_movers()
     if movers:
         history[today_str] = {k: v["pct"] for k,v in movers.items()}
         save_json(HISTORY_FILE, history)
     else:
         print("MEXC returned 0 movers - NOT overwriting history")
+
     for sym, data in movers.items():
-        if sym in active: continue
-        if sym in cooldowns: continue
+        if sym in active:
+            print(f"{sym} SKIP - Already active")
+            continue
+        if sym in cooldowns:
+            print(f"{sym} SKIP - In cooldown (signaled in last 24h)")
+            continue
         today_pct = data["pct"]
         price = data["price"]
         high = data["high"]
@@ -169,9 +193,9 @@ def run_once(reset_cooldowns=False):
             sl = round(price * 1.10, 8); tp1 = round(price * 0.85, 8); tp2 = round(price * 0.75, 8); runner = round(price * 0.60, 8); emoji = "\U0001F534"
         else:
             sl = round(price * 0.90, 8); tp1 = round(price * 1.15, 8); tp2 = round(price * 1.25, 8); runner = round(price * 1.40, 8); emoji = "\U0001F7E2"
-        signal = {"sym": sym, "side": side, "price": price, "pct": today_pct, "y_pct": y_pct, "mid": mid, "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner, "day": day_label, "reason": reason, "time": datetime.now(TZ).isoformat()}
+        signal = {"sym": sym, "side": side, "price": price, "pct": today_pct, "y_pct": y_pct, "mid": mid, "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner, "day": day_label, "reason": reason, "time": now.isoformat()}
         active[sym] = signal
-        cooldowns[sym] = datetime.now(TZ).isoformat()
+        cooldowns[sym] = now.isoformat()
         y_txt = "NEW" if is_new else f"{y_pct:.1f}% yday"
         msg = f"{emoji} <b>V800 {side} {sym}</b> - {day_label}\nToday: {today_pct:.1f}% | Yesterday: {y_txt}\nVol: ${vol:,.0f}\n{reason}\nPrice: {fmt(price)}\nMid: {fmt(mid)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
         send_telegram(msg)
