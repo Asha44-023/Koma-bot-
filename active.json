@@ -1,1 +1,32 @@
-{}
+{
+  "RARE": {
+    "sym": "RARE",
+    "side": "SHORT",
+    "price": 0.01509,
+    "pct": 77.11,
+    "y_pct": null,
+    "mid": 0.015765,
+    "sl": 0.016599,
+    "tp1": 0.0128265,
+    "tp2": 0.0113175,
+    "runner": 0.009054,
+    "day": "Day1",
+    "reason": "NEW pump + confirmation, -8.2% off High",
+    "time": "2026-11-16T13:45:35.379004+03:00"
+  },
+  "CASHCAT": {
+    "sym": "CASHCAT",
+    "side": "SHORT",
+    "price": 0.05021,
+    "pct": 27.400000000000002,
+    "y_pct": null,
+    "mid": 0.051665,
+    "sl": 0.055231,
+    "tp1": 0.0426785,
+    "tp2": 0.0376575,
+    "runner": 0.030126,
+    "day": "Day1",
+    "reason": "NEW pump fading below mid + pullback",
+    "time": "2026-11-16T13:45:35.379004+03:00"
+  }
+}
