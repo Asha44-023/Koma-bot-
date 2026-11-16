@@ -1,42 +1,33 @@
 name: Scan V800
 on:
   schedule:
-    - cron: '5,35 * * * *'
+    - cron: '35 * * * *'
   workflow_dispatch:
     inputs:
-      reset_cooldowns:
-        description: 'Clear active trades'
-        type: boolean
-        default: false
+      reset:
+        description: 'Reset cooldowns'
+        required: false
+        default: 'false'
 jobs:
   scan:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    concurrency:
-      group: v800
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pytz
-      - name: Run bot
+      - name: Install
+        run: pip install requests
+      - name: Run
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ "${{ inputs.reset_cooldowns }}" = "true" ]; then echo '{}' > active.json; echo '{}' > cooldown.json; fi
-          python bot.py --once
-      - name: Save
-        if: always()
+          RESET: ${{ github.event.inputs.reset }}
+        run: python bot.py
+      - name: Save history
         run: |
           git config user.name "bot"
-          git config user.email "bot@bot.local"
-          git pull --rebase || true
-          git add active.json cooldown.json movers_history.json || true
-          git commit -m "V800 run" || true
+          git config user.email "bot@bot.com"
+          git add movers_history.json active.json cooldown.json || true
+          git commit -m "save history" || true
           git push || true
