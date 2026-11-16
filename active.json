@@ -1,1 +1,17 @@
-{}
+{
+  "RARE": {
+    "sym": "RARE",
+    "side": "SHORT",
+    "price": 0.01468,
+    "pct": 72.3,
+    "y_pct": null,
+    "mid": 0.012425,
+    "sl": 0.016148,
+    "tp1": 0.012478,
+    "tp2": 0.01101,
+    "runner": 0.008808,
+    "day": "Day1",
+    "reason": "NEW pump + confirmation, -10.7% off High",
+    "time": "2026-11-16T14:00:47.747483+03:00"
+  }
+}
