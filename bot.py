@@ -1,4 +1,4 @@
-# V800 - FIXED - Cooldown expires + History fix
+# V800 - NO COOLDOWN FILE - Never gets stuck
 import json, os, re, requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 TZ = ZoneInfo("Africa/Nairobi")
 ACTIVE_FILE = "active.json"
 HISTORY_FILE = "movers_history.json"
-COOLDOWN_FILE = "cooldown.json"
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT_ID") or os.getenv("CHAT_ID")
@@ -81,29 +80,28 @@ def get_movers():
         print(f"MOVER {k}: {v['pct']:.1f}% price {v['price']} vol ${v['vol']:,.0f}")
     return movers
 
-def run_once(reset_cooldowns=False):
+def run_once():
     active = load_json(ACTIVE_FILE, {})
-    cooldowns = load_json(COOLDOWN_FILE, {}) if not reset_cooldowns else {}
     history = load_json(HISTORY_FILE, {})
     now = datetime.now(TZ)
     today_str = now.strftime("%Y-%m-%d")
     yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # FIX 1 - Cooldown expires after 24h, don't block forever
-    fresh_cooldowns = {}
-    for k, v in cooldowns.items():
+    # Active expires after 24h - NO cooldown file
+    fresh_active = {}
+    for k, v in active.items():
         try:
-            t = datetime.fromisoformat(str(v).replace("Z","+00:00"))
+            t = datetime.fromisoformat(str(v.get("time","")).replace("Z","+00:00"))
             if t.tzinfo is None:
                 t = t.replace(tzinfo=TZ)
             if (now - t).total_seconds() < 24*3600:
-                fresh_cooldowns[k] = v
+                fresh_active[k] = v
             else:
-                print(f"Cooldown expired for {k}, can signal again")
+                print(f"Active expired for {k}, can signal again")
         except:
-            fresh_cooldowns[k] = v
-    cooldowns = fresh_cooldowns
-    print(f"Active cooldowns after cleanup: {len(cooldowns)} - {list(cooldowns.keys())[:10]}")
+            fresh_active[k] = v
+    active = fresh_active
+    print(f"Active after cleanup: {len(active)} - {list(active.keys())[:10]}")
 
     raw_yday = history.get(yesterday_str, {}) if isinstance(history, dict) else {}
     yesterday_movers = {}
@@ -112,20 +110,15 @@ def run_once(reset_cooldowns=False):
             clean_k = k.replace("_USDT","").replace("USDT","")
             yesterday_movers[clean_k] = parse_pct(v)
     print(f"Today {today_str} Yday {yesterday_str} Yday movers: {len(yesterday_movers)}")
-
     movers = get_movers()
     if movers:
         history[today_str] = {k: v["pct"] for k,v in movers.items()}
         save_json(HISTORY_FILE, history)
     else:
         print("MEXC returned 0 movers - NOT overwriting history")
-
     for sym, data in movers.items():
         if sym in active:
-            print(f"{sym} SKIP - Already active")
-            continue
-        if sym in cooldowns:
-            print(f"{sym} SKIP - In cooldown (signaled in last 24h)")
+            print(f"{sym} SKIP - Already active in last 24h")
             continue
         today_pct = data["pct"]
         price = data["price"]
@@ -195,16 +188,12 @@ def run_once(reset_cooldowns=False):
             sl = round(price * 0.90, 8); tp1 = round(price * 1.15, 8); tp2 = round(price * 1.25, 8); runner = round(price * 1.40, 8); emoji = "\U0001F7E2"
         signal = {"sym": sym, "side": side, "price": price, "pct": today_pct, "y_pct": y_pct, "mid": mid, "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner, "day": day_label, "reason": reason, "time": now.isoformat()}
         active[sym] = signal
-        cooldowns[sym] = now.isoformat()
         y_txt = "NEW" if is_new else f"{y_pct:.1f}% yday"
         msg = f"{emoji} <b>V800 {side} {sym}</b> - {day_label}\nToday: {today_pct:.1f}% | Yesterday: {y_txt}\nVol: ${vol:,.0f}\n{reason}\nPrice: {fmt(price)}\nMid: {fmt(mid)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
         send_telegram(msg)
         print(f"{sym} {side} - {reason}")
     save_json(ACTIVE_FILE, active)
-    save_json(COOLDOWN_FILE, cooldowns)
     print(f"Done - Active: {len(active)}")
 
 if __name__ == "__main__":
-    import sys
-    reset = "--reset" in sys.argv or os.getenv("RESET") == "true"
-    run_once(reset_cooldowns=reset)
+    run_once()
