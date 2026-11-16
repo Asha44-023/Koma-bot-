@@ -6,7 +6,7 @@ TELEGRAM_TOKEN=os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT=os.getenv("TG_CHAT") or os.getenv("TELEGRAM_CHAT_ID")
 ACTIVE_FILE="active.json";COOLDOWN_FILE="cooldown.json";HISTORY_FILE="movers_history.json"
 session=requests.Session()
-TAG="V700-CYCLE-MACRO+15M"
+TAG="V800-PUMP-DUMP"
 GREEN="\033[92m"; RED="\033[91m"; YELLOW="\033[93m"; CYAN="\033[96m"; RESET="\033[0m"; BOLD="\033[1m"
 
 def get_time():return datetime.now(EAT).strftime("%Y-%m-%d %H:%M EAT")
@@ -91,14 +91,9 @@ def get_live(s):
    if lp and float(lp)>0:return float(lp)
   except:pass
  return None
-def calc_atr(d1,period=14):
- try:
-  h=d1["h"];l=d1["l"];c=d1["c"];tr=[]
-  for i in range(1,len(c)):tr.append(max(h[i]-l[i],abs(h[i]-c[i-1]),abs(l[i]-c[i-1])))
-  return sum(tr[-period:])/period if len(tr)>=period else c[-1]*0.03
- except:return 0.0
 
 def get_mexc_movers():
+    # Returns {sym: {"label": "+48.4% GAINER", "chg": 48.4}}
     movers={}
     try:
         r=session.get("https://contract.mexc.com/api/v1/contract/ticker",timeout=15).json()
@@ -120,179 +115,118 @@ def get_mexc_movers():
                 parsed.append((sym,chg,vol_usd))
             except: continue
         gainers=[x for x in parsed if 30 <= x[1] <= 300]
-        losers=[x for x in parsed if -80 <= x[1] <= -30]
+        losers=[x for x in parsed if -90 <= x[1] <= -30]
         gainers=sorted(gainers, key=lambda x: x[1], reverse=True)[:5]
         losers=sorted(losers, key=lambda x: x[1])[:5]
-        for sym,chg,_ in gainers: movers[sym]=f"+{chg:.1f}% GAINER"
-        for sym,chg,_ in losers: movers[sym]=f"{chg:.1f}% LOSER"
-        print(f"MOVERS TODAY: {movers}")
+        for sym,chg,_ in gainers: movers[sym]={"label":f"+{chg:.1f}% GAINER","chg":chg}
+        for sym,chg,_ in losers: movers[sym]={"label":f"{chg:.1f}% LOSER","chg":chg}
+        print(f"MOVERS TODAY: { {k:v['label'] for k,v in movers.items()} }")
         try:
             hist=load_json(HISTORY_FILE,{})
-            hist[get_today()]=movers
+            # Save as {sym: chg} for runner check tomorrow
+            hist[get_today()]={k:v["chg"] for k,v in movers.items()}
             for k in list(hist.keys()):
                 if k < get_2days_ago(): del hist[k]
             atomic_save(HISTORY_FILE,hist)
         except Exception as e: print(f"history err {e}")
     except Exception as e: print(f"movers err {e}")
     return movers
+
 def get_yesterday_movers():
+    # Returns {sym: chg_yesterday}
     try:
         hist=load_json(HISTORY_FILE,{})
-        y=hist.get(get_yesterday(),{}); d2=hist.get(get_2days_ago(),{})
+        y=hist.get(get_yesterday(),{})
+        d2=hist.get(get_2days_ago(),{})
         out={}
-        for sym,label in y.items(): out[sym]=f"YESTERDAY {label}"
-        for sym,label in d2.items():
-            if sym not in out: out[sym]=f"2DAYS {label}"
+        # hist values can be old format {sym: "label"} or new {sym: chg}
+        def parse_chg(v):
+            if isinstance(v,(int,float)): return float(v)
+            try:
+                # "+48.4% GAINER" -> 48.4
+                s=str(v).replace("%","").replace("GAINER","").replace("LOSER","").strip()
+                return float(s.split()[0])
+            except: return 0
+        for sym,v in y.items(): out[sym]=parse_chg(v)
+        for sym,v in d2.items():
+            if sym not in out: out[sym]=parse_chg(v)
         return out
     except: return {}
 
-# ================= V700 - CYCLE PHASE =================
-def get_cycle_phase(sym, live):
-    # Uses Daily (last 90 days) to decide: MARKUP / DISTRIBUTION / MARKDOWN / ACCUMULATION
-    # This is the "perfect logic" - macro decides direction.
+# ================= V800 - PUMP / DUMP - NO BOS, NO STRUCTURE =================
+def get_daily_mid(sym):
+    # Only thing we need from Daily: mid of 90d range
     try:
         d1=kl(sym,"Day1",min_candles=60)
-        if not d1 or len(d1["c"])<60: return "UNKNOWN","not enough daily data"
-        h=d1["h"]; l=d1["l"]; c=d1["c"]
-        # Last 90d high/low, last 30d high/low
+        if not d1 or len(d1["c"])<60: return None
+        h=d1["h"]; l=d1["l"]
         high_90=max(h[-90:]); low_90=min(l[-90:])
-        high_30=max(h[-30:]); low_30=min(l[-30:])
-        # Where is price vs range?
-        # 1. MARKDOWN: price broke below 30d low AND below 50% of 90d range, and making lower highs
-        # Example KAVA: high_90=0.084, low_30=0.06, live=0.026 -> MARKDOWN
-        range_mid = (high_90+low_90)/2
-        # Check for lower highs on daily last 10 candles
-        # Find last 3 daily swings
-        # Simple: last 10 daily highs are declining?
-        last_highs = h[-10:]
-        lower_highs = last_highs[-1] < last_highs[-5] < last_highs[0]
-        # Distribution: price chopping in top 30% of range for >21 days, not breaking out
-        top_zone_low = high_90 - (high_90-low_90)*0.30
-        in_top_zone = all(x > top_zone_low*0.85 for x in c[-21:])
-        range_21 = max(h[-21:]) - min(l[-21:])
-        is_flat_21 = range_21 / c[-1] < 0.25  # less than 25% range in 21 days = flat
-        if live < low_30 and live < range_mid and lower_highs:
-            return "MARKDOWN", f"Daily broke 30d low {fmt(low_30)} | Live {fmt(live)} < mid {fmt(range_mid)} | Lower Highs - SHORTS ONLY"
-        if live < low_30 and live < range_mid:
-            return "MARKDOWN", f"Daily broke 30d low {fmt(low_30)} | Live {fmt(live)} - SHORTS ONLY"
-        if in_top_zone and is_flat_21 and lower_highs:
-            return "DISTRIBUTION", f"Flat top 21d {fmt(min(l[-21:]))}-{fmt(max(h[-21:]))} + Lower Highs - NO TRADE (whale selling)"
-        if in_top_zone and is_flat_21:
-            return "DISTRIBUTION", f"Flat top 21d - NO TRADE"
-        # Markup: price above mid, making higher highs
-        last_lows = l[-10:]
-        higher_lows = last_lows[-1] > last_lows[-5]
-        if live > range_mid and higher_lows:
-            return "MARKUP", f"Daily above mid {fmt(range_mid)} + Higher Lows - LONGS ONLY"
-        if live > range_mid:
-            return "MARKUP", f"Daily above mid {fmt(range_mid)} - LONGS ONLY"
-        # Accumulation: price near 90d low, flat
-        if live < low_90*1.20 and is_flat_21:
-            return "ACCUMULATION", f"Near 90d low {fmt(low_90)} flat - NO TRADE, wait for markup"
-        return "MARKUP" if live > range_mid else "MARKDOWN", f"Fallback live {fmt(live)} vs mid {fmt(range_mid)}"
-    except Exception as e:
-        return "UNKNOWN", f"phase err {e}"
+        mid=(high_90+low_90)/2
+        return mid, high_90, low_90
+    except: return None
 
-def get_swings_15m(d):
-    h=d["h"]; l=d["l"]; out=[]
-    for i in range(2,len(h)-2):
-        if h[i]==max(h[i-2:i+3]): out.append((i,"H",h[i]))
-        if l[i]==min(l[i-2:i+3]): out.append((i,"L",l[i]))
-    return out
+def v800_signal(sym, live, chg_today, chg_yest, label):
+    """
+    YOUR RULE:
+    Pumped +30 to +300%:
+      - live ABOVE mid = HAS TO PUMP MORE -> BUY
+      - live BELOW mid = Fake pump, HAS TO DUMP -> SELL
+    Dumped -30 to -90%:
+      - live BELOW mid = HAS TO DUMP MORE -> SELL
+      - live ABOVE mid = Fake dump, HAS TO PUMP -> BUY
+    Runner: today + yesterday same direction = RUNNER CONFIRMED, stronger
+    """
+    mid_data=get_daily_mid(sym)
+    if not mid_data:
+        return None, f"No daily mid for {sym} - skip"
+    mid, high_90, low_90 = mid_data
+    above_mid = live > mid
 
-def get_15m_entry(d15, live, allowed_side):
-    # Returns structure dict if 15M confirms allowed_side with Sweep+BOS or BOS continuation + pullback to OB
-    try:
-        if not d15 or len(d15["c"])<40: return None
-        h=d15["h"]; l=d15["l"]; c=d15["c"]; o=d15["o"]
-        sw=get_swings_15m(d15)
-        if len(sw)<4: return None
-        # Try to find BOS in last 12 candles (3h) in allowed direction
-        if allowed_side=="BUY":
-            lows=[(i,p) for i,t,p in sw if t=="L"][-3:]
-            highs=[(i,p) for i,t,p in sw if t=="H"][-3:]
-            if len(lows)<2 or len(highs)<2: return None
-            prior_low=lows[-2][1]
-            sweep_idx=None; sweep_price=None
-            for i in range(max(0,len(c)-80), len(c)):
-                if l[i] < prior_low and c[i] > prior_low:
-                    sweep_idx=i; sweep_price=l[i]; break
-            # If no sweep, try continuation: BOS without sweep = still valid in MARKUP
-            bos_price=highs[-1][1] if highs else None
-            bos_idx=None
-            start = sweep_idx if sweep_idx is not None else max(0,len(c)-30)
-            for i in range(start, len(c)):
-                if c[i] > bos_price:
-                    bos_idx=i; break
-            if bos_idx is None or bos_idx < len(c)-12: return None
-            ob_low=None; ob_high=None
-            for i in range(bos_idx, max(start, bos_idx-8), -1):
-                if c[i] < o[i]:
-                    ob_low=min(l[max(0,i-1):i+2]); ob_high=max(h[max(0,i-1):i+2]); break
-            if ob_low is None:
-                ob_low=min(l[bos_idx-3:bos_idx]); ob_high=max(h[bos_idx-3:bos_idx])
-            atr=calc_atr(d15)
-            if abs(live-(ob_low+ob_high)/2) > atr*4: return None
-            return {"side":"BUY","sweep":sweep_price,"bos":bos_price,"zone_low":ob_low,"zone_high":ob_high,"debug":f"15M Sweep {fmt(sweep_price) if sweep_price else 'none'} BOS > {fmt(bos_price)} OB {fmt(ob_low)}-{fmt(ob_high)}"}
-        else: # SELL
-            highs=[(i,p) for i,t,p in sw if t=="H"][-3:]
-            lows=[(i,p) for i,t,p in sw if t=="L"][-3:]
-            if len(highs)<2 or len(lows)<2: return None
-            prior_high=highs[-2][1]
-            sweep_idx=None; sweep_price=None
-            for i in range(max(0,len(c)-80), len(c)):
-                if h[i] > prior_high and c[i] < prior_high:
-                    sweep_idx=i; sweep_price=h[i]; break
-            bos_price=lows[-1][1] if lows else None
-            bos_idx=None
-            start = sweep_idx if sweep_idx is not None else max(0,len(c)-30)
-            for i in range(start, len(c)):
-                if c[i] < bos_price:
-                    bos_idx=i; break
-            if bos_idx is None or bos_idx < len(c)-12: return None
-            ob_low=None; ob_high=None
-            for i in range(bos_idx, max(start, bos_idx-8), -1):
-                if c[i] > o[i]:
-                    ob_low=min(l[max(0,i-1):i+2]); ob_high=max(h[max(0,i-1):i+2]); break
-            if ob_low is None:
-                ob_low=min(l[bos_idx-3:bos_idx]); ob_high=max(h[bos_idx-3:bos_idx])
-            atr=calc_atr(d15)
-            if abs(live-(ob_low+ob_high)/2) > atr*4: return None
-            return {"side":"SELL","sweep":sweep_price,"bos":bos_price,"zone_low":ob_low,"zone_high":ob_high,"debug":f"15M Sweep {fmt(sweep_price) if sweep_price else 'none'} BOS < {fmt(bos_price)} OB {fmt(ob_low)}-{fmt(ob_high)}"}
-    except Exception as e:
-        print(f"15m entry err {e}"); return None
+    # Runner check
+    is_runner=False
+    runner_txt=""
+    if chg_yest is not None:
+        if chg_today>0 and chg_yest>0:
+            is_runner=True; runner_txt=f"RUNNER CONFIRMED +{chg_today:.1f}% TODAY + +{chg_yest:.1f}% YESTERDAY"
+        elif chg_today<0 and chg_yest<0:
+            is_runner=True; runner_txt=f"RUNNER CONFIRMED {chg_today:.1f}% TODAY + {chg_yest:.1f}% YESTERDAY"
 
-def v700_signal(sym, live, mover_label):
-    phase, phase_reason = get_cycle_phase(sym, live)
-    if phase in ["DISTRIBUTION","ACCUMULATION","UNKNOWN"]:
-        return None, f"PHASE {phase} | {phase_reason} | NO TRADE"
-    allowed = "BUY" if phase=="MARKUP" else "SELL"
-    d15=kl(sym,"Min15",min_candles=50)
-    d5=kl(sym,"Min5",min_candles=20)
-    if not d15 or not d5: return None, f"PHASE {phase} | missing 15M/5M"
-    struct=get_15m_entry(d15, live, allowed)
-    if not struct: return None, f"PHASE {phase} | {phase_reason} | No 15M {allowed} BOS yet - waiting pullback"
-    zone_low, zone_high = struct["zone_low"], struct["zone_high"]
-    in_zone = zone_low*0.99 <= live <= zone_high*1.01
-    if not in_zone:
-        return None, f"PHASE {phase} | 15M {struct['debug']} | waiting pullback to OB live {fmt(live)} zone {fmt(zone_low)}-{fmt(zone_high)}"
-    h=d5["h"]; l=d5["l"]; c=d5["c"]; o=d5["o"]; v=d5["v"]
-    body=abs(c[-1]-o[-1]); rng=h[-1]-l[-1] if h[-1]>l[-1] else 1
-    body_pct=body/rng if rng>0 else 0
-    avg_vol=sum(v[-6:-1])/5 if len(v)>=6 else 1
-    vol_ok = v[-1] > avg_vol*1.3 if avg_vol>0 else False
-    if body_pct < 0.5: return None, f"PHASE {phase} | in OB but 5M body {body_pct*100:.0f}% <50% weak"
-    if not vol_ok: return None, f"PHASE {phase} | in OB but 5M vol low"
-    atr=calc_atr(d15)
-    if allowed=="BUY":
-        sl=min(l[-6:]) - atr*0.2; entry=live
-        tp1=round_level(entry*1.08); tp2=round_level(entry*1.15); tp3=round_level(entry*1.25)
-        reason=f"V700 {phase} LONG | {mover_label} | {phase_reason} | {struct['debug']} | 5M body {body_pct*100:.0f}%"
+    # Decide HAS TO PUMP or HAS TO DUMP
+    if chg_today >= 30:
+        # PUMPED
+        if above_mid:
+            side="BUY"; verdict="HAS TO PUMP MORE"
+            reason=f"V800 PUMPED +{chg_today:.1f}% | Live {fmt(live)} ABOVE Mid {fmt(mid)} | Real Pump | {verdict}"
+        else:
+            side="SELL"; verdict="HAS TO DUMP"
+            reason=f"V800 PUMPED +{chg_today:.1f}% | Live {fmt(live)} BELOW Mid {fmt(mid)} | Fake Pump | {verdict}"
+    elif chg_today <= -30:
+        # DUMPED
+        if not above_mid:
+            side="SELL"; verdict="HAS TO DUMP MORE"
+            reason=f"V800 DUMPED {chg_today:.1f}% | Live {fmt(live)} BELOW Mid {fmt(mid)} | Real Dump | {verdict}"
+        else:
+            side="BUY"; verdict="HAS TO PUMP"
+            reason=f"V800 DUMPED {chg_today:.1f}% | Live {fmt(live)} ABOVE Mid {fmt(mid)} | Fake Dump | {verdict}"
     else:
-        sl=max(h[-6:]) + atr*0.2; entry=live
-        tp1=round_level(entry*0.92); tp2=round_level(entry*0.85); tp3=round_level(entry*0.75)
-        reason=f"V700 {phase} SHORT | {mover_label} | {phase_reason} | {struct['debug']} | 5M body {body_pct*100:.0f}%"
-    return {"side":allowed,"entry":entry,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":reason,"is_mover":True,"mover_label":f"{mover_label} | {phase}"}, reason
+        return None, "Not a mover +-30%"
+
+    if is_runner:
+        reason+=f" | {runner_txt} | HOLD FOR WEEK - Small dump = pullback, not reversal"
+    else:
+        reason+=f" | {label} | New Face - Day 1"
+
+    # Entry = live now, no waiting for pullback / BOS
+    entry=live
+    if side=="BUY":
+        sl=round_level(entry*0.90)  # -10% SL, runner can dip small
+        tp1=round_level(entry*1.15); tp2=round_level(entry*1.30); tp3=round_level(entry*1.50)
+    else:
+        sl=round_level(entry*1.10)  # +10% SL
+        tp1=round_level(entry*0.85); tp2=round_level(entry*0.70); tp3=round_level(entry*0.50)
+
+    sig={"side":side,"entry":entry,"sl":sl,"tp1":tp1,"tp2":tp2,"tp3":tp3,"reason":reason,"is_mover":True,"mover_label":f"{label} | {verdict} | {'RUNNER' if is_runner else 'DAY1'}"}
+    return sig, reason
 
 def check_exits():
     for sym in list(ACTIVE.keys()):
@@ -305,32 +239,30 @@ def check_exits():
             if side=="BUY" and live<=sl: reason="SL HIT"
             if side=="SELL" and live>=sl: reason="SL HIT"
             if side=="BUY" and live>=pos["tp1"] and not pos.get("tp1_hit"):
-                pos["tp1_hit"]=True; pos["sl"]=entry; save_a(); tg(f"✅ TP1 HIT {sym} +8% - SL to BE")
+                pos["tp1_hit"]=True; pos["sl"]=entry; save_a(); tg(f"✅ TP1 HIT {sym} +15% - SL to BE")
             if side=="SELL" and live<=pos["tp1"] and not pos.get("tp1_hit"):
-                pos["tp1_hit"]=True; pos["sl"]=entry; save_a(); tg(f"✅ TP1 HIT {sym} +8% - SL to BE")
+                pos["tp1_hit"]=True; pos["sl"]=entry; save_a(); tg(f"✅ TP1 HIT {sym} +15% - SL to BE")
             if reason:
                 tg(format_exit_msg(sym, side, live, reason, pnl, entry, sl))
                 del ACTIVE[sym]; save_a()
         except Exception as e: print(f"exit err {sym} {e}")
 
 def run_once():
-    print(f"[{get_time()}] | {TAG} | CYCLE PHASE + 15M ENTRY")
+    print(f"[{get_time()}] | {TAG} | PUMP/DUMP - NO BOS")
     print("-"*100)
     check_exits()
     movers_today=get_mexc_movers()
     movers_yest=get_yesterday_movers()
-    combined={}
-    for k,v in movers_yest.items(): combined[k]=v
-    for k,v in movers_today.items():
-        if k in combined: combined[k]=f"{v} + {combined[k]}"
-        else: combined[k]=v
-    print(f"MOVERS COMBINED: {combined}")
+    print(f"YESTERDAY: {movers_yest}")
     signals=[]
-    for sym,label in combined.items():
+    # Only today's movers give signals - everyday new gainer/loser
+    for sym,data in movers_today.items():
         if sym in ACTIVE: print(f"{sym} already in trade, skip"); continue
         live=get_live(sym)
         if not live: print(f"{sym} no live"); continue
-        sig,msg=v700_signal(sym, live, label)
+        chg_today=data["chg"]; label=data["label"]
+        chg_yest=movers_yest.get(sym)
+        sig,msg=v800_signal(sym, live, chg_today, chg_yest, label)
         print(f"{sym} live={fmt(live)} | {msg}")
         if sig:
             ACTIVE[sym]={"side":sig["side"],"entry":sig["entry"],"sl":sig["sl"],"tp1":sig["tp1"],"tp2":sig["tp2"],"tp3":sig["tp3"],"reason":sig["reason"]}
@@ -343,7 +275,6 @@ def main():
         ACTIVE.clear(); COOLDOWN.clear(); COOLDOWN.update({"daily_pnl":0.0,"last_day":get_today()}); save_a(); atomic_save(COOLDOWN_FILE,COOLDOWN)
     if args.once:
         run_once(); return
-    # RENDER MODE: loop forever every 15 min - solves GitHub cron problem
     while True:
         try: run_once()
         except Exception as e: print(f"loop err {e}")
