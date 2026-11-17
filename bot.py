@@ -1,7 +1,8 @@
-# V900.3 FINAL - Pumped vs Shed Logic - BOTH WAYS
+# V900.3 FINAL - Pumped vs Shed Logic - BOTH WAYS - BEST ONLY
 # Small +150% / Mid +100% / Big +60%
 # SHORT: Pumped hit, shed NOT done yet -> short the remaining shed
 # LONG: Pumped hit, shed DONE + overshoot -> long the bounce
+# BEST ONLY: Group first (Big > Mid > Small), then Net, then Vol - No score
 # V900.2 filters kept: Days-Since-Spike >=2, Entry Zone, 7-day expiry
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT
 MIN_VOLUME = 5000000
 MAX_ACTIVE_DAYS = 7
 WARNING_DAY = 5
+MAX_SIGNALS_PER_SCAN = 1
+GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 
@@ -162,7 +165,7 @@ def analyze_outcome(sig, cur, days):
             next_sig = "WAIT - Shed never started properly | Next: Ignore until fresh pump +50% from here, then re-evaluate"
         else:
             next_sig = "NO TRADE - Chop / Invalidated | Next: Move on, ignore coin until new pump"
-    else: # LONG
+    else:
         low_7d = sig.get("low_7d", entry)
         if cur <= low_7d or cur <= entry * 0.95:
             next_sig = "INVALIDATED - DO NOT RE-LONG | Broke below low, dump won"
@@ -196,7 +199,7 @@ def analyze_sl(sig, cur, days):
             cause = "SL hit on wick / volatility - price spiked to SL then fell back"
             p_pump_again, p_dump, p_chop = 35, 40, 25
             next_sig = "WICK SL - Can re-short on bounce\nNext: Wait for bounce +10% to entry, if it rejects, re-short with same SL."
-    else: # LONG SL
+    else:
         below_low_pct = (low_7d - cur) / low_7d * 100 if low_7d > 0 else 0
         if cur <= low_7d:
             cause = f"Invalidated - price broke below 7d low (-{below_low_pct:.1f}% below low). Dump won, sellers in control. Long thesis dead."
@@ -298,6 +301,7 @@ def run_once():
     mexc = get_mexc_perps()
     print(f"MEXC perps: {len(mexc)} | Global: {len(global_data)}")
     active = check_active_tps(active, mexc, global_data)
+    candidates = []
     for sym, m in mexc.items():
         if sym in active:
             print(f"{sym} SKIP - Already active")
@@ -328,26 +332,21 @@ def run_once():
             continue
         side = None
         reason = ""
-        # === V900.3 BOTH WAYS ===
         if pumped >= pump_thresh:
             days_ago, spike_pct, daily_closes = days_since_spike(spark)
             print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%)")
             if days_ago < 2:
-                print(f"{sym} SKIP V900.2 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
+                print(f"{sym} SKIP V900.3 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
                 continue
             if shed < expected_shed:
-                # SHORT - dump not done yet
                 side = "SHORT"
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | No 1-day spike, grind pump, cooled"
             else:
-                # LONG - dump DONE, now buy bounce - only if still above low
                 if net <= 0:
                     print(f"{sym} SKIP LONG - Net {net:.1f}% <= 0, broke below 7d low, dead coin")
                     continue
-                # Don't LONG if it already bounced a lot from the bottom of shed
-                # Shed bottom = Now is the low point of the dump, so LONG is fresh
                 side = "LONG"
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
@@ -355,7 +354,6 @@ def run_once():
         if side is None:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
-        # === SL / TP - Mirrored ===
         entry_price = price_exec
         entry_high = round(price_exec * 1.02, 8)
         entry_low = round(price_exec * 0.98, 8)
@@ -366,46 +364,68 @@ def run_once():
             tp2 = round(price_exec * (1 - expected_shed/100), 8)
             runner = round(price_exec * (1 - (expected_shed/100)*1.5), 8)
             emoji = "🔴"
-        else: # LONG - mirror: TPs are + bounce, SL -10%
+        else:
             sl = round(price_exec * 0.90, 8)
             tp1 = round(price_exec * (1 + (expected_shed/100)*0.5), 8)
             tp2 = round(price_exec * (1 + expected_shed/100), 8)
             runner = round(price_exec * (1 + (expected_shed/100)*1.5), 8)
             emoji = "🟢"
-        signal = {
+        candidates.append({
             "sym": sym, "side": side, "price": entry_price,
             "entry_high": entry_high, "entry_low": entry_low,
-            "valid_until": valid_until.isoformat(),
+            "valid_until": valid_until,
             "pumped": pumped, "shed": shed, "net": net,
-            "cap_at_low": cap_at_low, "group": group,
+            "cap_at_low": cap_at_low, "cap_now": cap_now, "group": group,
             "low_7d": low_7d, "high_7d": high_7d,
             "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner,
-            "reason": reason, "time": now.isoformat(), "warned_5d": False,
-            "days_since_spike": days_ago if 'days_ago' in locals() else 99,
-            "spike_pct": spike_pct if 'spike_pct' in locals() else 0
+            "reason": reason, "emoji": emoji,
+            "vol": max(global_vol, vol_local),
+            "days_ago": days_ago, "spike_pct": spike_pct,
+            "expected_shed": expected_shed
+        })
+    # === V900.3 BEST ONLY - Same as manual ranking ===
+    # Sort by: Group first, then Net, then Vol - No score
+    if candidates:
+        candidates.sort(key=lambda x: (GROUP_RANK.get(x["group"], 0), x["net"], x["vol"]), reverse=True)
+        best = candidates[0]
+        print(f"BEST: {best['sym']} {best['group']} Net +{best['net']:.1f}% Vol ${best['vol']:,.0f} - sending, {len(candidates)-1} others skipped")
+        for c in candidates[1:]:
+            print(f"SKIPPED - {c['sym']} {c['group']} Net +{c['net']:.1f}% Vol ${c['vol']:,.0f} - weaker than {best['sym']}")
+        sym = best["sym"]
+        signal = {
+            "sym": sym, "side": best["side"], "price": best["price"],
+            "entry_high": best["entry_high"], "entry_low": best["entry_low"],
+            "valid_until": best["valid_until"].isoformat(),
+            "pumped": best["pumped"], "shed": best["shed"], "net": best["net"],
+            "cap_at_low": best["cap_at_low"], "group": best["group"],
+            "low_7d": best["low_7d"], "high_7d": best["high_7d"],
+            "sl": best["sl"], "tp1": best["tp1"], "tp2": best["tp2"], "runner": best["runner"],
+            "reason": best["reason"], "time": now.isoformat(), "warned_5d": False,
+            "days_since_spike": best["days_ago"],
+            "spike_pct": best["spike_pct"]
         }
         active[sym] = signal
-        exp_days = EXPECTED_DAYS.get(group, "3-5 days")
+        exp_days = EXPECTED_DAYS.get(best["group"], "3-5 days")
         msg = (
-            f"{emoji} <b>V900.3 PERP {side} {sym}</b> - {group}\n"
+            f"{best['emoji']} <b>V900.3 PERP {best['side']} {sym}</b> - {best['group']} - BEST SIGNAL\n"
             f"Expected to TP2: {exp_days}\n"
-            f"Cap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\n"
-            f"Pumped: +{pumped:.1f}% (Need +{pump_thresh}%)\n"
-            f"Shed so far: -{shed:.1f}% (Expected -{expected_shed}%)\n"
-            f"Net: +{net:.1f}%\n"
-            f"Low 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\n"
-            f"Global Vol: ${max(global_vol, vol_local):,.0f}\n"
-            f"{reason}\n"
-            f"\n🎯 <b>ENTER AT: {fmt(entry_price)}</b>\n"
-            f"Entry Zone: {fmt(entry_low)} - {fmt(entry_high)}\n"
-            f"Valid Until: {valid_until.strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
-            f"SL: {fmt(sl)}\n"
-            f"TP1: {fmt(tp1)}\n"
-            f"TP2: {fmt(tp2)}\n"
-            f"Runner: {fmt(runner)}"
+            f"Cap at Low: ${best['cap_at_low']/1e6:.1f}M (Now ${best['cap_now']/1e6:.1f}M)\n"
+            f"Pumped: +{best['pumped']:.1f}%\n"
+            f"Shed so far: -{best['shed']:.1f}% (Expected -{best['expected_shed']}%)\n"
+            f"Net: +{best['net']:.1f}%\n"
+            f"Low 7d: {fmt(best['low_7d'])} | High 7d: {fmt(best['high_7d'])}\n"
+            f"Global Vol: ${best['vol']:,.0f}\n"
+            f"{best['reason']}\n"
+            f"\n🎯 <b>ENTER AT: {fmt(best['price'])}</b>\n"
+            f"Entry Zone: {fmt(best['entry_low'])} - {fmt(best['entry_high'])}\n"
+            f"Valid Until: {best['valid_until'].strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
+            f"SL: {fmt(best['sl'])}\n"
+            f"TP1: {fmt(best['tp1'])}\n"
+            f"TP2: {fmt(best['tp2'])}\n"
+            f"Runner: {fmt(best['runner'])}"
         )
         send_telegram(msg)
-        print(f"{sym} {side} - {reason} | ENTER AT {entry_price}")
+        print(f"{sym} {best['side']} - BEST SIGNAL SENT")
     save_json(ACTIVE_FILE, active)
     print(f"Done - Active: {len(active)}")
 
