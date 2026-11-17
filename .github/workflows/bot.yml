@@ -1,11 +1,11 @@
-name: Scan V800
+name: Scan V900
 on:
   schedule:
-    - cron: '35 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       reset:
-        description: 'Reset cooldowns'
+        description: 'Reset active signals'
         required: false
         default: 'false'
 jobs:
@@ -18,6 +18,9 @@ jobs:
           python-version: '3.11'
       - name: Install
         run: pip install requests
+      - name: Reset if requested
+        if: github.event.inputs.reset == 'true'
+        run: rm -f active.json movers_history.json || true
       - name: Run
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -29,6 +32,6 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          git add movers_history.json active.json cooldown.json || true
+          git add active.json movers_history.json || true
           git commit -m "save history" || true
           git push || true
