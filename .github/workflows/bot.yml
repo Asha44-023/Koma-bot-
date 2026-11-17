@@ -1,4 +1,4 @@
-name: V900 Scan Every 1 Hour
+name: V900.3 Scan Every 1 Hour
 
 on:
   schedule:
@@ -28,9 +28,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install requests
+        run: pip install requests tzdata
 
-      - name: Run V900 Scan
+      - name: Run V900.3 Scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -42,5 +42,5 @@ jobs:
           git config user.email "bot@v900.local"
           git pull --rebase || true
           git add active.json movers_history.json || true
-          git commit -m "V900 scan $(date -u +'%Y-%m-%d %H:%M UTC')" || echo "No changes"
+          git commit -m "V900.3 scan $(date -u +'%Y-%m-%d %H:%M UTC')" || echo "No changes"
           git push || echo "Push failed - check permissions"
