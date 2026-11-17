@@ -22,5 +22,29 @@
     "warned_5d": false,
     "days_since_spike": 99,
     "spike_pct": 0
+  },
+  "AKE": {
+    "sym": "AKE",
+    "side": "SHORT",
+    "price": 0.00989,
+    "entry_high": 0.0100878,
+    "entry_low": 0.0096922,
+    "valid_until": "2026-11-18T01:23:24.359773+03:00",
+    "pumped": 467.0860682658058,
+    "shed": 27.66833839672315,
+    "net": 310.1827758973502,
+    "cap_at_low": 55060207.12496206,
+    "group": "Small",
+    "low_7d": 0.00241531838540176,
+    "high_7d": 0.013696934067875985,
+    "sl": 0.010879,
+    "tp1": 0.00766475,
+    "tp2": 0.0054395,
+    "runner": 0.00321425,
+    "reason": "Small pumped +467.1% hit +150.0%, shed only -27.7% so far, expected -45.0% - SHORT now | Spike was 4d ago (+359%), cooled",
+    "time": "2026-11-18T00:23:24.359773+03:00",
+    "warned_5d": false,
+    "days_since_spike": 4,
+    "spike_pct": 358.81631950841256
   }
 }
