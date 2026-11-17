@@ -2,6 +2,7 @@
 # Small +150% / Mid +100% / Big +60%
 # No pullback, No funding, No 3x, No 0.5% - Signal the moment it hits
 # Designed for 1 HOUR cron - 7d High stays, so late check still catches pump
+# FIX: Use sparkline from markets - 4 calls total, no 429, BLESS not missed
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -49,44 +50,28 @@ def get_group(cap_at_low):
 
 def get_global_data():
     # CoinGecko = Global aggregated price + cap + volume
-    # Fetch Page 1-4 = Top 1000
+    # FIX: sparkline=true gives 7d low/high in SAME 4 calls
+    # No more 626 x market_chart calls = no more 429
     result = {}
     for page in [1, 2, 3, 4]:
         try:
-            r = requests.get(f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}&price_change_percentage=7d", timeout=20).json()
+            r = requests.get(f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}&price_change_percentage=7d&sparkline=true", timeout=20).json()
             for c in r:
                 sym = c.get("symbol","").upper()
                 if sym not in result:
+                    spark = c.get("sparkline_in_7d", {}).get("price", []) or []
                     result[sym] = {
                         "cap_now": c.get("market_cap",0) or 0,
                         "global_price": c.get("current_price",0) or 0,
                         "global_vol": c.get("total_volume",0) or 0,
                         "gecko_id": c.get("id"),
                         "change_7d": c.get("price_change_percentage_7d_in_currency", 0) or 0,
+                        "spark_7d": spark,
                     }
         except Exception as e:
             print(f"GLOBAL API ERROR page {page}: {e}")
             break
     return result
-
-def get_7d_low_high(gecko_id):
-    # FIX: Retry on 429 + sleep - CoinGecko free limit is ~30/min
-    for attempt in range(3):
-        try:
-            r = requests.get(f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart?vs_currency=usd&days=7", timeout=15)
-            if r.status_code == 429:
-                print(f"Rate limit for {gecko_id}, waiting 10s...")
-                time.sleep(10)
-                continue
-            data = r.json()
-            prices = [p[1] for p in data.get("prices",[])]
-            if prices:
-                return min(prices), max(prices)
-            return None, None
-        except Exception as e:
-            print(f"Chart error {gecko_id}: {e}")
-            time.sleep(2)
-    return None, None
 
 def get_mexc_perps():
     # MEXC = Execution price
@@ -117,7 +102,6 @@ def run_once():
     active = load_json(ACTIVE_FILE, {})
     now = datetime.now(TZ)
     now_utc = datetime.now(UTC)
-    today_str = now_utc.strftime("%Y-%m-%d")
 
     fresh = {}
     for k,v in active.items():
@@ -150,19 +134,15 @@ def run_once():
             print(f"{sym} SKIP - No global data, cannot calc Pumped")
             continue
 
-        # FIX: Pre-filter with 7d change - saves 600 chart calls, avoids 429
-        # If Net 7d change is < +40%, it cannot have Pumped +150% then shed to here
-        # Unless it pumped +150% and already shed -70% - but then it's done anyway
-        change_7d = g.get("change_7d", 0)
-        if change_7d < 40:
-            print(f"{sym} SKIP - 7d change +{change_7d:.1f}% < +40%, cannot have pumped")
+        # FIX: Use sparkline from markets - 0 extra calls, no 429, no missed BLESS
+        # BLESS net +37.2% could still be Pumped +150% -> Shed -45% = Net +37.5%
+        # So we NEVER pre-filter by change_7d - we always check sparkline low/high
+        spark = g.get("spark_7d", [])
+        if not spark:
+            print(f"{sym} SKIP - No 7d sparkline")
             continue
-
-        # Get real 7d Low / High for pumped / shed maths
-        low_7d, high_7d = get_7d_low_high(g.get("gecko_id")) if g.get("gecko_id") else (None, None)
-        if not low_7d:
-            print(f"{sym} SKIP - No 7d chart")
-            continue
+        low_7d = min(spark)
+        high_7d = max(spark)
 
         # === CAP AT LOW - Group locked at start of pump ===
         cap_at_low = cap_now * (low_7d / global_price) if global_price > 0 else cap_now
