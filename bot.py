@@ -4,6 +4,7 @@
 # LONG: Pumped hit, shed DONE + overshoot -> long the bounce
 # BEST ONLY: Group first (Big > Mid > Small), then Net, then Vol - No score
 # V900.2 filters kept: Days-Since-Spike >=2, Entry Zone, 7-day expiry
+# AKE FIX: Don't SHORT if price still >= High, Don't LONG if price still <= Low
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -351,6 +352,14 @@ def run_once():
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
+        # === AKE FIX - Don't enter while still making new High / Low ===
+        # SHORT only if price is back BELOW High, LONG only if price is back ABOVE Low
+        if side == "SHORT" and global_price >= high_7d:
+            print(f"{sym} SKIP V900.3 - Price {fmt(global_price)} still >= High {fmt(high_7d)} - still making new high, wait for price back below High")
+            continue
+        if side == "LONG" and global_price <= low_7d:
+            print(f"{sym} SKIP V900.3 - Price {fmt(global_price)} still <= Low {fmt(low_7d)} - still making new low, wait for price back above Low")
+            continue
         if side is None:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
