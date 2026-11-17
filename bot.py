@@ -2,7 +2,8 @@
 # Small +150% / Mid +100% / Big +60%
 # No pullback, No funding, No 3x, No 0.5% - Signal the moment it hits
 # Designed for 1 HOUR cron - 7d High stays, so late check still catches pump
-# FIX: Use sparkline from markets - 4 calls total, no 429, BLESS not missed
+# FIX: Sparkline - 4 calls total, no 429
+# NEW: TP Tracking - records TP1/TP2/Runner/SL + days taken to movers_history.json
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -16,6 +17,9 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT_ID") or os.getenv("CHAT_ID")
 
 MIN_VOLUME = 5000000  # $5M global volume
+
+# Expected days to TP2 by group
+EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 
 def load_json(path, default):
     try:
@@ -50,8 +54,7 @@ def get_group(cap_at_low):
 
 def get_global_data():
     # CoinGecko = Global aggregated price + cap + volume
-    # FIX: sparkline=true gives 7d low/high in SAME 4 calls
-    # No more 626 x market_chart calls = no more 429
+    # sparkline=true gives 7d low/high in SAME 4 calls - no 429
     result = {}
     for page in [1, 2, 3, 4]:
         try:
@@ -98,6 +101,74 @@ def get_mexc_perps():
         movers[sym] = {"price": price, "vol": vol, "symbol": sym_raw}
     return movers
 
+def check_active_tps(active, mexc, global_data):
+    # Check if any active signal hit TP1 / TP2 / Runner / SL
+    # Writes result to movers_history.json with days taken
+    history = load_json(HISTORY_FILE, [])
+    now = datetime.now(TZ)
+    to_remove = []
+
+    for sym, sig in list(active.items()):
+        cur = None
+        if sym in mexc:
+            cur = mexc[sym]["price"]
+        elif sym in global_data:
+            cur = global_data[sym]["global_price"]
+        if not cur:
+            continue
+
+        entry = sig.get("price", 0)
+        if not entry:
+            continue
+
+        try:
+            t = datetime.fromisoformat(str(sig.get("time","")).replace("Z","+00:00"))
+            if t.tzinfo is None: t = t.replace(tzinfo=TZ)
+            days = (now - t).total_seconds() / 86400
+        except:
+            days = 0
+
+        side = sig.get("side", "SHORT")
+        tp1, tp2, runner, sl = sig.get("tp1",0), sig.get("tp2",0), sig.get("runner",0), sig.get("sl",0)
+        group = sig.get("group","Small")
+        expected = EXPECTED_DAYS.get(group, "3-5 days")
+
+        hit = None
+        if side == "SHORT":
+            if cur <= runner: hit = "RUNNER"
+            elif cur <= tp2: hit = "TP2"
+            elif cur <= tp1: hit = "TP1"
+            elif cur >= sl: hit = "SL"
+        else:
+            if cur >= runner: hit = "RUNNER"
+            elif cur >= tp2: hit = "TP2"
+            elif cur >= tp1: hit = "TP1"
+            elif cur <= sl: hit = "SL"
+
+        if hit:
+            record = {
+                "sym": sym, "side": side, "group": group,
+                "entry": entry, "exit_price": cur, "hit": hit,
+                "pumped": sig.get("pumped"), "shed": sig.get("shed"),
+                "time_in": sig.get("time"), "time_out": now.isoformat(),
+                "days_taken": round(days, 2),
+                "expected_days": expected,
+                "tp1": tp1, "tp2": tp2, "runner": runner, "sl": sl,
+            }
+            history.append(record)
+            save_json(HISTORY_FILE, history)
+            to_remove.append(sym)
+
+            pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
+            msg = f"✅ <b>{sym} {hit} HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nProfit: {pct:+.1f}%\nDays taken: {days:.2f} days (Expected: {expected})\nPumped was +{sig.get('pumped',0):.1f}%"
+            send_telegram(msg)
+            print(f"{sym} {hit} HIT in {days:.2f}d - Expected {expected}")
+
+    for sym in to_remove:
+        del active[sym]
+
+    return active
+
 def run_once():
     active = load_json(ACTIVE_FILE, {})
     now = datetime.now(TZ)
@@ -117,6 +188,9 @@ def run_once():
     mexc = get_mexc_perps()
     print(f"MEXC perps: {len(mexc)} | Global: {len(global_data)}")
 
+    # NEW: Check TPs for active signals first
+    active = check_active_tps(active, mexc, global_data)
+
     for sym, m in mexc.items():
         if sym in active:
             print(f"{sym} SKIP - Already active")
@@ -134,9 +208,7 @@ def run_once():
             print(f"{sym} SKIP - No global data, cannot calc Pumped")
             continue
 
-        # FIX: Use sparkline from markets - 0 extra calls, no 429, no missed BLESS
-        # BLESS net +37.2% could still be Pumped +150% -> Shed -45% = Net +37.5%
-        # So we NEVER pre-filter by change_7d - we always check sparkline low/high
+        # Use sparkline from markets - 0 extra calls, no 429, no missed BLESS
         spark = g.get("spark_7d", [])
         if not spark:
             print(f"{sym} SKIP - No 7d sparkline")
@@ -166,7 +238,6 @@ def run_once():
         # === SIGNAL LOGIC - No pullback wait ===
         # FIX FOR 1 HOUR CRON: Allow late entry
         # Skip only if shed >= expected * 1.5 (really dumped already)
-        # Example Small: expected -45%, we still signal even if shed -60%, we skip only if shed -67.5%+
         if pumped >= pump_thresh:
             if shed >= expected_shed * 1.5:
                 print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%, limit -{expected_shed*1.5:.1f}%) - move done")
@@ -203,7 +274,8 @@ def run_once():
         }
         active[sym] = signal
 
-        msg = f"{emoji} <b>V900 PERP {side} {sym}</b> - {group}\nCap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\nPumped: +{pumped:.1f}% (Need +{pump_thresh}%)\nShed so far: -{shed:.1f}% (Expected -{expected_shed}%)\nLow 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\nGlobal Vol: ${max(global_vol, vol_local):,.0f}\n{reason}\nPrice: {fmt(price_exec)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
+        exp_days = EXPECTED_DAYS.get(group, "3-5 days")
+        msg = f"{emoji} <b>V900 PERP {side} {sym}</b> - {group}\nExpected to TP2: {exp_days}\nCap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\nPumped: +{pumped:.1f}% (Need +{pump_thresh}%)\nShed so far: -{shed:.1f}% (Expected -{expected_shed}%)\nLow 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\nGlobal Vol: ${max(global_vol, vol_local):,.0f}\n{reason}\nPrice: {fmt(price_exec)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
         send_telegram(msg)
         print(f"{sym} {side} - {reason}")
 
