@@ -1,6 +1,8 @@
-# V900 FINAL - Pumped vs Shed Logic - 3 Levels Locked
+# V900.2 FINAL - Pumped vs Shed Logic - 3 Levels Locked
 # Small +150% / Mid +100% / Big +60%
 # STRICT: Skip if shed > expected - no late chasing
+# NEW V900.2: Days-Since-Spike filter - BLOCK if spike was <2 days ago (no early entry)
+# NEW: Entry Price Level - Enter At + Entry Zone + Valid Until
 # TP Tracking: 7-day expiry + Day 5 Warning + Probability + Cause + Next Signal (EXPIRED + SL)
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
@@ -49,6 +51,38 @@ def get_group(cap_at_low):
         return "Mid", 100.0, 30.0
     else:
         return "Big", 60.0, 20.0
+
+# --- V900.2 NEW: Days Since Spike from 7d sparkline ---
+# Sparkline from CoinGecko = ~168 hourly points (7 days x 24h)
+# We group into 7 daily closes, then find last day with >+50% jump
+def days_since_spike(spark):
+    if not spark or len(spark) < 48:
+        return 99  # Not enough data -> treat as grind, allow
+    # Build 7 daily closes: take last price of each 24h block
+    # Spark is oldest -> newest, chunk it
+    n = len(spark)
+    # Use 24h chunks from the end backwards to align to now
+    daily_closes = []
+    # Split into 7 equal chunks
+    chunk = n // 7
+    for i in range(7):
+        start = i * chunk
+        end = (i + 1) * chunk if i < 6 else n
+        daily_closes.append(spark[end - 1])
+    # Find last spike day: daily change > +50%
+    spike_idx = -1
+    spike_pct = 0
+    for i in range(1, len(daily_closes)):
+        if daily_closes[i-1] <= 0:
+            continue
+        chg = (daily_closes[i] - daily_closes[i-1]) / daily_closes[i-1] * 100
+        if chg > 50:
+            spike_idx = i
+            spike_pct = chg
+    if spike_idx == -1:
+        return 99, 0, daily_closes  # No spike = grind, safe
+    days_ago = (len(daily_closes) - 1) - spike_idx
+    return days_ago, spike_pct, daily_closes
 
 def get_global_data():
     result = {}
@@ -139,11 +173,9 @@ def analyze_outcome(sig, cur, days):
     return p_tp1, cause, next_sig, progress, p_chop, p_sl
 
 def analyze_sl(sig, cur, days):
-    """NEW: What to expect after SL hit - for SHORT"""
     entry = sig.get("price", 0)
     high_7d = sig.get("high_7d", entry)
     sl = sig.get("sl", entry)
-    # How far above SL / high did it go?
     above_high_pct = (cur - high_7d) / high_7d * 100 if high_7d > 0 else 0
     if cur >= high_7d:
         cause = f"Invalidated - price broke above 7d high (+{above_high_pct:.1f}% above high). Pump won, buyers in control. Short thesis dead."
@@ -218,7 +250,6 @@ def check_active_tps(active, mexc, global_data):
                 msg = f"⏰ <b>{sym} EXPIRED</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nResult: {pct:+.1f}% | Progress to TP1: {progress:.0f}% | Days held: {days:.2f} (Expected: {expected})\n\n📊 <b>Probability if held longer:</b>\nTP1: {p_tp1}% | Chop: {p_chop}% | SL: {p_sl}%\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n➡️ <b>Next Signal:</b>\n{next_sig}\n\nClosing - no more tracking"
                 print(f"{sym} EXPIRED after {days:.2f}d - Prob TP1 {p_tp1}%")
             elif hit == "SL":
-                # NEW: SL gets Cause + Next Signal too
                 cause, next_sig, p_pump, p_dump, p_chop = analyze_sl(sig, cur, days)
                 msg = f"🛑 <b>{sym} SL HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nLoss: {pct:+.1f}% | Days: {days:.2f} (Expected: {expected})\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n📊 <b>What to expect next:</b>\nPump again: {p_pump}% | Dump back: {p_dump}% | Chop: {p_chop}%\n\n➡️ <b>Next Signal:</b>\n{next_sig}"
                 print(f"{sym} SL HIT in {days:.2f}d - Pump again {p_pump}%")
@@ -281,8 +312,16 @@ def run_once():
                 print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%) - move done, too late")
                 continue
             else:
+                # --- V900.2: Days-Since-Spike check BEFORE allowing SHORT ---
+                days_ago, spike_pct, daily_closes = days_since_spike(spark)
+                print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%)")
+                if days_ago < 2:
+                    print(f"{sym} SKIP V900.2 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
+                    continue
                 side = "SHORT"
-                reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now"
+                reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
+                if days_ago == 99:
+                    reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | No 1-day spike, grind pump, cooled"
         if side is None:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
@@ -291,26 +330,56 @@ def run_once():
             tp1 = round(price_exec * (1 - (expected_shed/100)*0.5), 8)
             tp2 = round(price_exec * (1 - expected_shed/100), 8)
             runner = round(price_exec * (1 - (expected_shed/100)*1.5), 8)
-            emoji = "\U0001F534"
+            emoji = "🔴"
+            # --- NEW: Entry Price Level ---
+            entry_price = price_exec
+            entry_high = round(price_exec * 1.02, 8)  # Top of entry zone - don't chase above this
+            entry_low = round(price_exec * 0.98, 8)   # Bottom of entry zone
+            valid_until = now + timedelta(hours=1)
         else:
             sl = round(price_exec * 0.90, 8)
             tp1 = round(price_exec * 1.15, 8)
             tp2 = round(price_exec * 1.25, 8)
             runner = round(price_exec * 1.40, 8)
-            emoji = "\U0001F7E2"
+            emoji = "🟢"
+            entry_price = price_exec
+            entry_high = round(price_exec * 1.02, 8)
+            entry_low = round(price_exec * 0.98, 8)
+            valid_until = now + timedelta(hours=1)
         signal = {
-            "sym": sym, "side": side, "price": price_exec,
+            "sym": sym, "side": side, "price": entry_price,
+            "entry_high": entry_high, "entry_low": entry_low,
+            "valid_until": valid_until.isoformat(),
             "pumped": pumped, "shed": shed, "net": net,
             "cap_at_low": cap_at_low, "group": group,
             "low_7d": low_7d, "high_7d": high_7d,
             "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner,
-            "reason": reason, "time": now.isoformat(), "warned_5d": False
+            "reason": reason, "time": now.isoformat(), "warned_5d": False,
+            "days_since_spike": days_ago if 'days_ago' in locals() else 99,
+            "spike_pct": spike_pct if 'spike_pct' in locals() else 0
         }
         active[sym] = signal
         exp_days = EXPECTED_DAYS.get(group, "3-5 days")
-        msg = f"{emoji} <b>V900 PERP {side} {sym}</b> - {group}\nExpected to TP2: {exp_days}\nCap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\nPumped: +{pumped:.1f}% (Need +{pump_thresh}%)\nShed so far: -{shed:.1f}% (Expected -{expected_shed}%)\nLow 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\nGlobal Vol: ${max(global_vol, vol_local):,.0f}\n{reason}\nPrice: {fmt(price_exec)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
+        # --- NEW Telegram format with Entry Level ---
+        msg = (
+            f"{emoji} <b>V900.2 PERP {side} {sym}</b> - {group}\n"
+            f"Expected to TP2: {exp_days}\n"
+            f"Cap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\n"
+            f"Pumped: +{pumped:.1f}% (Need +{pump_thresh}%)\n"
+            f"Shed so far: -{shed:.1f}% (Expected -{expected_shed}%)\n"
+            f"Low 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\n"
+            f"Global Vol: ${max(global_vol, vol_local):,.0f}\n"
+            f"{reason}\n"
+            f"\n🎯 <b>ENTER AT: {fmt(entry_price)}</b>\n"
+            f"Entry Zone: {fmt(entry_low)} - {fmt(entry_high)}\n"
+            f"Valid Until: {valid_until.strftime('%H:%M')} EAT (+1h) - If price is above {fmt(entry_high)} when you see this, SKIP, do not chase\n"
+            f"SL: {fmt(sl)}\n"
+            f"TP1: {fmt(tp1)}\n"
+            f"TP2: {fmt(tp2)}\n"
+            f"Runner: {fmt(runner)}"
+        )
         send_telegram(msg)
-        print(f"{sym} {side} - {reason}")
+        print(f"{sym} {side} - {reason} | ENTER AT {entry_price}")
     save_json(ACTIVE_FILE, active)
     print(f"Done - Active: {len(active)}")
 
