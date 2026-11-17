@@ -2,7 +2,7 @@
 # Small +150% / Mid +100% / Big +60%
 # No pullback, No funding, No 3x, No 0.5% - Signal the moment it hits
 # Designed for 1 HOUR cron - 7d High stays, so late check still catches pump
-import json, os, requests
+import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -49,21 +49,20 @@ def get_group(cap_at_low):
 
 def get_global_data():
     # CoinGecko = Global aggregated price + cap + volume
-    # FIX: Fetch Page 1-4 = Top 1000, not just Top 250
-    # BLESS / RARE / MANADIA / AKE are Rank 300-600, they were missed before
+    # Fetch Page 1-4 = Top 1000
     result = {}
     for page in [1, 2, 3, 4]:
         try:
             r = requests.get(f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}&price_change_percentage=7d", timeout=20).json()
             for c in r:
                 sym = c.get("symbol","").upper()
-                # Keep first occurrence only
                 if sym not in result:
                     result[sym] = {
                         "cap_now": c.get("market_cap",0) or 0,
                         "global_price": c.get("current_price",0) or 0,
                         "global_vol": c.get("total_volume",0) or 0,
                         "gecko_id": c.get("id"),
+                        "change_7d": c.get("price_change_percentage_7d_in_currency", 0) or 0,
                     }
         except Exception as e:
             print(f"GLOBAL API ERROR page {page}: {e}")
@@ -71,17 +70,26 @@ def get_global_data():
     return result
 
 def get_7d_low_high(gecko_id):
-    try:
-        r = requests.get(f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart?vs_currency=usd&days=7", timeout=15).json()
-        prices = [p[1] for p in r.get("prices",[])]
-        if prices:
-            return min(prices), max(prices)
-    except: pass
+    # FIX: Retry on 429 + sleep - CoinGecko free limit is ~30/min
+    for attempt in range(3):
+        try:
+            r = requests.get(f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart?vs_currency=usd&days=7", timeout=15)
+            if r.status_code == 429:
+                print(f"Rate limit for {gecko_id}, waiting 10s...")
+                time.sleep(10)
+                continue
+            data = r.json()
+            prices = [p[1] for p in data.get("prices",[])]
+            if prices:
+                return min(prices), max(prices)
+            return None, None
+        except Exception as e:
+            print(f"Chart error {gecko_id}: {e}")
+            time.sleep(2)
     return None, None
 
 def get_mexc_perps():
     # MEXC = Execution price
-    # FIX: Skip stock / commodity / index perps - not crypto
     SKIP_SUFFIX = ["STOCK", "STOCKS"]
     SKIP_EXACT = {"XAU","XAG","NVIDIA","ANTHROPIC","OPENAI","SPX","NASDAQ","DJI","US100","US30","GOLD","SILVER","OIL","BTCDOM"}
     r = requests.get("https://contract.mexc.com/api/v1/contract/ticker", timeout=20).json()
@@ -92,7 +100,6 @@ def get_mexc_perps():
         if "_USDT" not in sym_raw: continue
         sym = sym_raw.replace("_USDT","")
         if sym in ["BTC","ETH","BNB","SOL","XRP","DOGE"]: continue
-        # Skip stocks
         if sym in SKIP_EXACT: continue
         if any(sym.endswith(s) for s in SKIP_SUFFIX): continue
         if "STOCK" in sym: continue
@@ -112,7 +119,6 @@ def run_once():
     now_utc = datetime.now(UTC)
     today_str = now_utc.strftime("%Y-%m-%d")
 
-    # Active 24h - no cooldown file
     fresh = {}
     for k,v in active.items():
         try:
@@ -132,7 +138,7 @@ def run_once():
             print(f"{sym} SKIP - Already active")
             continue
 
-        price_exec = m["price"]  # MEXC execution price
+        price_exec = m["price"]
         vol_local = m["vol"]
 
         g = global_data.get(sym, {})
@@ -140,9 +146,16 @@ def run_once():
         global_price = g.get("global_price", price_exec)
         global_vol = g.get("global_vol", vol_local)
 
-        # FIX: If no CoinGecko data, SKIP - do not fake Pumped 0%
         if cap_now == 0 or global_price == 0:
             print(f"{sym} SKIP - No global data, cannot calc Pumped")
+            continue
+
+        # FIX: Pre-filter with 7d change - saves 600 chart calls, avoids 429
+        # If Net 7d change is < +40%, it cannot have Pumped +150% then shed to here
+        # Unless it pumped +150% and already shed -70% - but then it's done anyway
+        change_7d = g.get("change_7d", 0)
+        if change_7d < 40:
+            print(f"{sym} SKIP - 7d change +{change_7d:.1f}% < +40%, cannot have pumped")
             continue
 
         # Get real 7d Low / High for pumped / shed maths
@@ -171,10 +184,8 @@ def run_once():
         reason = ""
 
         # === SIGNAL LOGIC - No pullback wait ===
-        # SHORT when Pumped hits threshold
         # FIX FOR 1 HOUR CRON: Allow late entry
-        # Old: skip if shed >= expected (missed if 1h late)
-        # New: skip only if shed >= expected * 1.5 (really dumped already)
+        # Skip only if shed >= expected * 1.5 (really dumped already)
         # Example Small: expected -45%, we still signal even if shed -60%, we skip only if shed -67.5%+
         if pumped >= pump_thresh:
             if shed >= expected_shed * 1.5:
