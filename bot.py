@@ -1,232 +1,223 @@
-# V800 - PERP STRICT $5M - NO COOLDOWN FILE - Never gets stuck
-import json, os, re, requests
-from datetime import datetime, timedelta
+# V900 FINAL - Pumped vs Shed Logic - 3 Levels Locked
+# Small +150% / Mid +100% / Big +60%
+# No pullback, No funding, No 3x, No 0.5% - Signal the moment it hits
+import json, os, requests
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Africa/Nairobi")
+UTC = timezone.utc
 ACTIVE_FILE = "active.json"
 HISTORY_FILE = "movers_history.json"
-VOL_FILE = "vol_history.json"
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT_ID") or os.getenv("CHAT_ID")
 
-# === STRICT PERP SETTINGS - BEST FOR YOU ===
-MIN_VOLUME = 5000000  # $5M - blocks CASHCAT $662k, allows RARE $11M
-MIN_MOVE = 35.0      # Must be +/-35% to qualify
-CONFIRMATION = 5.0   # Must be 5% off High / Low
+MIN_VOLUME = 5000000  # $5M global volume
 
 def load_json(path, default):
     try:
-        with open(path) as f:
-            return json.load(f)
-    except:
-        return default
+        with open(path) as f: return json.load(f)
+    except: return default
 
 def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    with open(path, "w") as f: json.dump(data, f, indent=2)
 
 def send_telegram(msg):
-    print(f"TELEGRAM DEBUG - Token set: {bool(TELEGRAM_TOKEN)} Chat ID set: {bool(TELEGRAM_CHAT_ID)}")
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("TELEGRAM ERROR: Token or Chat ID missing!")
+        print("TELEGRAM ERROR: Token/Chat missing")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
-        print(f"TELEGRAM RESPONSE: {r.status_code} {r.text[:400]}")
+        print(f"TELEGRAM: {r.status_code} {r.text[:200]}")
     except Exception as e:
         print(f"TELEGRAM EXCEPTION: {e}")
 
-def parse_pct(v):
-    if v is None: return None
-    s = str(v)
-    has_percent_sign = '%' in s
-    m = re.search(r'-?\d+\.?\d*', s)
-    if not m: return None
-    val = float(m.group(0))
-    if has_percent_sign:
-        return val
-    return val * 100
-
 def fmt(p):
-    s = f"{p:.8f}".rstrip('0').rstrip('.')
-    return s
+    return f"{p:.8f}".rstrip('0').rstrip('.')
 
-def get_movers():
-    # === PERPS ONLY - MEXC Contract Ticker - FIXED FIELD NAMES ===
+def get_group(cap_at_low):
+    # Group is decided by Cap at LOW, locked for whole pump
+    if cap_at_low < 200_000_000:
+        return "Small", 150.0, 45.0  # Pump +150% = Shed -45%
+    elif cap_at_low <= 2_000_000_000:
+        return "Mid", 100.0, 30.0    # Pump +100% = Shed -30%
+    else:
+        return "Big", 60.0, 20.0     # Pump +60% = Shed -20%
+
+def get_global_data():
+    # CoinGecko = Global aggregated price + cap + volume
+    result = {}
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&price_change_percentage=7d", timeout=20).json()
+        for c in r:
+            sym = c.get("symbol","").upper()
+            result[sym] = {
+                "cap_now": c.get("market_cap",0) or 0,
+                "global_price": c.get("current_price",0) or 0,
+                "global_vol": c.get("total_volume",0) or 0,
+                "gecko_id": c.get("id"),
+            }
+    except Exception as e:
+        print(f"GLOBAL API ERROR: {e}")
+    return result
+
+def get_7d_low_high(gecko_id):
+    try:
+        r = requests.get(f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart?vs_currency=usd&days=7", timeout=15).json()
+        prices = [p[1] for p in r.get("prices",[])]
+        if prices:
+            return min(prices), max(prices)
+    except: pass
+    return None, None
+
+def get_mexc_perps():
+    # MEXC = Execution price
     r = requests.get("https://contract.mexc.com/api/v1/contract/ticker", timeout=20).json()
-    data_list = r.get("data", []) if isinstance(r, dict) else r
-    if not data_list:
-        print(f"MEXC PERP ERROR: {str(r)[:500]}")
-        return {}
+    data_list = r.get("data",[]) if isinstance(r, dict) else r
     movers = {}
     for t in data_list:
         sym_raw = t.get('symbol','')
-        if "_USDT" not in sym_raw:
-            continue
+        if "_USDT" not in sym_raw: continue
         sym = sym_raw.replace("_USDT","")
         if sym in ["BTC","ETH","BNB","SOL","XRP","DOGE"]: continue
         try:
-            # PERP pct: riseFallRate is like 0.771 = 77.1% - singular!
-            pct_raw = t.get('riseFallRate', t.get('riseFallRates', t.get('changeRate')))
-            pct = float(pct_raw) * 100 if pct_raw is not None else 0
-
-            price = float(t.get('lastPrice', 0) or 0)
-            # PERP high/low: higher24Price / lower24Price
-            high = float(t.get('higher24Price', t.get('high24Price', t.get('highPrice', price))) or price)
-            low = float(t.get('lower24Price', t.get('low24Price', t.get('lowPrice', price))) or price)
-
-            # PERP vol: amount24 is turnover in USDT, volume24 is contracts
-            amount24 = float(t.get('amount24', 0) or 0)
-            volume24 = float(t.get('volume24', 0) or 0)
-            if amount24 > 1000:
-                vol = amount24
-            else:
-                vol = volume24 * price
-
-        except Exception as e:
-            print(f"PARSE ERR {sym_raw}: {e}")
-            continue
+            price = float(t.get('lastPrice',0) or 0)
+            amount24 = float(t.get('amount24',0) or 0)
+            volume24 = float(t.get('volume24',0) or 0)
+            vol = amount24 if amount24 > 1000 else volume24 * price
+        except: continue
         if price == 0: continue
-        if abs(pct) >= MIN_MOVE:
-            movers[sym] = {"pct": pct, "price": price, "symbol": sym_raw, "high": high, "low": low, "vol": vol}
-    print(f"Found {len(movers)} PERP movers >={MIN_MOVE}%")
-    for k,v in sorted(movers.items(), key=lambda x: -abs(x[1]['pct']))[:20]:
-        print(f"MOVER {k}: {v['pct']:.1f}% price {v['price']} PERP Vol ${v['vol']:,.0f} High {v['high']} Low {v['low']}")
+        movers[sym] = {"price": price, "vol": vol, "symbol": sym_raw}
     return movers
 
 def run_once():
     active = load_json(ACTIVE_FILE, {})
-    history = load_json(HISTORY_FILE, {})
-    vol_hist = load_json(VOL_FILE, {})
     now = datetime.now(TZ)
-    today_str = now.strftime("%Y-%m-%d")
-    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    now_utc = datetime.now(UTC)
+    today_str = now_utc.strftime("%Y-%m-%d")
 
-    # Active expires after 24h - NO cooldown file
-    fresh_active = {}
-    for k, v in active.items():
+    # Active 24h - no cooldown file
+    fresh = {}
+    for k,v in active.items():
         try:
             t = datetime.fromisoformat(str(v.get("time","")).replace("Z","+00:00"))
-            if t.tzinfo is None:
-                t = t.replace(tzinfo=TZ)
-            if (now - t).total_seconds() < 24*3600:
-                fresh_active[k] = v
-            else:
-                print(f"Active expired for {k}, can signal again")
-        except:
-            fresh_active[k] = v
-    active = fresh_active
-    print(f"Active after cleanup: {len(active)} - {list(active.keys())[:10]}")
+            if t.tzinfo is None: t = t.replace(tzinfo=TZ)
+            if (now - t).total_seconds() < 24*3600: fresh[k]=v
+        except: fresh[k]=v
+    active = fresh
+    print(f"Active: {len(active)} - {list(active.keys())}")
 
-    raw_yday = history.get(yesterday_str, {}) if isinstance(history, dict) else {}
-    yesterday_movers = {}
-    if isinstance(raw_yday, dict):
-        for k,v in raw_yday.items():
-            clean_k = k.replace("_USDT","").replace("USDT","")
-            yesterday_movers[clean_k] = parse_pct(v)
-    print(f"Today {today_str} Yday {yesterday_str} Yday movers: {len(yesterday_movers)}")
-    movers = get_movers()
-    if movers:
-        history[today_str] = {k: v["pct"] for k,v in movers.items()}
-        save_json(HISTORY_FILE, history)
-    else:
-        print("MEXC PERP returned 0 movers - NOT overwriting history")
+    global_data = get_global_data()
+    mexc = get_mexc_perps()
+    print(f"MEXC perps: {len(mexc)} | Global: {len(global_data)}")
 
-    for sym, data in movers.items():
+    for sym, m in mexc.items():
         if sym in active:
-            print(f"{sym} SKIP - Already active in last 24h")
+            print(f"{sym} SKIP - Already active")
             continue
-        today_pct = data["pct"]
-        price = data["price"]
-        high = data["high"]
-        low = data["low"]
-        vol = data["vol"]
-        mid = (high + low) / 2
-        y_pct = yesterday_movers.get(sym, None)
-        is_new = (y_pct is None)
+
+        price_exec = m["price"]  # MEXC execution price
+        vol_local = m["vol"]
+
+        g = global_data.get(sym, {})
+        cap_now = g.get("cap_now", 0)
+        global_price = g.get("global_price", price_exec)
+        global_vol = g.get("global_vol", vol_local)
+
+        # If no CoinGecko data, assume Small, use MEXC price
+        if cap_now == 0 or global_price == 0:
+            print(f"{sym} No global data - assume Small, use MEXC")
+            cap_now = 50_000_000
+            global_price = price_exec
+            low_7d = price_exec
+            high_7d = price_exec
+        else:
+            # Get real 7d Low / High for pumped / shed maths
+            low_7d, high_7d = get_7d_low_high(g.get("gecko_id")) if g.get("gecko_id") else (None, None)
+            if not low_7d:
+                # Fallback: use global_price as both, will skip
+                print(f"{sym} SKIP - No 7d chart")
+                continue
+
+        # === CAP AT LOW - Group locked at start of pump ===
+        # Cap moves with price, so we reverse it back to Low
+        # Cap at Low = Cap Now * (Low / Now)
+        cap_at_low = cap_now * (low_7d / global_price) if global_price > 0 else cap_now
+        group, pump_thresh, expected_shed = get_group(cap_at_low)
+
+        # === PUMPED vs SHED MATHS - Using Global Prices ===
+        # Pumped = (High - Low) / Low
+        # Shed = (High - Now) / High
+        # Net = (Now - Low) / Low
+        pumped = (high_7d - low_7d) / low_7d * 100 if low_7d > 0 else 0
+        shed = (high_7d - global_price) / high_7d * 100 if high_7d > 0 else 0
+        net = (global_price - low_7d) / low_7d * 100 if low_7d > 0 else 0
+
+        print(f"{sym} | {group} CapLow ${cap_at_low/1e6:.1f}M (CapNow ${cap_now/1e6:.1f}M) | Pumped +{pumped:.1f}% / Need +{pump_thresh}% | Shed -{shed:.1f}% | Net +{net:.1f}%")
+
+        # $5M filter - Global volume
+        if max(global_vol, vol_local) < MIN_VOLUME:
+            print(f"{sym} SKIP - Vol ${max(global_vol, vol_local):,.0f} < $5M")
+            continue
+
         side = None
-        day_label = "Day1" if is_new else "Day2+"
         reason = ""
 
-        # === $5M FILTER ===
-        if vol < MIN_VOLUME:
-            print(f"{sym} SKIP - Low PERP volume ${vol:,.0f} < $5M")
-            continue
+        # === SIGNAL LOGIC - No pullback wait ===
+        # SHORT when Pumped hits threshold - signal at peak, before shed
+        # We use Pumped (Low to High), not Net, because High is the peak that was hit
+        # If price already shed a lot, we already missed peak - still signal if pumped hit and shed < expected?
+        # For this test version: signal if Pumped >= threshold AND Shed < expected_shed (still near top, not already dumped)
+        # If Shed already >= expected, the move is done, skip
 
-        # === VOLUME + PRICE LOGIC ===
-        prev_vol = vol_hist.get(sym, vol)
-        vol_growth = vol - prev_vol
-        vol_hist[sym] = vol
-
-        from_high = (price - high) / high * 100 if high > 0 else 0
-        from_low = (price - low) / low * 100 if low > 0 else 0
-
-        # === SHORTS - 5% confirmation ===
-        if is_new and today_pct > 35:
-            if from_high <= -CONFIRMATION:
-                side = "SHORT"; reason = f"NEW pump + confirmation, {from_high:.1f}% off High"
-            else:
-                print(f"{sym} SKIP SHORT - Still at High, {from_high:.1f}% off High, wait for 5% pullback")
+        if pumped >= pump_thresh:
+            if shed >= expected_shed:
+                print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%) - move done")
                 continue
-        elif not is_new and today_pct > 35 and y_pct is not None and y_pct > 35:
-            if from_high <= -CONFIRMATION:
-                side = "SHORT"; day_label = "Runner"; reason = f"RUNNER {y_pct:.1f}% yday + {today_pct:.1f}% today, {from_high:.1f}% off High"
             else:
-                print(f"{sym} SKIP SHORT Runner - Still at High")
-                continue
-        elif not is_new and today_pct < -20 and y_pct is not None and y_pct > 35:
-            if from_high <= -CONFIRMATION:
-                side = "SHORT"; reason = f"PUMP THEN DUMP {y_pct:.1f}% yday"
-            else:
-                print(f"{sym} SKIP SHORT - No pullback yet")
-                continue
-        elif is_new and today_pct > 35 and price < mid:
-            if from_high <= -CONFIRMATION:
-                side = "SHORT"; reason = "NEW pump fading below mid + pullback"
-            else:
-                print(f"{sym} SKIP SHORT - No pullback yet")
-                continue
-
-        # === LONGS - 5% confirmation ===
-        if side is None and is_new and today_pct < -35:
-            if from_low >= CONFIRMATION:
-                side = "LONG"; reason = f"NEW dumped {today_pct:.1f}% today, bounced +{from_low:.1f}% off Low"
-            else:
-                print(f"{sym} SKIP LONG - Still at Low, {from_low:.1f}% off Low, wait for 5% bounce")
-                continue
-        elif side is None and not is_new and today_pct < -20 and y_pct is not None and y_pct < -20:
-            if from_low >= CONFIRMATION:
-                side = "LONG"; reason = f"DUMPED 2 DAYS {y_pct:.1f}% yday + {today_pct:.1f}% today, bounced +{from_low:.1f}% off Low"
-            else:
-                print(f"{sym} SKIP LONG - Still at Low, wait for bounce")
-                continue
-        elif side is None and not is_new and today_pct > 20 and y_pct is not None and y_pct < -35:
-            if from_low >= CONFIRMATION:
-                side = "LONG"; day_label = "Bounce"; reason = f"BOUNCE after {y_pct:.1f}% yday dump, +{from_low:.1f}% off Low"
-            else:
-                print(f"{sym} SKIP LONG Bounce - Still at Low")
-                continue
+                side = "SHORT"
+                reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now"
+        # LONG only if price already shed a lot and pumped was big - reversal after dump
+        # For now, LONG is disabled in test - we focus on SHORT first
+        # elif shed >= expected_shed and pumped >= pump_thresh:
+        #    side = "LONG"
 
         if side is None:
-            print(f"{sym} SKIP - {today_pct:.1f}% today, {y_pct} yday")
+            print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
 
-        # RED = U0001F534, GREEN = U0001F7E2
+        # SL / TP based on Expected Shed from scan
+        # SL: +10% above entry (if pump continues)
+        # TP1: 50% of expected shed, TP2: 100% of expected shed, Runner: 150%
         if side == "SHORT":
-            sl = round(price * 1.10, 8); tp1 = round(price * 0.85, 8); tp2 = round(price * 0.75, 8); runner = round(price * 0.60, 8); emoji = "\U0001F534"
+            sl = round(price_exec * 1.10, 8)
+            tp1 = round(price_exec * (1 - (expected_shed/100)*0.5), 8)
+            tp2 = round(price_exec * (1 - expected_shed/100), 8)
+            runner = round(price_exec * (1 - (expected_shed/100)*1.5), 8)
+            emoji = "\U0001F534"
         else:
-            sl = round(price * 0.90, 8); tp1 = round(price * 1.15, 8); tp2 = round(price * 1.25, 8); runner = round(price * 1.40, 8); emoji = "\U0001F7E2"
-        signal = {"sym": sym, "side": side, "price": price, "pct": today_pct, "y_pct": y_pct, "mid": mid, "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner, "day": day_label, "reason": reason, "time": now.isoformat()}
+            sl = round(price_exec * 0.90, 8)
+            tp1 = round(price_exec * 1.15, 8)
+            tp2 = round(price_exec * 1.25, 8)
+            runner = round(price_exec * 1.40, 8)
+            emoji = "\U0001F7E2"
+
+        signal = {
+            "sym": sym, "side": side, "price": price_exec,
+            "pumped": pumped, "shed": shed, "net": net,
+            "cap_at_low": cap_at_low, "group": group,
+            "low_7d": low_7d, "high_7d": high_7d,
+            "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner,
+            "reason": reason, "time": now.isoformat()
+        }
         active[sym] = signal
-        y_txt = "NEW" if is_new else f"{y_pct:.1f}% yday"
-        msg = f"{emoji} <b>V800 PERP {side} {sym}</b> - {day_label}\nToday: {today_pct:.1f}% | Yesterday: {y_txt}\nPERP Vol: ${vol:,.0f}\n{reason}\nPrice: {fmt(price)}\nMid: {fmt(mid)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
+
+        msg = f"{emoji} <b>V900 PERP {side} {sym}</b> - {group}\nCap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\nPumped: +{pumped:.1f}% (Need +{pump_thresh}%)\nShed so far: -{shed:.1f}% (Expected -{expected_shed}%)\nLow 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\nGlobal Vol: ${max(global_vol, vol_local):,.0f}\n{reason}\nPrice: {fmt(price_exec)}\nSL: {fmt(sl)}\nTP1: {fmt(tp1)}\nTP2: {fmt(tp2)}\nRunner: {fmt(runner)}"
         send_telegram(msg)
         print(f"{sym} {side} - {reason}")
 
-    save_json(VOL_FILE, vol_hist)
     save_json(ACTIVE_FILE, active)
     print(f"Done - Active: {len(active)}")
 
