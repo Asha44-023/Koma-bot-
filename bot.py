@@ -52,24 +52,19 @@ def get_group(cap_at_low):
     else:
         return "Big", 60.0, 20.0
 
-# --- V900.2 NEW: Days Since Spike from 7d sparkline ---
+# --- V900.2: Days Since Spike from 7d sparkline ---
 # Sparkline from CoinGecko = ~168 hourly points (7 days x 24h)
 # We group into 7 daily closes, then find last day with >+50% jump
 def days_since_spike(spark):
     if not spark or len(spark) < 48:
-        return 99  # Not enough data -> treat as grind, allow
-    # Build 7 daily closes: take last price of each 24h block
-    # Spark is oldest -> newest, chunk it
+        return 99, 0, []  # FIXED: was return 99 - crashed unpack
     n = len(spark)
-    # Use 24h chunks from the end backwards to align to now
     daily_closes = []
-    # Split into 7 equal chunks
     chunk = n // 7
     for i in range(7):
         start = i * chunk
         end = (i + 1) * chunk if i < 6 else n
         daily_closes.append(spark[end - 1])
-    # Find last spike day: daily change > +50%
     spike_idx = -1
     spike_pct = 0
     for i in range(1, len(daily_closes)):
@@ -333,8 +328,8 @@ def run_once():
             emoji = "🔴"
             # --- NEW: Entry Price Level ---
             entry_price = price_exec
-            entry_high = round(price_exec * 1.02, 8)  # Top of entry zone - don't chase above this
-            entry_low = round(price_exec * 0.98, 8)   # Bottom of entry zone
+            entry_high = round(price_exec * 1.02, 8)
+            entry_low = round(price_exec * 0.98, 8)
             valid_until = now + timedelta(hours=1)
         else:
             sl = round(price_exec * 0.90, 8)
