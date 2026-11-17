@@ -1,7 +1,7 @@
 # V900 FINAL - Pumped vs Shed Logic - 3 Levels Locked
 # Small +150% / Mid +100% / Big +60%
 # STRICT: Skip if shed > expected - no late chasing
-# Designed for 1 HOUR cron
+# TP Tracking: 7-day expiry + Day 5 Warning + Probability + Cause + Next Signal (EXPIRED + SL)
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -15,6 +15,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT_ID") or os.getenv("CHAT_ID")
 
 MIN_VOLUME = 5000000
+MAX_ACTIVE_DAYS = 7
+WARNING_DAY = 5
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 
@@ -94,6 +96,69 @@ def get_mexc_perps():
         movers[sym] = {"price": price, "vol": vol, "symbol": sym_raw}
     return movers
 
+def analyze_outcome(sig, cur, days):
+    entry = sig.get("price", 0)
+    tp1 = sig.get("tp1", 0)
+    sl = sig.get("sl", 0)
+    high_7d = sig.get("high_7d", entry)
+    if entry == 0 or tp1 == 0:
+        return 30, "Unknown - no data", "WAIT - No clear next signal", 0, 40, 30
+    total_dist = abs(entry - tp1)
+    moved = abs(entry - cur) if cur < entry else -abs(cur - entry)
+    progress = max(0, min(100, (moved / total_dist * 100) if total_dist > 0 else 0))
+    if progress >= 70:
+        p_tp1, p_chop, p_sl = 65, 25, 10
+        cause = "On track - shed in progress, momentum intact"
+    elif progress >= 40:
+        p_tp1, p_chop, p_sl = 45, 35, 20
+        cause = "Slowing - shed stalled, buyers defending support"
+    elif progress >= 20:
+        p_tp1, p_chop, p_sl = 30, 45, 25
+        cause = "Momentum lost - shed stalled for days, volume fading"
+    else:
+        if cur >= entry:
+            p_tp1, p_chop, p_sl = 15, 35, 50
+            cause = "Invalidated - price back above entry, pump won"
+        else:
+            p_tp1, p_chop, p_sl = 20, 50, 30
+            cause = "Dead - no momentum, chop / sideways"
+    if days >= 5 and progress < 50:
+        p_tp1 = max(10, p_tp1 - 15)
+        p_chop = p_chop + 10
+        cause += " | Overdue - past expected 3-5 days"
+    if cur >= high_7d or cur >= entry * 1.05:
+        next_sig = "INVALIDATED - DO NOT RE-SHORT | Next: WATCH LONG if it holds above high for 24h"
+        next_sig += f"\nRe-short only if pumps +15% to {fmt(entry * 1.15)} then rejects"
+    elif progress >= 50:
+        bounce = fmt(cur * 1.12)
+        next_sig = f"HOLD / RE-SHORT ON BOUNCE | Next: If bounces +12% to {bounce} and rejects, re-short"
+    elif progress >= 20:
+        next_sig = "WAIT - Shed never started properly | Next: Ignore until fresh pump +50% from here, then re-evaluate"
+    else:
+        next_sig = "NO TRADE - Chop / Invalidated | Next: Move on, ignore coin until new pump"
+    return p_tp1, cause, next_sig, progress, p_chop, p_sl
+
+def analyze_sl(sig, cur, days):
+    """NEW: What to expect after SL hit - for SHORT"""
+    entry = sig.get("price", 0)
+    high_7d = sig.get("high_7d", entry)
+    sl = sig.get("sl", entry)
+    # How far above SL / high did it go?
+    above_high_pct = (cur - high_7d) / high_7d * 100 if high_7d > 0 else 0
+    if cur >= high_7d:
+        cause = f"Invalidated - price broke above 7d high (+{above_high_pct:.1f}% above high). Pump won, buyers in control. Short thesis dead."
+        p_pump_again, p_dump, p_chop = 70, 15, 15
+        next_sig = "DO NOT RE-SHORT - Pump is still alive\nNext: 1) WAIT 24h - if holds above high, WATCH LONG\n2) Only re-short if it pumps +50% fresh from here and then rejects\n3) If it dumps back below entry, re-short on bounce to entry"
+    elif cur >= entry:
+        cause = "Shed failed - price reclaimed entry. Buyers defended, momentum flipped."
+        p_pump_again, p_dump, p_chop = 55, 25, 20
+        next_sig = "DO NOT RE-SHORT immediately\nNext: WAIT 24h. If price holds above entry, invalidated. If it falls back below entry and rejects, then re-short on bounce."
+    else:
+        cause = "SL hit on wick / volatility - price spiked to SL then fell back"
+        p_pump_again, p_dump, p_chop = 35, 40, 25
+        next_sig = "WICK SL - Can re-short on bounce\nNext: Wait for bounce +10% to entry, if it rejects, re-short with same SL."
+    return cause, next_sig, p_pump_again, p_dump, p_chop
+
 def check_active_tps(active, mexc, global_data):
     history = load_json(HISTORY_FILE, [])
     now = datetime.now(TZ)
@@ -125,6 +190,15 @@ def check_active_tps(active, mexc, global_data):
             elif cur >= tp2: hit = "TP2"
             elif cur >= tp1: hit = "TP1"
             elif cur <= sl: hit = "SL"
+        if not hit and days >= WARNING_DAY and not sig.get("warned_5d"):
+            p_tp1, cause, next_sig, progress, p_chop, p_sl = analyze_outcome(sig, cur, days)
+            pct_now = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
+            msg = f"⚠️ <b>{sym} Day {days:.1f} WARNING</b> - {group}\nStill no TP1 after {days:.1f} days (Expected: {expected})\nNow: {fmt(cur)} | Result so far: {pct_now:+.1f}% | Progress to TP1: {progress:.0f}%\nProbability to still hit TP1: {p_tp1}% | Chop: {p_chop}% | SL: {p_sl}%\nProbable Cause: {cause}\nAction: Consider exiting / move SL to entry. Bot will auto-expire on Day {MAX_ACTIVE_DAYS}."
+            send_telegram(msg)
+            sig["warned_5d"] = True
+            print(f"{sym} Day 5 WARNING sent - Progress {progress:.0f}%")
+        if not hit and days >= MAX_ACTIVE_DAYS:
+            hit = "EXPIRED"
         if hit:
             record = {
                 "sym": sym, "side": side, "group": group,
@@ -139,9 +213,19 @@ def check_active_tps(active, mexc, global_data):
             save_json(HISTORY_FILE, history)
             to_remove.append(sym)
             pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
-            msg = f"✅ <b>{sym} {hit} HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nProfit: {pct:+.1f}%\nDays taken: {days:.2f} days (Expected: {expected})\nPumped was +{sig.get('pumped',0):.1f}%"
+            if hit == "EXPIRED":
+                p_tp1, cause, next_sig, progress, p_chop, p_sl = analyze_outcome(sig, cur, days)
+                msg = f"⏰ <b>{sym} EXPIRED</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nResult: {pct:+.1f}% | Progress to TP1: {progress:.0f}% | Days held: {days:.2f} (Expected: {expected})\n\n📊 <b>Probability if held longer:</b>\nTP1: {p_tp1}% | Chop: {p_chop}% | SL: {p_sl}%\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n➡️ <b>Next Signal:</b>\n{next_sig}\n\nClosing - no more tracking"
+                print(f"{sym} EXPIRED after {days:.2f}d - Prob TP1 {p_tp1}%")
+            elif hit == "SL":
+                # NEW: SL gets Cause + Next Signal too
+                cause, next_sig, p_pump, p_dump, p_chop = analyze_sl(sig, cur, days)
+                msg = f"🛑 <b>{sym} SL HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nLoss: {pct:+.1f}% | Days: {days:.2f} (Expected: {expected})\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n📊 <b>What to expect next:</b>\nPump again: {p_pump}% | Dump back: {p_dump}% | Chop: {p_chop}%\n\n➡️ <b>Next Signal:</b>\n{next_sig}"
+                print(f"{sym} SL HIT in {days:.2f}d - Pump again {p_pump}%")
+            else:
+                msg = f"✅ <b>{sym} {hit} HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nProfit: {pct:+.1f}%\nDays taken: {days:.2f} days (Expected: {expected})\nPumped was +{sig.get('pumped',0):.1f}%"
+                print(f"{sym} {hit} HIT in {days:.2f}d - Expected {expected}")
             send_telegram(msg)
-            print(f"{sym} {hit} HIT in {days:.2f}d - Expected {expected}")
     for sym in to_remove:
         del active[sym]
     return active
@@ -149,13 +233,12 @@ def check_active_tps(active, mexc, global_data):
 def run_once():
     active = load_json(ACTIVE_FILE, {})
     now = datetime.now(TZ)
-    now_utc = datetime.now(UTC)
     fresh = {}
     for k,v in active.items():
         try:
             t = datetime.fromisoformat(str(v.get("time","")).replace("Z","+00:00"))
             if t.tzinfo is None: t = t.replace(tzinfo=TZ)
-            if (now - t).total_seconds() < 24*3600: fresh[k]=v
+            if (now - t).total_seconds() < MAX_ACTIVE_DAYS*24*3600: fresh[k]=v
         except: fresh[k]=v
     active = fresh
     print(f"Active: {len(active)} - {list(active.keys())}")
@@ -193,7 +276,6 @@ def run_once():
             continue
         side = None
         reason = ""
-        # === STRICT LOGIC - No late chasing ===
         if pumped >= pump_thresh:
             if shed >= expected_shed:
                 print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%) - move done, too late")
@@ -222,7 +304,7 @@ def run_once():
             "cap_at_low": cap_at_low, "group": group,
             "low_7d": low_7d, "high_7d": high_7d,
             "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner,
-            "reason": reason, "time": now.isoformat()
+            "reason": reason, "time": now.isoformat(), "warned_5d": False
         }
         active[sym] = signal
         exp_days = EXPECTED_DAYS.get(group, "3-5 days")
