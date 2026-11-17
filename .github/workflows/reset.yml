@@ -8,13 +8,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           git config user.name "bot"
           git config user.email "bot@github.com"
+          # Backup first - so you don't lose open trades forever
+          cp active.json active_backup_$(date -u +%Y%m%d_%H%M).json || echo "No active.json"
           echo '{}' > active.json
           echo '{"signals": {}, "daily_pnl": 0.0, "last_day": "2026-10-20"}' > cooldown.json
-          echo '{"closed": [], "open": {}}' > stats_v157.json
-          git add active.json cooldown.json stats_v157.json
-          git commit -m "RESET after V158 LH fix"
-          git pull --rebase
+          git add active.json cooldown.json active_backup_*.json || true
+          git commit -m "RESET - backup saved"
           git push
