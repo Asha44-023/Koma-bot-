@@ -1,7 +1,7 @@
 name: Keep Scheduler Alive
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '35 * * * *'
   workflow_dispatch:
 
 jobs:
