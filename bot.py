@@ -1,6 +1,7 @@
 # V900 FINAL - Pumped vs Shed Logic - 3 Levels Locked
 # Small +150% / Mid +100% / Big +60%
 # No pullback, No funding, No 3x, No 0.5% - Signal the moment it hits
+# Designed for 1 HOUR cron - 7d High stays, so late check still catches pump
 import json, os, requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -140,7 +141,6 @@ def run_once():
         global_vol = g.get("global_vol", vol_local)
 
         # FIX: If no CoinGecko data, SKIP - do not fake Pumped 0%
-        # Faking Small with Low=High=Price gave Pumped 0% and hid real pumps
         if cap_now == 0 or global_price == 0:
             print(f"{sym} SKIP - No global data, cannot calc Pumped")
             continue
@@ -152,15 +152,10 @@ def run_once():
             continue
 
         # === CAP AT LOW - Group locked at start of pump ===
-        # Cap moves with price, so we reverse it back to Low
-        # Cap at Low = Cap Now * (Low / Now)
         cap_at_low = cap_now * (low_7d / global_price) if global_price > 0 else cap_now
         group, pump_thresh, expected_shed = get_group(cap_at_low)
 
         # === PUMPED vs SHED MATHS - Using Global Prices ===
-        # Pumped = (High - Low) / Low
-        # Shed = (High - Now) / High
-        # Net = (Now - Low) / Low
         pumped = (high_7d - low_7d) / low_7d * 100 if low_7d > 0 else 0
         shed = (high_7d - global_price) / high_7d * 100 if high_7d > 0 else 0
         net = (global_price - low_7d) / low_7d * 100 if low_7d > 0 else 0
@@ -176,31 +171,24 @@ def run_once():
         reason = ""
 
         # === SIGNAL LOGIC - No pullback wait ===
-        # SHORT when Pumped hits threshold - signal at peak, before shed
-        # We use Pumped (Low to High), not Net, because High is the peak that was hit
-        # If price already shed a lot, we already missed peak - still signal if pumped hit and shed < expected?
-        # For this test version: signal if Pumped >= threshold AND Shed < expected_shed (still near top, not already dumped)
-        # If Shed already >= expected, the move is done, skip
-
+        # SHORT when Pumped hits threshold
+        # FIX FOR 1 HOUR CRON: Allow late entry
+        # Old: skip if shed >= expected (missed if 1h late)
+        # New: skip only if shed >= expected * 1.5 (really dumped already)
+        # Example Small: expected -45%, we still signal even if shed -60%, we skip only if shed -67.5%+
         if pumped >= pump_thresh:
-            if shed >= expected_shed:
-                print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%) - move done")
+            if shed >= expected_shed * 1.5:
+                print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%, limit -{expected_shed*1.5:.1f}%) - move done")
                 continue
             else:
                 side = "SHORT"
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now"
-        # LONG only if price already shed a lot and pumped was big - reversal after dump
-        # For now, LONG is disabled in test - we focus on SHORT first
-        # elif shed >= expected_shed and pumped >= pump_thresh:
-        #    side = "LONG"
 
         if side is None:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
 
         # SL / TP based on Expected Shed from scan
-        # SL: +10% above entry (if pump continues)
-        # TP1: 50% of expected shed, TP2: 100% of expected shed, Runner: 150%
         if side == "SHORT":
             sl = round(price_exec * 1.10, 8)
             tp1 = round(price_exec * (1 - (expected_shed/100)*0.5), 8)
