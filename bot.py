@@ -1,9 +1,8 @@
-# V900.2 FINAL - Pumped vs Shed Logic - 3 Levels Locked
+# V900.3 FINAL - Pumped vs Shed Logic - BOTH WAYS
 # Small +150% / Mid +100% / Big +60%
-# STRICT: Skip if shed > expected - no late chasing
-# NEW V900.2: Days-Since-Spike filter - BLOCK if spike was <2 days ago (no early entry)
-# NEW: Entry Price Level - Enter At + Entry Zone + Valid Until
-# TP Tracking: 7-day expiry + Day 5 Warning + Probability + Cause + Next Signal (EXPIRED + SL)
+# SHORT: Pumped hit, shed NOT done yet -> short the remaining shed
+# LONG: Pumped hit, shed DONE + overshoot -> long the bounce
+# V900.2 filters kept: Days-Since-Spike >=2, Entry Zone, 7-day expiry
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -52,12 +51,9 @@ def get_group(cap_at_low):
     else:
         return "Big", 60.0, 20.0
 
-# --- V900.2: Days Since Spike from 7d sparkline ---
-# Sparkline from CoinGecko = ~168 hourly points (7 days x 24h)
-# We group into 7 daily closes, then find last day with >+50% jump
 def days_since_spike(spark):
     if not spark or len(spark) < 48:
-        return 99, 0, []  # FIXED: was return 99 - crashed unpack
+        return 99, 0, []
     n = len(spark)
     daily_closes = []
     chunk = n // 7
@@ -75,7 +71,7 @@ def days_since_spike(spark):
             spike_idx = i
             spike_pct = chg
     if spike_idx == -1:
-        return 99, 0, daily_closes  # No spike = grind, safe
+        return 99, 0, daily_closes
     days_ago = (len(daily_closes) - 1) - spike_idx
     return days_ago, spike_pct, daily_closes
 
@@ -133,21 +129,21 @@ def analyze_outcome(sig, cur, days):
     if entry == 0 or tp1 == 0:
         return 30, "Unknown - no data", "WAIT - No clear next signal", 0, 40, 30
     total_dist = abs(entry - tp1)
-    moved = abs(entry - cur) if cur < entry else -abs(cur - entry)
+    moved = abs(entry - cur) if (sig.get("side")=="SHORT" and cur < entry) or (sig.get("side")=="LONG" and cur > entry) else -abs(cur - entry)
     progress = max(0, min(100, (moved / total_dist * 100) if total_dist > 0 else 0))
     if progress >= 70:
         p_tp1, p_chop, p_sl = 65, 25, 10
-        cause = "On track - shed in progress, momentum intact"
+        cause = "On track - move in progress, momentum intact"
     elif progress >= 40:
         p_tp1, p_chop, p_sl = 45, 35, 20
-        cause = "Slowing - shed stalled, buyers defending support"
+        cause = "Slowing - move stalled, opposite side defending"
     elif progress >= 20:
         p_tp1, p_chop, p_sl = 30, 45, 25
-        cause = "Momentum lost - shed stalled for days, volume fading"
+        cause = "Momentum lost - stalled for days, volume fading"
     else:
-        if cur >= entry:
+        if (sig.get("side")=="SHORT" and cur >= entry) or (sig.get("side")=="LONG" and cur <= entry):
             p_tp1, p_chop, p_sl = 15, 35, 50
-            cause = "Invalidated - price back above entry, pump won"
+            cause = "Invalidated - price back past entry, thesis wrong"
         else:
             p_tp1, p_chop, p_sl = 20, 50, 30
             cause = "Dead - no momentum, chop / sideways"
@@ -155,35 +151,65 @@ def analyze_outcome(sig, cur, days):
         p_tp1 = max(10, p_tp1 - 15)
         p_chop = p_chop + 10
         cause += " | Overdue - past expected 3-5 days"
-    if cur >= high_7d or cur >= entry * 1.05:
-        next_sig = "INVALIDATED - DO NOT RE-SHORT | Next: WATCH LONG if it holds above high for 24h"
-        next_sig += f"\nRe-short only if pumps +15% to {fmt(entry * 1.15)} then rejects"
-    elif progress >= 50:
-        bounce = fmt(cur * 1.12)
-        next_sig = f"HOLD / RE-SHORT ON BOUNCE | Next: If bounces +12% to {bounce} and rejects, re-short"
-    elif progress >= 20:
-        next_sig = "WAIT - Shed never started properly | Next: Ignore until fresh pump +50% from here, then re-evaluate"
-    else:
-        next_sig = "NO TRADE - Chop / Invalidated | Next: Move on, ignore coin until new pump"
+    if sig.get("side")=="SHORT":
+        if cur >= high_7d or cur >= entry * 1.05:
+            next_sig = "INVALIDATED - DO NOT RE-SHORT | Next: WATCH LONG if it holds above high for 24h"
+            next_sig += f"\nRe-short only if pumps +15% to {fmt(entry * 1.15)} then rejects"
+        elif progress >= 50:
+            bounce = fmt(cur * 1.12)
+            next_sig = f"HOLD / RE-SHORT ON BOUNCE | Next: If bounces +12% to {bounce} and rejects, re-short"
+        elif progress >= 20:
+            next_sig = "WAIT - Shed never started properly | Next: Ignore until fresh pump +50% from here, then re-evaluate"
+        else:
+            next_sig = "NO TRADE - Chop / Invalidated | Next: Move on, ignore coin until new pump"
+    else: # LONG
+        low_7d = sig.get("low_7d", entry)
+        if cur <= low_7d or cur <= entry * 0.95:
+            next_sig = "INVALIDATED - DO NOT RE-LONG | Broke below low, dump won"
+            next_sig += f"\nRe-long only if dumps -15% to {fmt(entry * 0.85)} then holds"
+        elif progress >= 50:
+            dip = fmt(cur * 0.88)
+            next_sig = f"HOLD / RE-LONG ON DIP | Next: If dips -12% to {dip} and holds, re-long"
+        elif progress >= 20:
+            next_sig = "WAIT - Bounce never started properly | Next: Ignore until fresh dump -50% from here, then re-evaluate"
+        else:
+            next_sig = "NO TRADE - Chop / Invalidated | Next: Move on, ignore coin until new pump"
     return p_tp1, cause, next_sig, progress, p_chop, p_sl
 
 def analyze_sl(sig, cur, days):
     entry = sig.get("price", 0)
     high_7d = sig.get("high_7d", entry)
+    low_7d = sig.get("low_7d", entry)
     sl = sig.get("sl", entry)
-    above_high_pct = (cur - high_7d) / high_7d * 100 if high_7d > 0 else 0
-    if cur >= high_7d:
-        cause = f"Invalidated - price broke above 7d high (+{above_high_pct:.1f}% above high). Pump won, buyers in control. Short thesis dead."
-        p_pump_again, p_dump, p_chop = 70, 15, 15
-        next_sig = "DO NOT RE-SHORT - Pump is still alive\nNext: 1) WAIT 24h - if holds above high, WATCH LONG\n2) Only re-short if it pumps +50% fresh from here and then rejects\n3) If it dumps back below entry, re-short on bounce to entry"
-    elif cur >= entry:
-        cause = "Shed failed - price reclaimed entry. Buyers defended, momentum flipped."
-        p_pump_again, p_dump, p_chop = 55, 25, 20
-        next_sig = "DO NOT RE-SHORT immediately\nNext: WAIT 24h. If price holds above entry, invalidated. If it falls back below entry and rejects, then re-short on bounce."
-    else:
-        cause = "SL hit on wick / volatility - price spiked to SL then fell back"
-        p_pump_again, p_dump, p_chop = 35, 40, 25
-        next_sig = "WICK SL - Can re-short on bounce\nNext: Wait for bounce +10% to entry, if it rejects, re-short with same SL."
+    side = sig.get("side","SHORT")
+    if side == "SHORT":
+        above_high_pct = (cur - high_7d) / high_7d * 100 if high_7d > 0 else 0
+        if cur >= high_7d:
+            cause = f"Invalidated - price broke above 7d high (+{above_high_pct:.1f}% above high). Pump won, buyers in control. Short thesis dead."
+            p_pump_again, p_dump, p_chop = 70, 15, 15
+            next_sig = "DO NOT RE-SHORT - Pump is still alive\nNext: 1) WAIT 24h - if holds above high, WATCH LONG\n2) Only re-short if it pumps +50% fresh from here and then rejects\n3) If it dumps back below entry, re-short on bounce to entry"
+        elif cur >= entry:
+            cause = "Shed failed - price reclaimed entry. Buyers defended, momentum flipped."
+            p_pump_again, p_dump, p_chop = 55, 25, 20
+            next_sig = "DO NOT RE-SHORT immediately\nNext: WAIT 24h. If price holds above entry, invalidated. If it falls back below entry and rejects, then re-short on bounce."
+        else:
+            cause = "SL hit on wick / volatility - price spiked to SL then fell back"
+            p_pump_again, p_dump, p_chop = 35, 40, 25
+            next_sig = "WICK SL - Can re-short on bounce\nNext: Wait for bounce +10% to entry, if it rejects, re-short with same SL."
+    else: # LONG SL
+        below_low_pct = (low_7d - cur) / low_7d * 100 if low_7d > 0 else 0
+        if cur <= low_7d:
+            cause = f"Invalidated - price broke below 7d low (-{below_low_pct:.1f}% below low). Dump won, sellers in control. Long thesis dead."
+            p_pump_again, p_dump, p_chop = 15, 70, 15
+            next_sig = "DO NOT RE-LONG - Dump is still alive\nNext: 1) WAIT 24h - if holds below low, WATCH SHORT\n2) Only re-long if it dumps -50% fresh from here and then holds\n3) If it bounces back above entry, re-long on dip to entry"
+        elif cur <= entry:
+            cause = "Bounce failed - price fell back below entry. Sellers defended, momentum flipped."
+            p_pump_again, p_dump, p_chop = 25, 55, 20
+            next_sig = "DO NOT RE-LONG immediately\nNext: WAIT 24h. If price holds below entry, invalidated. If it bounces back above entry and holds, then re-long on dip."
+        else:
+            cause = "SL hit on wick / volatility - price dipped to SL then bounced back"
+            p_pump_again, p_dump, p_chop = 40, 35, 25
+            next_sig = "WICK SL - Can re-long on dip\nNext: Wait for dip -10% to entry, if it holds, re-long with same SL."
     return cause, next_sig, p_pump_again, p_dump, p_chop
 
 def check_active_tps(active, mexc, global_data):
@@ -302,45 +328,50 @@ def run_once():
             continue
         side = None
         reason = ""
+        # === V900.3 BOTH WAYS ===
         if pumped >= pump_thresh:
-            if shed >= expected_shed:
-                print(f"{sym} SKIP - Already shed -{shed:.1f}% (expected -{expected_shed}%) - move done, too late")
+            days_ago, spike_pct, daily_closes = days_since_spike(spark)
+            print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%)")
+            if days_ago < 2:
+                print(f"{sym} SKIP V900.2 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
                 continue
-            else:
-                # --- V900.2: Days-Since-Spike check BEFORE allowing SHORT ---
-                days_ago, spike_pct, daily_closes = days_since_spike(spark)
-                print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%)")
-                if days_ago < 2:
-                    print(f"{sym} SKIP V900.2 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
-                    continue
+            if shed < expected_shed:
+                # SHORT - dump not done yet
                 side = "SHORT"
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | No 1-day spike, grind pump, cooled"
+            else:
+                # LONG - dump DONE, now buy bounce - only if still above low
+                if net <= 0:
+                    print(f"{sym} SKIP LONG - Net {net:.1f}% <= 0, broke below 7d low, dead coin")
+                    continue
+                # Don't LONG if it already bounced a lot from the bottom of shed
+                # Shed bottom = Now is the low point of the dump, so LONG is fresh
+                side = "LONG"
+                reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
+                if days_ago == 99:
+                    reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
         if side is None:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
+        # === SL / TP - Mirrored ===
+        entry_price = price_exec
+        entry_high = round(price_exec * 1.02, 8)
+        entry_low = round(price_exec * 0.98, 8)
+        valid_until = now + timedelta(hours=1)
         if side == "SHORT":
             sl = round(price_exec * 1.10, 8)
             tp1 = round(price_exec * (1 - (expected_shed/100)*0.5), 8)
             tp2 = round(price_exec * (1 - expected_shed/100), 8)
             runner = round(price_exec * (1 - (expected_shed/100)*1.5), 8)
             emoji = "🔴"
-            # --- NEW: Entry Price Level ---
-            entry_price = price_exec
-            entry_high = round(price_exec * 1.02, 8)
-            entry_low = round(price_exec * 0.98, 8)
-            valid_until = now + timedelta(hours=1)
-        else:
+        else: # LONG - mirror: TPs are + bounce, SL -10%
             sl = round(price_exec * 0.90, 8)
-            tp1 = round(price_exec * 1.15, 8)
-            tp2 = round(price_exec * 1.25, 8)
-            runner = round(price_exec * 1.40, 8)
+            tp1 = round(price_exec * (1 + (expected_shed/100)*0.5), 8)
+            tp2 = round(price_exec * (1 + expected_shed/100), 8)
+            runner = round(price_exec * (1 + (expected_shed/100)*1.5), 8)
             emoji = "🟢"
-            entry_price = price_exec
-            entry_high = round(price_exec * 1.02, 8)
-            entry_low = round(price_exec * 0.98, 8)
-            valid_until = now + timedelta(hours=1)
         signal = {
             "sym": sym, "side": side, "price": entry_price,
             "entry_high": entry_high, "entry_low": entry_low,
@@ -355,19 +386,19 @@ def run_once():
         }
         active[sym] = signal
         exp_days = EXPECTED_DAYS.get(group, "3-5 days")
-        # --- NEW Telegram format with Entry Level ---
         msg = (
-            f"{emoji} <b>V900.2 PERP {side} {sym}</b> - {group}\n"
+            f"{emoji} <b>V900.3 PERP {side} {sym}</b> - {group}\n"
             f"Expected to TP2: {exp_days}\n"
             f"Cap at Low: ${cap_at_low/1e6:.1f}M (Now ${cap_now/1e6:.1f}M)\n"
             f"Pumped: +{pumped:.1f}% (Need +{pump_thresh}%)\n"
             f"Shed so far: -{shed:.1f}% (Expected -{expected_shed}%)\n"
+            f"Net: +{net:.1f}%\n"
             f"Low 7d: {fmt(low_7d)} | High 7d: {fmt(high_7d)}\n"
             f"Global Vol: ${max(global_vol, vol_local):,.0f}\n"
             f"{reason}\n"
             f"\n🎯 <b>ENTER AT: {fmt(entry_price)}</b>\n"
             f"Entry Zone: {fmt(entry_low)} - {fmt(entry_high)}\n"
-            f"Valid Until: {valid_until.strftime('%H:%M')} EAT (+1h) - If price is above {fmt(entry_high)} when you see this, SKIP, do not chase\n"
+            f"Valid Until: {valid_until.strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
             f"SL: {fmt(sl)}\n"
             f"TP1: {fmt(tp1)}\n"
             f"TP2: {fmt(tp2)}\n"
