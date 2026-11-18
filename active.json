@@ -1,1 +1,28 @@
-{}
+{
+  "BTW": {
+    "sym": "BTW",
+    "side": "LONG",
+    "price": 0.4653,
+    "entry_high": 0.474606,
+    "entry_low": 0.455994,
+    "valid_until": "2026-11-18T15:04:58.763378+03:00",
+    "pumped": 229.1856542895382,
+    "shed": 58.601872044206885,
+    "net": 36.27669837489781,
+    "cap_at_low": 513821591.18185717,
+    "group": "Mid",
+    "low_7d": 0.34127551191515193,
+    "high_7d": 1.1234300268278639,
+    "sl": 0.41877,
+    "tp1": 0.535095,
+    "tp2": 0.60489,
+    "runner": 0.674685,
+    "reason": "Mid pumped +229.2% hit +100.0%, shed -58.6% DONE (expected -30.0%), net still +36.3% - LONG bounce now | No 1-day spike, grind pump, cooled",
+    "time": "2026-11-18T14:04:58.763378+03:00",
+    "warned_5d": false,
+    "days_since_spike": 99,
+    "spike_pct": 0,
+    "leg": 1,
+    "leg2_active": false
+  }
+}
