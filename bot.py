@@ -1,10 +1,11 @@
-# V900.3 FINAL - Pumped vs Shed Logic - BOTH WAYS - BEST ONLY
+# V900.3 FINAL - Pumped vs Shed Logic - BOTH WAYS - BEST ONLY + LEG 2 RE-ENTRY
 # Small +150% / Mid +100% / Big +60%
 # SHORT: Pumped hit, shed NOT done yet -> short the remaining shed
 # LONG: Pumped hit, shed DONE + overshoot -> long the bounce
 # BEST ONLY: Group first (Big > Mid > Small), then Net, then Vol - No score
 # V900.2 filters kept: Days-Since-Spike >=2, Entry Zone, 7-day expiry
 # AKE FIX: Don't SHORT if price still >= High, Don't LONG if price still <= Low
+# V900.3 NEW - LEG 2: After TP1, take profit, wait for 12% bounce/dip, re-enter to TP2
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -24,6 +25,9 @@ MAX_SIGNALS_PER_SCAN = 1
 GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
+# V900.3 - Leg 2 settings
+LEG2_BOUNCE_PCT = 0.12
+LEG2_CONFIRM_PCT = 0.02
 
 def load_json(path, default):
     try:
@@ -236,18 +240,114 @@ def check_active_tps(active, mexc, global_data):
         tp1, tp2, runner, sl = sig.get("tp1",0), sig.get("tp2",0), sig.get("runner",0), sig.get("sl",0)
         group = sig.get("group","Small")
         expected = EXPECTED_DAYS.get(group, "3-5 days")
+        leg = sig.get("leg", 1)
+
+        # ===== V900.3 LEG 2 - WAITING FOR BOUNCE/DIP AFTER TP1 =====
+        if leg == 2 and not sig.get("leg2_active"):
+            tp1_price = sig.get("tp1_hit_price", tp1)
+            bounce_target = sig.get("bounce_target", 0)
+            bounce_high = sig.get("bounce_high", 0)
+            bounce_done = sig.get("bounce_done", False)
+            if side == "SHORT":
+                if cur > bounce_high:
+                    sig["bounce_high"] = cur
+                    bounce_high = cur
+                if not bounce_done and cur >= bounce_target:
+                    sig["bounce_done"] = True
+                    bounce_done = True
+                    msg = f"📈 <b>{sym} LEG 2 - BOUNCE REACHED</b> - {group}\nTP1 was {fmt(tp1_price)} -> Bounced to {fmt(cur)} (+{LEG2_BOUNCE_PCT*100:.0f}%)\nNow WAIT for rejection - re-entry when price falls 2% below bounce high.\nBounce High so far: {fmt(bounce_high)}\nDo NOT enter yet."
+                    send_telegram(msg)
+                    print(f"{sym} LEG2 bounce reached at {cur}")
+                    continue
+                if bounce_done and cur <= bounce_high * (1 - LEG2_CONFIRM_PCT):
+                    new_entry = cur
+                    new_sl = round(bounce_high * 1.02, 8)
+                    new_tp1 = tp2
+                    new_tp2 = runner
+                    new_runner = round(tp2 * 0.85, 8) if side == "SHORT" else round(tp2 * 1.15, 8)
+                    msg = (
+                        f"🔁 <b>LEG 2 RE-ENTRY SHORT {sym}</b> - {group}\n"
+                        f"Leg 1 TP1 {fmt(tp1_price)} hit, bounced to {fmt(bounce_high)}, rejected.\n"
+                        f"\n🎯 <b>ENTER AT: {fmt(new_entry)}</b>\n"
+                        f"Entry Zone: {fmt(new_entry*0.98)} - {fmt(new_entry*1.02)}\n"
+                        f"SL: {fmt(new_sl)} (above bounce high)\n"
+                        f"TP1: {fmt(new_tp1)} (old TP2)\n"
+                        f"TP2: {fmt(new_tp2)} (old Runner)\n"
+                        f"Runner: {fmt(new_runner)}\n"
+                        f"Valid Until: {(now + timedelta(hours=1)).strftime('%H:%M')} EAT (+1h) - If outside zone, SKIP"
+                    )
+                    send_telegram(msg)
+                    sig.update({"price": new_entry, "sl": new_sl, "tp1": new_tp1, "tp2": new_tp2, "runner": new_runner, "leg": 2, "leg2_active": True, "time": now.isoformat()})
+                    print(f"{sym} LEG2 RE-ENTRY SHORT sent at {new_entry}")
+                    continue
+                if days >= MAX_ACTIVE_DAYS:
+                    record = {"sym": sym, "side": side, "group": group, "entry": entry, "exit_price": cur, "hit": "TP1 + LEG2 EXPIRED - No bounce", "pumped": sig.get("pumped"), "shed": sig.get("shed"), "time_in": sig.get("time"), "time_out": now.isoformat(), "days_taken": round(days, 2), "expected_days": expected, "tp1": tp1, "tp2": tp2, "runner": runner, "sl": sl}
+                    history.append(record); save_json(HISTORY_FILE, history); to_remove.append(sym)
+                    send_telegram(f"⏰ <b>{sym} LEG 2 EXPIRED</b> - TP1 was hit, but no +12% bounce in {days:.1f}d. Closing. Profit from Leg 1 kept.")
+                continue
+            else:
+                if cur < bounce_high or bounce_high == 0:
+                    sig["bounce_high"] = cur
+                    bounce_high = cur
+                if not bounce_done and cur <= bounce_target:
+                    sig["bounce_done"] = True
+                    bounce_done = True
+                    msg = f"📉 <b>{sym} LEG 2 - DIP REACHED</b> - {group}\nTP1 was {fmt(tp1_price)} -> Dipped to {fmt(cur)} (-{LEG2_BOUNCE_PCT*100:.0f}%)\nNow WAIT for hold - re-entry when price rises 2% above dip low.\nDip Low so far: {fmt(bounce_high)}\nDo NOT enter yet."
+                    send_telegram(msg)
+                    print(f"{sym} LEG2 dip reached at {cur}")
+                    continue
+                if bounce_done and cur >= bounce_high * (1 + LEG2_CONFIRM_PCT):
+                    new_entry = cur
+                    new_sl = round(bounce_high * 0.98, 8)
+                    new_tp1 = tp2
+                    new_tp2 = runner
+                    new_runner = round(tp2 * 1.15, 8)
+                    msg = (
+                        f"🔁 <b>LEG 2 RE-ENTRY LONG {sym}</b> - {group}\n"
+                        f"Leg 1 TP1 {fmt(tp1_price)} hit, dipped to {fmt(bounce_high)}, held.\n"
+                        f"\n🎯 <b>ENTER AT: {fmt(new_entry)}</b>\n"
+                        f"Entry Zone: {fmt(new_entry*0.98)} - {fmt(new_entry*1.02)}\n"
+                        f"SL: {fmt(new_sl)} (below dip low)\n"
+                        f"TP1: {fmt(new_tp1)} (old TP2)\n"
+                        f"TP2: {fmt(new_tp2)} (old Runner)\n"
+                        f"Runner: {fmt(new_runner)}\n"
+                        f"Valid Until: {(now + timedelta(hours=1)).strftime('%H:%M')} EAT (+1h) - If outside zone, SKIP"
+                    )
+                    send_telegram(msg)
+                    sig.update({"price": new_entry, "sl": new_sl, "tp1": new_tp1, "tp2": new_tp2, "runner": new_runner, "leg": 2, "leg2_active": True, "time": now.isoformat()})
+                    print(f"{sym} LEG2 RE-ENTRY LONG sent at {new_entry}")
+                    continue
+                if days >= MAX_ACTIVE_DAYS:
+                    record = {"sym": sym, "side": side, "group": group, "entry": entry, "exit_price": cur, "hit": "TP1 + LEG2 EXPIRED - No dip", "pumped": sig.get("pumped"), "shed": sig.get("shed"), "time_in": sig.get("time"), "time_out": now.isoformat(), "days_taken": round(days, 2), "expected_days": expected, "tp1": tp1, "tp2": tp2, "runner": runner, "sl": sl}
+                    history.append(record); save_json(HISTORY_FILE, history); to_remove.append(sym)
+                    send_telegram(f"⏰ <b>{sym} LEG 2 EXPIRED</b> - TP1 was hit, but no -12% dip in {days:.1f}d. Closing. Profit from Leg 1 kept.")
+                continue
+
         hit = None
-        if side == "SHORT":
-            if cur <= runner: hit = "RUNNER"
-            elif cur <= tp2: hit = "TP2"
-            elif cur <= tp1: hit = "TP1"
-            elif cur >= sl: hit = "SL"
+        if sig.get("leg2_active"):
+            if side == "SHORT":
+                if cur <= runner: hit = "RUNNER"
+                elif cur <= tp2: hit = "TP2"
+                elif cur <= tp1: hit = "TP1-LEG2"
+                elif cur >= sl: hit = "SL-LEG2"
+            else:
+                if cur >= runner: hit = "RUNNER"
+                elif cur >= tp2: hit = "TP2"
+                elif cur >= tp1: hit = "TP1-LEG2"
+                elif cur <= sl: hit = "SL-LEG2"
         else:
-            if cur >= runner: hit = "RUNNER"
-            elif cur >= tp2: hit = "TP2"
-            elif cur >= tp1: hit = "TP1"
-            elif cur <= sl: hit = "SL"
-        if not hit and days >= WARNING_DAY and not sig.get("warned_5d"):
+            if side == "SHORT":
+                if cur <= runner: hit = "RUNNER"
+                elif cur <= tp2: hit = "TP2"
+                elif cur <= tp1: hit = "TP1"
+                elif cur >= sl: hit = "SL"
+            else:
+                if cur >= runner: hit = "RUNNER"
+                elif cur >= tp2: hit = "TP2"
+                elif cur >= tp1: hit = "TP1"
+                elif cur <= sl: hit = "SL"
+
+        if not hit and days >= WARNING_DAY and not sig.get("warned_5d") and not sig.get("leg2_active"):
             p_tp1, cause, next_sig, progress, p_chop, p_sl = analyze_outcome(sig, cur, days)
             pct_now = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
             msg = f"⚠️ <b>{sym} Day {days:.1f} WARNING</b> - {group}\nStill no TP1 after {days:.1f} days (Expected: {expected})\nNow: {fmt(cur)} | Result so far: {pct_now:+.1f}% | Progress to TP1: {progress:.0f}%\nProbability to still hit TP1: {p_tp1}% | Chop: {p_chop}% | SL: {p_sl}%\nProbable Cause: {cause}\nAction: Consider exiting / move SL to entry. Bot will auto-expire on Day {MAX_ACTIVE_DAYS}."
@@ -257,6 +357,29 @@ def check_active_tps(active, mexc, global_data):
         if not hit and days >= MAX_ACTIVE_DAYS:
             hit = "EXPIRED"
         if hit:
+            if hit == "TP1" and not sig.get("leg2_active"):
+                pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
+                if side == "SHORT":
+                    bounce_target = round(cur * (1 + LEG2_BOUNCE_PCT), 8)
+                    bounce_msg = f"Wait for +12% bounce to {fmt(bounce_target)} then rejection, then re-enter SHORT to TP2 {fmt(tp2)}"
+                else:
+                    bounce_target = round(cur * (1 - LEG2_BOUNCE_PCT), 8)
+                    bounce_msg = f"Wait for -12% dip to {fmt(bounce_target)} then hold, then re-enter LONG to TP2 {fmt(tp2)}"
+                msg = (
+                    f"✅ <b>{sym} TP1 HIT - TAKE PROFIT - LEG 1 DONE</b> - {group}\n"
+                    f"Entry: {fmt(entry)} -> Now: {fmt(cur)}\n"
+                    f"Profit: {pct:+.1f}%\n"
+                    f"Days taken: {days:.2f} days (Expected: {expected})\n"
+                    f"Pumped was +{sig.get('pumped',0):.1f}%\n\n"
+                    f"🔁 <b>LEG 2 - WAITING FOR BOUNCE/DIP</b>\n"
+                    f"{bounce_msg}\n"
+                    f"Bot will alert you when bounce is reached and when to re-enter. DO NOT chase now."
+                )
+                send_telegram(msg)
+                print(f"{sym} TP1 HIT - Switching to LEG 2 waiting, bounce_target {bounce_target}")
+                sig.update({"leg": 2, "tp1_hit_price": cur, "bounce_target": bounce_target, "bounce_high": cur, "bounce_done": False, "leg2_active": False, "warned_5d": False, "time": now.isoformat()})
+                continue
+
             record = {
                 "sym": sym, "side": side, "group": group,
                 "entry": entry, "exit_price": cur, "hit": hit,
@@ -274,10 +397,11 @@ def check_active_tps(active, mexc, global_data):
                 p_tp1, cause, next_sig, progress, p_chop, p_sl = analyze_outcome(sig, cur, days)
                 msg = f"⏰ <b>{sym} EXPIRED</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nResult: {pct:+.1f}% | Progress to TP1: {progress:.0f}% | Days held: {days:.2f} (Expected: {expected})\n\n📊 <b>Probability if held longer:</b>\nTP1: {p_tp1}% | Chop: {p_chop}% | SL: {p_sl}%\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n➡️ <b>Next Signal:</b>\n{next_sig}\n\nClosing - no more tracking"
                 print(f"{sym} EXPIRED after {days:.2f}d - Prob TP1 {p_tp1}%")
-            elif hit == "SL":
+            elif hit in ("SL", "SL-LEG2"):
                 cause, next_sig, p_pump, p_dump, p_chop = analyze_sl(sig, cur, days)
-                msg = f"🛑 <b>{sym} SL HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nLoss: {pct:+.1f}% | Days: {days:.2f} (Expected: {expected})\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n📊 <b>What to expect next:</b>\nPump again: {p_pump}% | Dump back: {p_dump}% | Chop: {p_chop}%\n\n➡️ <b>Next Signal:</b>\n{next_sig}"
-                print(f"{sym} SL HIT in {days:.2f}d - Pump again {p_pump}%")
+                leg_label = "LEG 2" if "LEG2" in hit else "LEG 1"
+                msg = f"🛑 <b>{sym} SL HIT ({leg_label})</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nLoss: {pct:+.1f}% | Days: {days:.2f} (Expected: {expected})\n\n🔍 <b>Probable Cause:</b>\n{cause}\n\n📊 <b>What to expect next:</b>\nPump again: {p_pump}% | Dump back: {p_dump}% | Chop: {p_chop}%\n\n➡️ <b>Next Signal:</b>\n{next_sig}"
+                print(f"{sym} SL HIT ({leg_label}) in {days:.2f}d - Pump again {p_pump}%")
             else:
                 msg = f"✅ <b>{sym} {hit} HIT</b> - {group}\nEntry: {fmt(entry)} -> Now: {fmt(cur)}\nProfit: {pct:+.1f}%\nDays taken: {days:.2f} days (Expected: {expected})\nPumped was +{sig.get('pumped',0):.1f}%"
                 print(f"{sym} {hit} HIT in {days:.2f}d - Expected {expected}")
@@ -352,8 +476,6 @@ def run_once():
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
-        # === AKE FIX - Don't enter while still making new High / Low ===
-        # SHORT only if price is back BELOW High, LONG only if price is back ABOVE Low
         if side == "SHORT" and global_price >= high_7d:
             print(f"{sym} SKIP V900.3 - Price {fmt(global_price)} still >= High {fmt(high_7d)} - still making new high, wait for price back below High")
             continue
@@ -392,8 +514,6 @@ def run_once():
             "days_ago": days_ago, "spike_pct": spike_pct,
             "expected_shed": expected_shed
         })
-    # === V900.3 BEST ONLY - Same as manual ranking ===
-    # Sort by: Group first, then Net, then Vol - No score
     if candidates:
         candidates.sort(key=lambda x: (GROUP_RANK.get(x["group"], 0), x["net"], x["vol"]), reverse=True)
         best = candidates[0]
@@ -411,7 +531,8 @@ def run_once():
             "sl": best["sl"], "tp1": best["tp1"], "tp2": best["tp2"], "runner": best["runner"],
             "reason": best["reason"], "time": now.isoformat(), "warned_5d": False,
             "days_since_spike": best["days_ago"],
-            "spike_pct": best["spike_pct"]
+            "spike_pct": best["spike_pct"],
+            "leg": 1, "leg2_active": False
         }
         active[sym] = signal
         exp_days = EXPECTED_DAYS.get(best["group"], "3-5 days")
@@ -429,8 +550,8 @@ def run_once():
             f"Entry Zone: {fmt(best['entry_low'])} - {fmt(best['entry_high'])}\n"
             f"Valid Until: {best['valid_until'].strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
             f"SL: {fmt(best['sl'])}\n"
-            f"TP1: {fmt(best['tp1'])}\n"
-            f"TP2: {fmt(best['tp2'])}\n"
+            f"TP1: {fmt(best['tp1'])} - TAKE PROFIT, then wait for Leg 2\n"
+            f"TP2: {fmt(best['tp2'])} - Via Leg 2 re-entry after bounce/dip\n"
             f"Runner: {fmt(best['runner'])}"
         )
         send_telegram(msg)
