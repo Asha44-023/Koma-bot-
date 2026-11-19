@@ -6,6 +6,9 @@
 # V900.2 filters kept: Days-Since-Spike >=2, Entry Zone, 7-day expiry
 # AKE FIX: Don't SHORT if price still >= High, Don't LONG if price still <= Low
 # V900.3 NEW - LEG 2: After TP1, take profit, wait for 12% bounce/dip, re-enter to TP2
+# V900.3 FIX 2026-11-19 - BTW BUG: TP2 / Runner are INDEPENDENT, not blocked by Leg 2 wait.
+# If price passes TP2 without the 12% bounce/dip, alert "TP2 HIT WITHOUT LEG 2 - LEG 2 SKIPPED", do NOT stay stuck waiting for dip/bounce.
+# TP1 / TP2 = 1 hit = alert. Retest is NOT required.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -241,6 +244,34 @@ def check_active_tps(active, mexc, global_data):
         group = sig.get("group","Small")
         expected = EXPECTED_DAYS.get(group, "3-5 days")
         leg = sig.get("leg", 1)
+
+        # ===== V900.3 FIX - LEG 2 WAITING: TP2 / RUNNER ARE INDEPENDENT =====
+        # FIX: Check this BEFORE the bounce/dip wait. If price runs straight through TP2
+        # without the 12% bounce/dip, we must NOT stay stuck waiting.
+        # BTW example: LONG Entry 0.4653 -> TP1 0.5461 hit -> price ran to 0.69, straight through TP2 0.60489,
+        # dip to 0.480568 never came, old code never alerted TP2 because it was stuck in leg==2 wait.
+        if leg == 2 and not sig.get("leg2_active"):
+            tp2_hit = (cur <= tp2) if side == "SHORT" else (cur >= tp2)
+            runner_hit = (cur <= runner) if side == "SHORT" else (cur >= runner)
+            if runner_hit or tp2_hit:
+                hit_label = "RUNNER HIT WITHOUT LEG 2 - LEG 2 SKIPPED" if runner_hit else "TP2 HIT WITHOUT LEG 2 - LEG 2 SKIPPED"
+                pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
+                # TP2 here is original TP2, Runner is original Runner - use original entry for profit calc
+                # Original entry is stored in sig before Leg 1, but sig["price"] is still Leg 1 entry at this point (not yet overwritten by Leg 2 re-entry), so pct is correct.
+                msg = (
+                    f"✅ <b>{sym} {hit_label}</b> - {group}\n"
+                    f"Leg 1 TP1 hit, then price ran straight through TP2 without the 12% bounce/dip.\n"
+                    f"Leg 1 Entry: {fmt(entry)} -> Now: {fmt(cur)}\n"
+                    f"Profit if held from Leg 1: {pct:+.1f}%\n"
+                    f"TP2 was: {fmt(tp2)} | Runner was: {fmt(runner)}\n"
+                    f"Leg 2 bounce/dip to {fmt(sig.get('bounce_target', 0))} NEVER came - LEG 2 SKIPPED, DO NOT wait for it.\n"
+                    f"Days taken: {days:.2f} days (Expected: {expected})"
+                )
+                send_telegram(msg)
+                print(f"{sym} {hit_label} at {cur} - Leg 2 skipped")
+                record = {"sym": sym, "side": side, "group": group, "entry": entry, "exit_price": cur, "hit": hit_label, "pumped": sig.get("pumped"), "shed": sig.get("shed"), "time_in": sig.get("time"), "time_out": now.isoformat(), "days_taken": round(days, 2), "expected_days": expected, "tp1": tp1, "tp2": tp2, "runner": runner, "sl": sl}
+                history.append(record); save_json(HISTORY_FILE, history); to_remove.append(sym)
+                continue
 
         # ===== V900.3 LEG 2 - WAITING FOR BOUNCE/DIP AFTER TP1 =====
         if leg == 2 and not sig.get("leg2_active"):
