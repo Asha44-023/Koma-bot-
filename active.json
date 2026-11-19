@@ -1,1 +1,28 @@
-{}
+{
+  "PIEVERSE": {
+    "sym": "PIEVERSE",
+    "side": "SHORT",
+    "price": 3.0163,
+    "entry_high": 3.076626,
+    "entry_low": 2.955974,
+    "valid_until": "2026-11-19T17:05:16.105567+03:00",
+    "pumped": 119.81516141097597,
+    "shed": 13.276668667858587,
+    "net": 90.63103074872213,
+    "cap_at_low": 440348454.1331039,
+    "group": "Mid",
+    "low_7d": 1.605195118539489,
+    "high_7d": 3.5284622407786848,
+    "sl": 3.31793,
+    "tp1": 2.563855,
+    "tp2": 2.11141,
+    "runner": 1.658965,
+    "reason": "Mid pumped +119.8% hit +100.0%, shed only -13.3% so far, expected -30.0% - SHORT now | No 1-day spike, grind pump, cooled",
+    "time": "2026-11-19T16:05:16.105567+03:00",
+    "warned_5d": false,
+    "days_since_spike": 99,
+    "spike_pct": 0,
+    "leg": 1,
+    "leg2_active": false
+  }
+}
