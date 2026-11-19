@@ -9,6 +9,9 @@
 # V900.3 FIX 2026-11-19 - BTW BUG: TP2 / Runner are INDEPENDENT, not blocked by Leg 2 wait.
 # If price passes TP2 without the 12% bounce/dip, alert "TP2 HIT WITHOUT LEG 2 - LEG 2 SKIPPED", do NOT stay stuck waiting for dip/bounce.
 # TP1 / TP2 = 1 hit = alert. Retest is NOT required.
+# V900.3 PATCH 2026-11-19 - EVAA RULE / TP1-ONLY: Fresh pump = TP1 ONLY, close all, no Leg 2.
+# General cap-based rule: Small <60% shed done + <=3d spike, Mid <70% + <=4d, Big <75% + <=5d = TP1 ONLY.
+# EVAA example: Small, shed 19.4% / expected 45% = 43%, spike 2d ago -> TP1 ONLY = True, would have closed at TP1 on 18th.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -61,6 +64,20 @@ def get_group(cap_at_low):
         return "Mid", 100.0, 30.0
     else:
         return "Big", 60.0, 20.0
+
+def is_tp1_only(group, shed, expected_shed, days_ago):
+    # V900.3 PATCH - EVAA RULE: Fresh pump = TP1 ONLY
+    # shed_ratio = how much of expected shed is already done
+    # If shed is not mostly done AND spike was recent, pump is still alive
+    if expected_shed <= 0:
+        return False
+    shed_ratio = shed / expected_shed
+    if group == "Small":
+        return shed_ratio < 0.60 and days_ago <= 3
+    elif group == "Mid":
+        return shed_ratio < 0.70 and days_ago <= 4
+    else: # Big
+        return shed_ratio < 0.75 and days_ago <= 5
 
 def days_since_spike(spark):
     if not spark or len(spark) < 48:
@@ -246,18 +263,12 @@ def check_active_tps(active, mexc, global_data):
         leg = sig.get("leg", 1)
 
         # ===== V900.3 FIX - LEG 2 WAITING: TP2 / RUNNER ARE INDEPENDENT =====
-        # FIX: Check this BEFORE the bounce/dip wait. If price runs straight through TP2
-        # without the 12% bounce/dip, we must NOT stay stuck waiting.
-        # BTW example: LONG Entry 0.4653 -> TP1 0.5461 hit -> price ran to 0.69, straight through TP2 0.60489,
-        # dip to 0.480568 never came, old code never alerted TP2 because it was stuck in leg==2 wait.
         if leg == 2 and not sig.get("leg2_active"):
             tp2_hit = (cur <= tp2) if side == "SHORT" else (cur >= tp2)
             runner_hit = (cur <= runner) if side == "SHORT" else (cur >= runner)
             if runner_hit or tp2_hit:
                 hit_label = "RUNNER HIT WITHOUT LEG 2 - LEG 2 SKIPPED" if runner_hit else "TP2 HIT WITHOUT LEG 2 - LEG 2 SKIPPED"
                 pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
-                # TP2 here is original TP2, Runner is original Runner - use original entry for profit calc
-                # Original entry is stored in sig before Leg 1, but sig["price"] is still Leg 1 entry at this point (not yet overwritten by Leg 2 re-entry), so pct is correct.
                 msg = (
                     f"✅ <b>{sym} {hit_label}</b> - {group}\n"
                     f"Leg 1 TP1 hit, then price ran straight through TP2 without the 12% bounce/dip.\n"
@@ -389,6 +400,24 @@ def check_active_tps(active, mexc, global_data):
             hit = "EXPIRED"
         if hit:
             if hit == "TP1" and not sig.get("leg2_active"):
+                # ===== V900.3 PATCH - EVAA RULE: TP1 ONLY - CLOSE ALL, NO LEG 2 =====
+                if sig.get("tp1_only"):
+                    pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
+                    msg = (
+                        f"✅ <b>{sym} TP1 HIT - TP1 ONLY - CLOSE ALL</b> - {group}\n"
+                        f"Entry: {fmt(entry)} -> Now: {fmt(cur)}\n"
+                        f"Profit: {pct:+.1f}%\n"
+                        f"Days taken: {days:.2f} days (Expected: {expected})\n"
+                        f"Pumped was +{sig.get('pumped',0):.1f}% | Shed was -{sig.get('shed',0):.1f}%\n\n"
+                        f"🔒 <b>TP1 ONLY MODE - NO LEG 2</b>\n"
+                        f"Reason: Fresh pump - spike was {sig.get('days_since_spike','?')}d ago, shed not mostly done.\n"
+                        f"Pump still alive, DO NOT wait for TP2 / Leg 2. Take profit and move on."
+                    )
+                    send_telegram(msg)
+                    print(f"{sym} TP1 HIT - TP1 ONLY - Closing, no Leg 2")
+                    record = {"sym": sym, "side": side, "group": group, "entry": entry, "exit_price": cur, "hit": "TP1-ONLY", "pumped": sig.get("pumped"), "shed": sig.get("shed"), "time_in": sig.get("time"), "time_out": now.isoformat(), "days_taken": round(days, 2), "expected_days": expected, "tp1": tp1, "tp2": tp2, "runner": runner, "sl": sl}
+                    history.append(record); save_json(HISTORY_FILE, history); to_remove.append(sym)
+                    continue
                 pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
                 if side == "SHORT":
                     bounce_target = round(cur * (1 + LEG2_BOUNCE_PCT), 8)
@@ -532,6 +561,9 @@ def run_once():
             tp2 = round(price_exec * (1 + expected_shed/100), 8)
             runner = round(price_exec * (1 + (expected_shed/100)*1.5), 8)
             emoji = "🟢"
+        # V900.3 PATCH - Calculate TP1-ONLY flag
+        tp1_only = is_tp1_only(group, shed, expected_shed, days_ago)
+        print(f"{sym} TP1-ONLY check: group={group} shed={shed:.1f}% / expected={expected_shed}% = {shed/expected_shed*100:.0f}% done, spike {days_ago}d ago -> TP1_ONLY={tp1_only}")
         candidates.append({
             "sym": sym, "side": side, "price": entry_price,
             "entry_high": entry_high, "entry_low": entry_low,
@@ -543,7 +575,8 @@ def run_once():
             "reason": reason, "emoji": emoji,
             "vol": max(global_vol, vol_local),
             "days_ago": days_ago, "spike_pct": spike_pct,
-            "expected_shed": expected_shed
+            "expected_shed": expected_shed,
+            "tp1_only": tp1_only
         })
     if candidates:
         candidates.sort(key=lambda x: (GROUP_RANK.get(x["group"], 0), x["net"], x["vol"]), reverse=True)
@@ -563,12 +596,15 @@ def run_once():
             "reason": best["reason"], "time": now.isoformat(), "warned_5d": False,
             "days_since_spike": best["days_ago"],
             "spike_pct": best["spike_pct"],
-            "leg": 1, "leg2_active": False
+            "leg": 1, "leg2_active": False,
+            "tp1_only": best["tp1_only"]
         }
         active[sym] = signal
         exp_days = EXPECTED_DAYS.get(best["group"], "3-5 days")
+        mode_line = "🔒 TP1 ONLY - Fresh Pump, Close at TP1, NO Leg 2" if best["tp1_only"] else "🔁 TP1 + LEG 2 to TP2"
         msg = (
             f"{best['emoji']} <b>V900.3 PERP {best['side']} {sym}</b> - {best['group']} - BEST SIGNAL\n"
+            f"Mode: {mode_line}\n"
             f"Expected to TP2: {exp_days}\n"
             f"Cap at Low: ${best['cap_at_low']/1e6:.1f}M (Now ${best['cap_now']/1e6:.1f}M)\n"
             f"Pumped: +{best['pumped']:.1f}%\n"
@@ -581,12 +617,12 @@ def run_once():
             f"Entry Zone: {fmt(best['entry_low'])} - {fmt(best['entry_high'])}\n"
             f"Valid Until: {best['valid_until'].strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
             f"SL: {fmt(best['sl'])}\n"
-            f"TP1: {fmt(best['tp1'])} - TAKE PROFIT, then wait for Leg 2\n"
-            f"TP2: {fmt(best['tp2'])} - Via Leg 2 re-entry after bounce/dip\n"
+            f"TP1: {fmt(best['tp1'])} - TAKE PROFIT{' - CLOSE ALL if TP1 ONLY' if best['tp1_only'] else ', then wait for Leg 2'}\n"
+            f"TP2: {fmt(best['tp2'])} - {'SKIPPED - TP1 ONLY MODE' if best['tp1_only'] else 'Via Leg 2 re-entry after bounce/dip'}\n"
             f"Runner: {fmt(best['runner'])}"
         )
         send_telegram(msg)
-        print(f"{sym} {best['side']} - BEST SIGNAL SENT")
+        print(f"{sym} {best['side']} - BEST SIGNAL SENT - TP1_ONLY={best['tp1_only']}")
     save_json(ACTIVE_FILE, active)
     print(f"Done - Active: {len(active)}")
 
