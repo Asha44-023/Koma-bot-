@@ -76,5 +76,31 @@
     "spike_pct": 67.16925211890282,
     "leg": 1,
     "leg2_active": false
+  },
+  "KAVA": {
+    "sym": "KAVA",
+    "side": "LONG",
+    "price": 0.03027,
+    "entry_high": 0.0308754,
+    "entry_low": 0.0296646,
+    "valid_until": "2026-11-19T07:04:28.471174+03:00",
+    "pumped": 161.98606546301605,
+    "shed": 55.80064382395826,
+    "net": 15.796154205596324,
+    "cap_at_low": 28391286.589387555,
+    "group": "Small",
+    "low_7d": 0.026219117731746476,
+    "high_7d": 0.06869043494451857,
+    "sl": 0.027243,
+    "tp1": 0.03708075,
+    "tp2": 0.0438915,
+    "runner": 0.05070225,
+    "reason": "Small pumped +162.0% hit +150.0%, shed -55.8% DONE (expected -45.0%), net still +15.8% - LONG bounce now | No 1-day spike, grind pump, cooled",
+    "time": "2026-11-19T06:04:28.471174+03:00",
+    "warned_5d": false,
+    "days_since_spike": 99,
+    "spike_pct": 0,
+    "leg": 1,
+    "leg2_active": false
   }
 }
