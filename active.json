@@ -51,5 +51,32 @@
     "leg": 1,
     "leg2_active": false,
     "tp1_only": false
+  },
+  "EVAA": {
+    "sym": "EVAA",
+    "side": "SHORT",
+    "price": 5.1568,
+    "entry_high": 5.259936,
+    "entry_low": 5.053664,
+    "valid_until": "2026-11-20T01:18:15.834264+03:00",
+    "pumped": 389.69834520997284,
+    "shed": 1.2782780856017948,
+    "net": 383.4386385775991,
+    "cap_at_low": 7014192.349161401,
+    "group": "Small",
+    "low_7d": 1.0590796000634863,
+    "high_7d": 5.186295275967291,
+    "sl": 5.67248,
+    "tp1": 3.99652,
+    "tp2": 2.83624,
+    "runner": 1.67596,
+    "reason": "Small pumped +389.7% hit +150.0%, shed only -1.3% so far, expected -45.0% - SHORT now | Spike was 4d ago (+67%), cooled",
+    "time": "2026-11-20T00:18:15.834264+03:00",
+    "warned_5d": false,
+    "days_since_spike": 4,
+    "spike_pct": 67.16925211890282,
+    "leg": 1,
+    "leg2_active": false,
+    "tp1_only": false
   }
 }
