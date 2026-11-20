@@ -1,1 +1,32 @@
-{}
+{
+  "AKE": {
+    "sym": "AKE",
+    "side": "SHORT",
+    "price": 0.01053,
+    "entry_high": 0.0107406,
+    "entry_low": 0.0103194,
+    "valid_until": "2026-11-20T08:07:38.649091+03:00",
+    "pumped": 424.12172580033405,
+    "shed": 23.21471397992258,
+    "net": 302.4483662491524,
+    "cap_at_low": 59573702.394301854,
+    "group": "Small",
+    "low_7d": 0.0026133116399555396,
+    "high_7d": 0.013696934067875985,
+    "low_2d": 0.009683836571160863,
+    "pump_2d": 8.606025336291209,
+    "pump_midpoint": 0.011690385319518423,
+    "sl": 0.011583,
+    "tp1": 0.00816075,
+    "tp2": 0.0057915,
+    "runner": 0.00342225,
+    "reason": "Small pumped +424.1% hit +150.0%, shed only -23.2% so far, expected -45.0% - SHORT now | No 1-day spike, grind pump, cooled",
+    "time": "2026-11-20T07:07:38.649091+03:00",
+    "warned_5d": false,
+    "days_since_spike": 99,
+    "spike_pct": 0,
+    "leg": 1,
+    "leg2_active": false,
+    "tp1_only": false
+  }
+}
