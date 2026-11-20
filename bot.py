@@ -13,9 +13,11 @@
 # General cap-based rule: Small <60% shed done + <=3d spike, Mid <70% + <=4d, Big <75% + <=5d = TP1 ONLY.
 # EVAA example: Small, shed 19.4% / expected 45% = 43%, spike 2d ago -> TP1 ONLY = True, would have closed at TP1 on 18th.
 # V900.3 UPDATE 2026-11-20 - 7D SCAN + 2D PUMP BLOCK (EVAA/BTW/AKE FIX):
-# Scan 7d, but block SHORT if Pump from 2d Low >15%. 2d Low = bounce bottom after shed.
+# Scan 7d, but block BOTH SIDES if Pump from 2d Low >15%. 2d Low = bounce bottom after shed.
 # EVAA: 2d Low 3.05 -> 5.45 = +78% BLOCK. BTW: 0.335 -> 0.482 = +43% BLOCK. AKE: 0.00925 -> 0.0105 = +13.5% ALLOW.
+# BTW LONG FIX 2026-11-20: LONG also blocked if Pump 2d >15% - don't chase a +33.8% bounce. Same 15% rule both sides.
 # Pump Dead = Live < 2d Low. Pump Weakening = Live < Midpoint (2d Low + Pump High)/2. Cap ranking UNCHANGED - Cap = Order, Pump = Gate.
+# PURE MATH ONLY - NO STRUCTURE: No support, resistance, trendlines, patterns. Only % + Cap.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -34,8 +36,8 @@ WARNING_DAY = 5
 MAX_SIGNALS_PER_SCAN = 1
 GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
 
-# V900.3 - 2D PUMP BLOCK
-PUMP_BLOCK_PCT = 15.0  # If Pump from 2d Low > 15%, BLOCK SHORT - pump already in progress
+# V900.3 - 2D PUMP BLOCK - BOTH SIDES
+PUMP_BLOCK_PCT = 15.0  # If Pump from 2d Low > 15%, BLOCK BOTH SHORT and LONG - pump/bounce already in progress
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 # V900.3 - Leg 2 settings
@@ -518,12 +520,11 @@ def run_once():
             continue
         low_7d = min(spark)
         high_7d = max(spark)
-        # === V900.3 UPDATE - 2D PUMP BLOCK ===
+        # === V900.3 UPDATE - 2D PUMP BLOCK - BOTH SIDES ===
         low_2d = get_low_2d(spark)
         pump_2d = (global_price - low_2d) / low_2d * 100 if low_2d > 0 else 0
         pump_midpoint = (low_2d + high_7d) / 2 if low_2d > 0 else 0
         pump_dead = global_price < low_2d
-        # Pump state for logging / future re-entry: ALIVE / WEAKENING / DEAD
         if pump_dead:
             pump_state = "DEAD"
         elif global_price < pump_midpoint:
@@ -560,10 +561,11 @@ def run_once():
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
-        # === V900.3 UPDATE - BLOCK SHORT IF PUMP ALREADY STARTED ===
-        # Cap = Order, Pump = Gate. This does NOT replace cap ranking.
-        if side == "SHORT" and pump_2d > PUMP_BLOCK_PCT:
-            print(f"{sym} SKIP V900.3 - PUMP BLOCK - Pump2d +{pump_2d:.1f}% > +{PUMP_BLOCK_PCT:.0f}% (Low2d {fmt(low_2d)} -> Live {fmt(global_price)}). Pump ALIVE, DO NOT SHORT. Wait for Pump Dead: Live < Low2d {fmt(low_2d)} or Weakening: Live < Mid {fmt(pump_midpoint)}")
+        # === V900.3 UPDATE - BLOCK BOTH SIDES IF PUMP ALREADY STARTED ===
+        # Cap = Order, Pump = Gate. Same 15% rule for SHORT and LONG. No structure, pure %.
+        # SHORT: Don't short into a +15% pump. LONG: Don't chase a +15% bounce from 2d Low.
+        if pump_2d > PUMP_BLOCK_PCT:
+            print(f"{sym} SKIP V900.3 - PUMP BLOCK - Pump2d +{pump_2d:.1f}% > +{PUMP_BLOCK_PCT:.0f}% (Low2d {fmt(low_2d)} -> Live {fmt(global_price)}). Pump ALIVE, DO NOT {side}. Wait for Pump Dead: Live < Low2d {fmt(low_2d)} or Weakening: Live < Mid {fmt(pump_midpoint)}")
             continue
         if side == "SHORT" and global_price >= high_7d:
             print(f"{sym} SKIP V900.3 - Price {fmt(global_price)} still >= High {fmt(high_7d)} - still making new high, wait for price back below High")
