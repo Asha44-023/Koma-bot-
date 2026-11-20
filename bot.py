@@ -12,6 +12,10 @@
 # V900.3 PATCH 2026-11-19 - EVAA RULE / TP1-ONLY: Fresh pump = TP1 ONLY, close all, no Leg 2.
 # General cap-based rule: Small <60% shed done + <=3d spike, Mid <70% + <=4d, Big <75% + <=5d = TP1 ONLY.
 # EVAA example: Small, shed 19.4% / expected 45% = 43%, spike 2d ago -> TP1 ONLY = True, would have closed at TP1 on 18th.
+# V900.3 UPDATE 2026-11-20 - 7D SCAN + 2D PUMP BLOCK (EVAA/BTW/AKE FIX):
+# Scan 7d, but block SHORT if Pump from 2d Low >15%. 2d Low = bounce bottom after shed.
+# EVAA: 2d Low 3.05 -> 5.45 = +78% BLOCK. BTW: 0.335 -> 0.482 = +43% BLOCK. AKE: 0.00925 -> 0.0105 = +13.5% ALLOW.
+# Pump Dead = Live < 2d Low. Pump Weakening = Live < Midpoint (2d Low + Pump High)/2. Cap ranking UNCHANGED - Cap = Order, Pump = Gate.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -29,6 +33,9 @@ MAX_ACTIVE_DAYS = 7
 WARNING_DAY = 5
 MAX_SIGNALS_PER_SCAN = 1
 GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
+
+# V900.3 - 2D PUMP BLOCK
+PUMP_BLOCK_PCT = 15.0  # If Pump from 2d Low > 15%, BLOCK SHORT - pump already in progress
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 # V900.3 - Leg 2 settings
@@ -65,10 +72,18 @@ def get_group(cap_at_low):
     else:
         return "Big", 60.0, 20.0
 
+def get_low_2d(spark):
+    # spark is 7d hourly (~168 points). 2d = last ~48 points. Fallback to last 2/7 if length differs.
+    if not spark:
+        return 0
+    if len(spark) >= 48:
+        window = spark[-48:]
+    else:
+        cut = max(1, int(len(spark) * 2 / 7))
+        window = spark[-cut:]
+    return min(window)
+
 def is_tp1_only(group, shed, expected_shed, days_ago):
-    # V900.3 PATCH - EVAA RULE: Fresh pump = TP1 ONLY
-    # shed_ratio = how much of expected shed is already done
-    # If shed is not mostly done AND spike was recent, pump is still alive
     if expected_shed <= 0:
         return False
     shed_ratio = shed / expected_shed
@@ -76,7 +91,7 @@ def is_tp1_only(group, shed, expected_shed, days_ago):
         return shed_ratio < 0.60 and days_ago <= 3
     elif group == "Mid":
         return shed_ratio < 0.70 and days_ago <= 4
-    else: # Big
+    else:
         return shed_ratio < 0.75 and days_ago <= 5
 
 def days_since_spike(spark):
@@ -262,7 +277,6 @@ def check_active_tps(active, mexc, global_data):
         expected = EXPECTED_DAYS.get(group, "3-5 days")
         leg = sig.get("leg", 1)
 
-        # ===== V900.3 FIX - LEG 2 WAITING: TP2 / RUNNER ARE INDEPENDENT =====
         if leg == 2 and not sig.get("leg2_active"):
             tp2_hit = (cur <= tp2) if side == "SHORT" else (cur >= tp2)
             runner_hit = (cur <= runner) if side == "SHORT" else (cur >= runner)
@@ -284,7 +298,6 @@ def check_active_tps(active, mexc, global_data):
                 history.append(record); save_json(HISTORY_FILE, history); to_remove.append(sym)
                 continue
 
-        # ===== V900.3 LEG 2 - WAITING FOR BOUNCE/DIP AFTER TP1 =====
         if leg == 2 and not sig.get("leg2_active"):
             tp1_price = sig.get("tp1_hit_price", tp1)
             bounce_target = sig.get("bounce_target", 0)
@@ -400,7 +413,6 @@ def check_active_tps(active, mexc, global_data):
             hit = "EXPIRED"
         if hit:
             if hit == "TP1" and not sig.get("leg2_active"):
-                # ===== V900.3 PATCH - EVAA RULE: TP1 ONLY - CLOSE ALL, NO LEG 2 =====
                 if sig.get("tp1_only"):
                     pct = (entry - cur)/entry*100 if side == "SHORT" else (cur - entry)/entry*100
                     msg = (
@@ -506,12 +518,24 @@ def run_once():
             continue
         low_7d = min(spark)
         high_7d = max(spark)
+        # === V900.3 UPDATE - 2D PUMP BLOCK ===
+        low_2d = get_low_2d(spark)
+        pump_2d = (global_price - low_2d) / low_2d * 100 if low_2d > 0 else 0
+        pump_midpoint = (low_2d + high_7d) / 2 if low_2d > 0 else 0
+        pump_dead = global_price < low_2d
+        # Pump state for logging / future re-entry: ALIVE / WEAKENING / DEAD
+        if pump_dead:
+            pump_state = "DEAD"
+        elif global_price < pump_midpoint:
+            pump_state = "WEAKENING"
+        else:
+            pump_state = "ALIVE"
         cap_at_low = cap_now * (low_7d / global_price) if global_price > 0 else cap_now
         group, pump_thresh, expected_shed = get_group(cap_at_low)
         pumped = (high_7d - low_7d) / low_7d * 100 if low_7d > 0 else 0
         shed = (high_7d - global_price) / high_7d * 100 if high_7d > 0 else 0
         net = (global_price - low_7d) / low_7d * 100 if low_7d > 0 else 0
-        print(f"{sym} | {group} CapLow ${cap_at_low/1e6:.1f}M (CapNow ${cap_now/1e6:.1f}M) | Pumped +{pumped:.1f}% / Need +{pump_thresh}% | Shed -{shed:.1f}% | Net +{net:.1f}%")
+        print(f"{sym} | {group} CapLow ${cap_at_low/1e6:.1f}M (CapNow ${cap_now/1e6:.1f}M) | Pumped +{pumped:.1f}% / Need +{pump_thresh}% | Shed -{shed:.1f}% | Net +{net:.1f}% | Pump2d +{pump_2d:.1f}% (Low2d {fmt(low_2d)} Mid {fmt(pump_midpoint)} State {pump_state})")
         if max(global_vol, vol_local) < MIN_VOLUME:
             print(f"{sym} SKIP - Vol ${max(global_vol, vol_local):,.0f} < $5M")
             continue
@@ -536,6 +560,11 @@ def run_once():
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
+        # === V900.3 UPDATE - BLOCK SHORT IF PUMP ALREADY STARTED ===
+        # Cap = Order, Pump = Gate. This does NOT replace cap ranking.
+        if side == "SHORT" and pump_2d > PUMP_BLOCK_PCT:
+            print(f"{sym} SKIP V900.3 - PUMP BLOCK - Pump2d +{pump_2d:.1f}% > +{PUMP_BLOCK_PCT:.0f}% (Low2d {fmt(low_2d)} -> Live {fmt(global_price)}). Pump ALIVE, DO NOT SHORT. Wait for Pump Dead: Live < Low2d {fmt(low_2d)} or Weakening: Live < Mid {fmt(pump_midpoint)}")
+            continue
         if side == "SHORT" and global_price >= high_7d:
             print(f"{sym} SKIP V900.3 - Price {fmt(global_price)} still >= High {fmt(high_7d)} - still making new high, wait for price back below High")
             continue
@@ -561,7 +590,6 @@ def run_once():
             tp2 = round(price_exec * (1 + expected_shed/100), 8)
             runner = round(price_exec * (1 + (expected_shed/100)*1.5), 8)
             emoji = "🟢"
-        # V900.3 PATCH - Calculate TP1-ONLY flag
         tp1_only = is_tp1_only(group, shed, expected_shed, days_ago)
         print(f"{sym} TP1-ONLY check: group={group} shed={shed:.1f}% / expected={expected_shed}% = {shed/expected_shed*100:.0f}% done, spike {days_ago}d ago -> TP1_ONLY={tp1_only}")
         candidates.append({
@@ -571,6 +599,7 @@ def run_once():
             "pumped": pumped, "shed": shed, "net": net,
             "cap_at_low": cap_at_low, "cap_now": cap_now, "group": group,
             "low_7d": low_7d, "high_7d": high_7d,
+            "low_2d": low_2d, "pump_2d": pump_2d, "pump_midpoint": pump_midpoint, "pump_state": pump_state,
             "sl": sl, "tp1": tp1, "tp2": tp2, "runner": runner,
             "reason": reason, "emoji": emoji,
             "vol": max(global_vol, vol_local),
@@ -592,6 +621,7 @@ def run_once():
             "pumped": best["pumped"], "shed": best["shed"], "net": best["net"],
             "cap_at_low": best["cap_at_low"], "group": best["group"],
             "low_7d": best["low_7d"], "high_7d": best["high_7d"],
+            "low_2d": best["low_2d"], "pump_2d": best["pump_2d"], "pump_midpoint": best["pump_midpoint"],
             "sl": best["sl"], "tp1": best["tp1"], "tp2": best["tp2"], "runner": best["runner"],
             "reason": best["reason"], "time": now.isoformat(), "warned_5d": False,
             "days_since_spike": best["days_ago"],
@@ -611,6 +641,7 @@ def run_once():
             f"Shed so far: -{best['shed']:.1f}% (Expected -{best['expected_shed']}%)\n"
             f"Net: +{best['net']:.1f}%\n"
             f"Low 7d: {fmt(best['low_7d'])} | High 7d: {fmt(best['high_7d'])}\n"
+            f"Low 2d: {fmt(best['low_2d'])} | Pump 2d: +{best['pump_2d']:.1f}% (Block >{PUMP_BLOCK_PCT:.0f}%) | Pump Mid: {fmt(best['pump_midpoint'])} | State: {best['pump_state']}\n"
             f"Global Vol: ${best['vol']:,.0f}\n"
             f"{best['reason']}\n"
             f"\n🎯 <b>ENTER AT: {fmt(best['price'])}</b>\n"
