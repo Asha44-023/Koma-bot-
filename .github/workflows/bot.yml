@@ -21,6 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,17 +31,44 @@ jobs:
       - name: Install deps
         run: pip install requests tzdata
 
+      - name: Fix state files BEFORE run
+        run: |
+          # active.json MUST be {} | movers_history.json MUST be []
+          if [ ! -s active.json ]; then echo '{}' > active.json; fi
+          if [ ! -s movers_history.json ]; then echo '[]' > movers_history.json; fi
+          python3 -c "
+          import json
+          try:
+              d=json.load(open('movers_history.json'))
+              if not isinstance(d, list):
+                  print('FIX: movers_history was dict, resetting to []')
+                  json.dump([], open('movers_history.json','w'), indent=2)
+          except:
+              json.dump([], open('movers_history.json','w'), indent=2)
+          try:
+              d=json.load(open('active.json'))
+              if not isinstance(d, dict):
+                  print('FIX: active was list, resetting to {}')
+                  json.dump({}, open('active.json','w'), indent=2)
+          except:
+              json.dump({}, open('active.json','w'), indent=2)
+          "
+
       - name: Run V900.3 Scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py
 
       - name: Save active.json + history
+        if: always()
         run: |
           git config user.name "v900-bot"
           git config user.email "bot@v900.local"
-          git pull --rebase || true
+          git pull --rebase origin ${{ github.ref_name }} || true
           git add active.json movers_history.json || true
-          git commit -m "V900.3 scan $(date -u +'%Y-%m-%d %H:%M UTC')" || echo "No changes"
-          git push || echo "Push failed - check permissions"
+          git diff --cached --quiet && echo "No changes" || git commit -m "V900.3 scan $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push origin ${{ github.ref_name }} || (git pull --rebase origin ${{ github.ref_name }} && git push origin ${{ github.ref_name }})
