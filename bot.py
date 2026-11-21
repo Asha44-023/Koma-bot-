@@ -18,6 +18,7 @@
 # BTW LONG FIX 2026-11-20: LONG also blocked if Pump 2d >15% - don't chase a +33.8% bounce. Same 15% rule both sides.
 # Pump Dead = Live < 2d Low. Pump Weakening = Live < Midpoint (2d Low + Pump High)/2. Cap ranking UNCHANGED - Cap = Order, Pump = Gate.
 # PURE MATH ONLY - NO STRUCTURE: No support, resistance, trendlines, patterns. Only % + Cap.
+# FIX 2026-11-21 - HISTORY BUG: load_json now forces [] if file is {} / empty, plus guard in check_active_tps so history.append never crashes again.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -46,8 +47,16 @@ LEG2_CONFIRM_PCT = 0.02
 
 def load_json(path, default):
     try:
-        with open(path) as f: return json.load(f)
-    except: return default
+        with open(path) as f:
+            data = json.load(f)
+            # FIX: if file is {} but we wanted [], return []
+            if isinstance(default, list) and not isinstance(data, list):
+                return []
+            if isinstance(default, dict) and not isinstance(data, dict):
+                return {}
+            return data
+    except:
+        return default
 
 def save_json(path, data):
     with open(path, "w") as f: json.dump(data, f, indent=2)
@@ -259,6 +268,9 @@ def analyze_sl(sig, cur, days):
 
 def check_active_tps(active, mexc, global_data):
     history = load_json(HISTORY_FILE, [])
+    # FIX 2026-11-21: safety guard - never crash on history.append
+    if not isinstance(history, list):
+        history = []
     now = datetime.now(TZ)
     to_remove = []
     for sym, sig in list(active.items()):
