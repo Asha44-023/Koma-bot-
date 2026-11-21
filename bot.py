@@ -19,6 +19,10 @@
 # Pump Dead = Live < 2d Low. Pump Weakening = Live < Midpoint (2d Low + Pump High)/2. Cap ranking UNCHANGED - Cap = Order, Pump = Gate.
 # PURE MATH ONLY - NO STRUCTURE: No support, resistance, trendlines, patterns. Only % + Cap.
 # FIX 2026-11-21 - HISTORY BUG: load_json now forces [] if file is {} / empty, plus guard in check_active_tps so history.append never crashes again.
+# V900.3 UPDATE 2026-11-21 - BLESS FIX - 3 NEW GUARDS:
+# 1) SHED DONE GUARD: SHORT blocked if shed >=90% of expected. BLESS was 44.2/45 = 98% - would have been blocked. No edge left.
+# 2) SECOND PUMP GUARD: Block BOTH SIDES if 2x +50% daily spikes in 7d. BLESS pumped 16th AND 21st - whipsaw coin.
+# 3) FRESH SPIKE GUARD: Block BOTH SIDES if +30% range in last 48h hourly. BLESS spiked to 0.023 on 21st - not cooled, old days_since_spike missed it.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -39,6 +43,11 @@ GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
 
 # V900.3 - 2D PUMP BLOCK - BOTH SIDES
 PUMP_BLOCK_PCT = 15.0  # If Pump from 2d Low > 15%, BLOCK BOTH SHORT and LONG - pump/bounce already in progress
+
+# V900.3 - BLESS GUARDS
+SHED_DONE_BLOCK = 0.90  # SHORT blocked if shed >=90% of expected
+MAX_SPIKES_7D = 2  # Block if >=2 daily spikes >50% in 7d
+FRESH_SPIKE_48H_PCT = 30.0  # Block if (max-min)/min in last 48h >30%
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 # V900.3 - Leg 2 settings
@@ -128,6 +137,38 @@ def days_since_spike(spark):
         return 99, 0, daily_closes
     days_ago = (len(daily_closes) - 1) - spike_idx
     return days_ago, spike_pct, daily_closes
+
+# --- V900.3 NEW HELPERS ---
+def count_spikes_7d(spark):
+    # Count how many +50% daily jumps in 7d - BLESS had 2
+    if not spark or len(spark) < 48:
+        return 0
+    n = len(spark)
+    chunk = n // 7
+    daily_closes = []
+    for i in range(7):
+        start = i * chunk
+        end = (i + 1) * chunk if i < 6 else n
+        daily_closes.append(spark[end - 1])
+    count = 0
+    for i in range(1, len(daily_closes)):
+        if daily_closes[i-1] <= 0:
+            continue
+        chg = (daily_closes[i] - daily_closes[i-1]) / daily_closes[i-1] * 100
+        if chg > 50:
+            count += 1
+    return count
+
+def fresh_spike_48h_pct(spark):
+    # Range in last 48h hourly: (max-min)/min - catches intra-day spike to 0.023 that daily closes miss
+    if not spark or len(spark) < 10:
+        return 0
+    window = spark[-48:] if len(spark) >= 48 else spark
+    lo = min(window)
+    hi = max(window)
+    if lo <= 0:
+        return 0
+    return (hi - lo) / lo * 100
 
 def get_global_data():
     result = {}
@@ -268,7 +309,6 @@ def analyze_sl(sig, cur, days):
 
 def check_active_tps(active, mexc, global_data):
     history = load_json(HISTORY_FILE, [])
-    # FIX 2026-11-21: safety guard - never crash on history.append
     if not isinstance(history, list):
         history = []
     now = datetime.now(TZ)
@@ -552,15 +592,29 @@ def run_once():
         if max(global_vol, vol_local) < MIN_VOLUME:
             print(f"{sym} SKIP - Vol ${max(global_vol, vol_local):,.0f} < $5M")
             continue
+        # === V900.3 - BLESS GUARDS - BEFORE side decision ===
+        spike_count = count_spikes_7d(spark)
+        fresh_48h = fresh_spike_48h_pct(spark)
+        shed_ratio = shed / expected_shed if expected_shed > 0 else 0
+        if spike_count >= MAX_SPIKES_7D:
+            print(f"{sym} SKIP V900.3 - SECOND PUMP GUARD - {spike_count}x +50% spikes in 7d - whipsaw coin, BLESS pattern")
+            continue
+        if fresh_48h > FRESH_SPIKE_48H_PCT:
+            print(f"{sym} SKIP V900.3 - FRESH SPIKE GUARD - 48h range +{fresh_48h:.1f}% > +{FRESH_SPIKE_48H_PCT:.0f}% - pump not cooled yet")
+            continue
         side = None
         reason = ""
         if pumped >= pump_thresh:
             days_ago, spike_pct, daily_closes = days_since_spike(spark)
-            print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%)")
+            print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%) | Spikes 7d: {spike_count} | Fresh 48h: +{fresh_48h:.1f}% | Shed ratio: {shed_ratio*100:.0f}%")
             if days_ago < 2:
                 print(f"{sym} SKIP V900.3 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
                 continue
             if shed < expected_shed:
+                # V900.3 - SHED DONE GUARD: don't SHORT the last <10%
+                if shed_ratio >= SHED_DONE_BLOCK:
+                    print(f"{sym} SKIP V900.3 - SHED DONE GUARD - Shed -{shed:.1f}% / Expected -{expected_shed}% = {shed_ratio*100:.0f}% done >= {SHED_DONE_BLOCK*100:.0f}% - no edge left, bounce likely")
+                    continue
                 side = "SHORT"
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}% so far, expected -{expected_shed}% - SHORT now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
