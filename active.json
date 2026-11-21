@@ -27,36 +27,5 @@
     "spike_pct": 87.89881914182148,
     "leg": 1,
     "leg2_active": false,
-    "tp1_only": true
-  },
-  "BLESS": {
-    "sym": "BLESS",
-    "side": "SHORT",
-    "price": 0.011654,
-    "entry_high": 0.01188708,
-    "entry_low": 0.01142092,
-    "valid_until": "2026-11-21T21:16:39.959562+03:00",
-    "pumped": 151.66625911443919,
-    "shed": 44.16632793357212,
-    "net": 40.51451381580265,
-    "cap_at_low": 15397657.09068465,
-    "group": "Small",
-    "low_7d": 0.008360716399303931,
-    "high_7d": 0.02104110219729564,
-    "low_2d": 0.01086925343311187,
-    "pump_2d": 8.084884323435439,
-    "pump_midpoint": 0.015955177815203756,
-    "sl": 0.0128194,
-    "tp1": 0.00903185,
-    "tp2": 0.0064097,
-    "runner": 0.00378755,
-    "reason": "Small pumped +151.7% hit +150.0%, shed only -44.2% so far, expected -45.0% - SHORT now | Spike was 5d ago (+105%), cooled",
-    "time": "2026-11-21T20:16:39.959562+03:00",
-    "warned_5d": false,
-    "days_since_spike": 5,
-    "spike_pct": 104.853770267752,
-    "leg": 1,
-    "leg2_active": false,
-    "tp1_only": false
+    "tp1_only": true }
   }
-}
