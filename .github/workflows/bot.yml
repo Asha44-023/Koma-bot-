@@ -68,7 +68,9 @@ jobs:
         run: |
           git config user.name "v900-bot"
           git config user.email "bot@v900.local"
-          git pull --rebase origin ${{ github.ref_name }} || true
+          git config rebase.autoStash true
           git add active.json movers_history.json || true
           git diff --cached --quiet && echo "No changes" || git commit -m "V900.3 scan $(date -u +'%Y-%m-%d %H:%M UTC')"
-          git push origin ${{ github.ref_name }} || (git pull --rebase origin ${{ github.ref_name }} && git push origin ${{ github.ref_name }})
+          # Pull with -X theirs = if conflict, OUR new bot state wins, don't fail
+          git pull --rebase -X theirs origin ${{ github.ref_name }} || (git rebase --abort || true; git fetch origin; git rebase -X theirs origin/${{ github.ref_name }} || true)
+          git push origin ${{ github.ref_name }} || (git pull --rebase -X theirs origin ${{ github.ref_name }} && git push origin ${{ github.ref_name }})
