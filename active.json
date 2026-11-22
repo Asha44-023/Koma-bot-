@@ -30,7 +30,7 @@
     "tp1_only": false,
     "tp1_hit_price": 3.26,
     "bounce_target": 3.6512,
-    "bounce_high": 3.26,
-    "bounce_done": false
+    "bounce_high": 3.8604,
+    "bounce_done": true
   }
 }
