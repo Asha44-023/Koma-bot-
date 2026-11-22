@@ -23,6 +23,7 @@
 # 1) SHED DONE GUARD: SHORT blocked if shed >=90% of expected. BLESS was 44.2/45 = 98% - would have been blocked. No edge left.
 # 2) SECOND PUMP GUARD: Block BOTH SIDES if 2x +50% daily spikes in 7d. BLESS pumped 16th AND 21st - whipsaw coin.
 # 3) FRESH SPIKE GUARD: Block BOTH SIDES if +30% range in last 48h hourly. BLESS spiked to 0.023 on 21st - not cooled, old days_since_spike missed it.
+# V900.3 PATCH 2026-11-22 - 4 BEST SIGNALS: Was 1 best only, now Top 4 best per scan. Still V900.3, same name.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -38,7 +39,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_BOT_CHAT
 MIN_VOLUME = 5000000
 MAX_ACTIVE_DAYS = 7
 WARNING_DAY = 5
-MAX_SIGNALS_PER_SCAN = 1
+MAX_SIGNALS_PER_SCAN = 4
 GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
 
 # V900.3 - 2D PUMP BLOCK - BOTH SIDES
@@ -677,51 +678,52 @@ def run_once():
         })
     if candidates:
         candidates.sort(key=lambda x: (GROUP_RANK.get(x["group"], 0), x["net"], x["vol"]), reverse=True)
-        best = candidates[0]
-        print(f"BEST: {best['sym']} {best['group']} Net +{best['net']:.1f}% Vol ${best['vol']:,.0f} - sending, {len(candidates)-1} others skipped")
-        for c in candidates[1:]:
-            print(f"SKIPPED - {c['sym']} {c['group']} Net +{c['net']:.1f}% Vol ${c['vol']:,.0f} - weaker than {best['sym']}")
-        sym = best["sym"]
-        signal = {
-            "sym": sym, "side": best["side"], "price": best["price"],
-            "entry_high": best["entry_high"], "entry_low": best["entry_low"],
-            "valid_until": best["valid_until"].isoformat(),
-            "pumped": best["pumped"], "shed": best["shed"], "net": best["net"],
-            "cap_at_low": best["cap_at_low"], "group": best["group"],
-            "low_7d": best["low_7d"], "high_7d": best["high_7d"],
-            "low_2d": best["low_2d"], "pump_2d": best["pump_2d"], "pump_midpoint": best["pump_midpoint"],
-            "sl": best["sl"], "tp1": best["tp1"], "tp2": best["tp2"], "runner": best["runner"],
-            "reason": best["reason"], "time": now.isoformat(), "warned_5d": False,
-            "days_since_spike": best["days_ago"],
-            "spike_pct": best["spike_pct"],
-            "leg": 1, "leg2_active": False,
-            "tp1_only": best["tp1_only"]
-        }
-        active[sym] = signal
-        exp_days = EXPECTED_DAYS.get(best["group"], "3-5 days")
-        mode_line = "🔒 TP1 ONLY - Fresh Pump, Close at TP1, NO Leg 2" if best["tp1_only"] else "🔁 TP1 + LEG 2 to TP2"
-        msg = (
-            f"{best['emoji']} <b>V900.3 PERP {best['side']} {sym}</b> - {best['group']} - BEST SIGNAL\n"
-            f"Mode: {mode_line}\n"
-            f"Expected to TP2: {exp_days}\n"
-            f"Cap at Low: ${best['cap_at_low']/1e6:.1f}M (Now ${best['cap_now']/1e6:.1f}M)\n"
-            f"Pumped: +{best['pumped']:.1f}%\n"
-            f"Shed so far: -{best['shed']:.1f}% (Expected -{best['expected_shed']}%)\n"
-            f"Net: +{best['net']:.1f}%\n"
-            f"Low 7d: {fmt(best['low_7d'])} | High 7d: {fmt(best['high_7d'])}\n"
-            f"Low 2d: {fmt(best['low_2d'])} | Pump 2d: +{best['pump_2d']:.1f}% (Block >{PUMP_BLOCK_PCT:.0f}%) | Pump Mid: {fmt(best['pump_midpoint'])} | State: {best['pump_state']}\n"
-            f"Global Vol: ${best['vol']:,.0f}\n"
-            f"{best['reason']}\n"
-            f"\n🎯 <b>ENTER AT: {fmt(best['price'])}</b>\n"
-            f"Entry Zone: {fmt(best['entry_low'])} - {fmt(best['entry_high'])}\n"
-            f"Valid Until: {best['valid_until'].strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
-            f"SL: {fmt(best['sl'])}\n"
-            f"TP1: {fmt(best['tp1'])} - TAKE PROFIT{' - CLOSE ALL if TP1 ONLY' if best['tp1_only'] else ', then wait for Leg 2'}\n"
-            f"TP2: {fmt(best['tp2'])} - {'SKIPPED - TP1 ONLY MODE' if best['tp1_only'] else 'Via Leg 2 re-entry after bounce/dip'}\n"
-            f"Runner: {fmt(best['runner'])}"
-        )
-        send_telegram(msg)
-        print(f"{sym} {best['side']} - BEST SIGNAL SENT - TP1_ONLY={best['tp1_only']}")
+        top_signals = candidates[:MAX_SIGNALS_PER_SCAN]
+        print(f"V900.3 - SENDING Top {len(top_signals)} BEST signals, {len(candidates)-len(top_signals)} worst skipped")
+        for c in candidates[len(top_signals):]:
+            print(f"SKIPPED - {c['sym']} {c['group']} Net +{c['net']:.1f}% Vol ${c['vol']:,.0f} - weaker than Top 4")
+        for best in top_signals:
+            sym = best["sym"]
+            signal = {
+                "sym": sym, "side": best["side"], "price": best["price"],
+                "entry_high": best["entry_high"], "entry_low": best["entry_low"],
+                "valid_until": best["valid_until"].isoformat(),
+                "pumped": best["pumped"], "shed": best["shed"], "net": best["net"],
+                "cap_at_low": best["cap_at_low"], "group": best["group"],
+                "low_7d": best["low_7d"], "high_7d": best["high_7d"],
+                "low_2d": best["low_2d"], "pump_2d": best["pump_2d"], "pump_midpoint": best["pump_midpoint"],
+                "sl": best["sl"], "tp1": best["tp1"], "tp2": best["tp2"], "runner": best["runner"],
+                "reason": best["reason"], "time": now.isoformat(), "warned_5d": False,
+                "days_since_spike": best["days_ago"],
+                "spike_pct": best["spike_pct"],
+                "leg": 1, "leg2_active": False,
+                "tp1_only": best["tp1_only"]
+            }
+            active[sym] = signal
+            exp_days = EXPECTED_DAYS.get(best["group"], "3-5 days")
+            mode_line = "🔒 TP1 ONLY - Fresh Pump, Close at TP1, NO Leg 2" if best["tp1_only"] else "🔁 TP1 + LEG 2 to TP2"
+            msg = (
+                f"{best['emoji']} <b>V900.3 PERP {best['side']} {sym}</b> - {best['group']} - BEST SIGNAL\n"
+                f"Mode: {mode_line}\n"
+                f"Expected to TP2: {exp_days}\n"
+                f"Cap at Low: ${best['cap_at_low']/1e6:.1f}M (Now ${best['cap_now']/1e6:.1f}M)\n"
+                f"Pumped: +{best['pumped']:.1f}%\n"
+                f"Shed so far: -{best['shed']:.1f}% (Expected -{best['expected_shed']}%)\n"
+                f"Net: +{best['net']:.1f}%\n"
+                f"Low 7d: {fmt(best['low_7d'])} | High 7d: {fmt(best['high_7d'])}\n"
+                f"Low 2d: {fmt(best['low_2d'])} | Pump 2d: +{best['pump_2d']:.1f}% (Block >{PUMP_BLOCK_PCT:.0f}%) | Pump Mid: {fmt(best['pump_midpoint'])} | State: {best['pump_state']}\n"
+                f"Global Vol: ${best['vol']:,.0f}\n"
+                f"{best['reason']}\n"
+                f"\n🎯 <b>ENTER AT: {fmt(best['price'])}</b>\n"
+                f"Entry Zone: {fmt(best['entry_low'])} - {fmt(best['entry_high'])}\n"
+                f"Valid Until: {best['valid_until'].strftime('%H:%M')} EAT (+1h) - If price is outside zone when you see this, SKIP, do not chase\n"
+                f"SL: {fmt(best['sl'])}\n"
+                f"TP1: {fmt(best['tp1'])} - TAKE PROFIT{' - CLOSE ALL if TP1 ONLY' if best['tp1_only'] else ', then wait for Leg 2'}\n"
+                f"TP2: {fmt(best['tp2'])} - {'SKIPPED - TP1 ONLY MODE' if best['tp1_only'] else 'Via Leg 2 re-entry after bounce/dip'}\n"
+                f"Runner: {fmt(best['runner'])}"
+            )
+            send_telegram(msg)
+            print(f"{sym} {best['side']} - BEST SIGNAL SENT - TP1_ONLY={best['tp1_only']}")
     save_json(ACTIVE_FILE, active)
     print(f"Done - Active: {len(active)}")
 
