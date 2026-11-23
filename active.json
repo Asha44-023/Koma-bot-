@@ -1,1 +1,32 @@
-{}
+{
+  "BTW": {
+    "sym": "BTW",
+    "side": "SHORT",
+    "price": 0.718,
+    "entry_high": 0.73236,
+    "entry_low": 0.70364,
+    "valid_until": "2026-11-23T06:00:22.180872+03:00",
+    "pumped": 120.83041816788085,
+    "shed": 4.856713187219764,
+    "net": 110.10531812732881,
+    "cap_at_low": 513928839.8904879,
+    "group": "Mid",
+    "low_7d": 0.34127551191515193,
+    "high_7d": 0.753640140066806,
+    "low_2d": 0.6347303691720828,
+    "pump_2d": 12.96733775875195,
+    "pump_midpoint": 0.6941852546194445,
+    "sl": 0.7898,
+    "tp1": 0.6103,
+    "tp2": 0.5026,
+    "runner": 0.3949,
+    "reason": "Mid pumped +120.8% hit +100.0%, shed only -4.9% so far, expected -30.0% - SHORT now | No 1-day spike, grind pump, cooled",
+    "time": "2026-11-23T05:00:22.180872+03:00",
+    "warned_5d": false,
+    "days_since_spike": 99,
+    "spike_pct": 0,
+    "leg": 1,
+    "leg2_active": false,
+    "tp1_only": false
+  }
+}
