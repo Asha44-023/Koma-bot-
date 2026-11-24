@@ -30,6 +30,11 @@
 # SL: SHORT = Entry x 1.10 | LONG = Entry x 0.90
 # V900.3 PATCH 2026-11-24 - FRESH SPIKE GUARD 30 -> 90: 30 blocked everything (MMT 45%, PIEVERSE 67%, EVAA 84% all blocked, 0 signals). 90 only blocks if coin almost doubled in 48h. Still V900.3, same logic.
 # V900.3 PATCH 2026-11-24 - TP1 ALREADY PASSED GUARD: PIEVERSE LONG Entry 3.1771 TP1 2.7912 - TP1 below entry, fake signal. Now skip if LONG TP1 <= Entry or SHORT TP1 >= Entry.
+# V900.3 PATCH 2026-11-24 - MEXC 24H BLOCK + SHED COOLING (from live MEXC screenshot 2:55pm EAT, NOT search):
+# Search was wrong: EVAA search $2.54 vs MEXC $1.9762, BLESS search -9% vs MEXC +38.05%. Search is cached, MEXC is truth.
+# 1) MEXC_24H_BLOCK = 30.0: Block BOTH SIDES if abs(MEXC 24h change) > 30%. EVAA -33.72% BLOCK, BLESS +38.05% BLOCK, PIEVERSE -12.47% PASS, BTW -2.28% PASS, MMT +11.27% PASS.
+#    This is DIFFERENT from FRESH_SPIKE_48H_PCT (CoinGecko 48h range). That stays at 90%. Do NOT confuse them.
+# 2) SHED COOLING for LONG: LONG only if abs(MEXC 24h change) <= 10% AND not new low. EVAA shed -69.6% looks DONE but -33.72% in 24h = still falling, NO LONG. PIEVERSE -12.47% = still falling, NO LONG.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -55,6 +60,10 @@ PUMP_BLOCK_PCT = 15.0
 SHED_DONE_BLOCK = 0.90
 MAX_SPIKES_7D = 2
 FRESH_SPIKE_48H_PCT = 90.0
+
+# V900.3 PATCH 2026-11-24 - MEXC 24H BLOCK + SHED COOLING
+MEXC_24H_BLOCK = 30.0
+SHED_COOLING_MAX = 10.0
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 LEG2_BOUNCE_PCT = 0.12
@@ -187,6 +196,30 @@ def fresh_spike_48h_pct(spark):
         return 0
     return (hi - lo) / lo * 100
 
+# NEW - MEXC 24h change parser. MEXC returns riseFallRate as decimal, e.g. -0.3372 = -33.72%
+def parse_mexc_24h_change(t):
+    for key in ["riseFallRate", "riseFallRate24", "priceChangePercent", "change24", "riseFallValueRate"]:
+        if key in t and t.get(key) is not None:
+            try:
+                v = float(t.get(key))
+                # If value looks like decimal (-0.3372), convert to %. If already % (-33.72), keep.
+                if abs(v) < 2:
+                    return v * 100.0
+                return v
+            except:
+                continue
+    # Fallback: compute from riseFallValue / lastPrice if available
+    try:
+        last = float(t.get("lastPrice", 0) or 0)
+        diff = float(t.get("riseFallValue", 0) or 0)
+        if last != 0 and diff != 0:
+            prev = last - diff
+            if prev != 0:
+                return diff / prev * 100.0
+    except:
+        pass
+    return 0.0
+
 def get_global_data():
     result = {}
     for page in [1, 2, 3, 4]:
@@ -230,7 +263,8 @@ def get_mexc_perps():
             vol = amount24 if amount24 > 1000 else volume24 * price
         except: continue
         if price == 0: continue
-        movers[sym] = {"price": price, "vol": vol, "symbol": sym_raw}
+        change_24h = parse_mexc_24h_change(t)
+        movers[sym] = {"price": price, "vol": vol, "symbol": sym_raw, "change_24h": change_24h}
     return movers
 
 def analyze_outcome(sig, cur, days):
@@ -576,6 +610,7 @@ def run_once():
             continue
         price_exec = m["price"]
         vol_local = m["vol"]
+        change_24h = m.get("change_24h", 0.0)
         g = global_data.get(sym, {})
         cap_now = g.get("cap_now", 0)
         global_price = g.get("global_price", price_exec)
@@ -604,9 +639,14 @@ def run_once():
         pumped = (high_7d - low_7d) / low_7d * 100 if low_7d > 0 else 0
         shed = (high_7d - global_price) / high_7d * 100 if high_7d > 0 else 0
         net = (global_price - low_7d) / low_7d * 100 if low_7d > 0 else 0
-        print(f"{sym} | {group} CapLow ${cap_at_low/1e6:.1f}M (CapNow ${cap_now/1e6:.1f}M) | Pumped +{pumped:.1f}% / Need +{pump_thresh}% | Shed -{shed:.1f}% | Net +{net:.1f}% | Pump2d +{pump_2d:.1f}% (Low2d {fmt(low_2d)} Mid {fmt(pump_midpoint)} State {pump_state})")
+        print(f"{sym} | {group} CapLow ${cap_at_low/1e6:.1f}M (CapNow ${cap_now/1e6:.1f}M) | Pumped +{pumped:.1f}% / Need +{pump_thresh}% | Shed -{shed:.1f}% | Net +{net:.1f}% | Pump2d +{pump_2d:.1f}% (Low2d {fmt(low_2d)} Mid {fmt(pump_midpoint)} State {pump_state}) | MEXC 24h {change_24h:+.2f}%")
         if max(global_vol, vol_local) < MIN_VOLUME:
             print(f"{sym} SKIP - Vol ${max(global_vol, vol_local):,.0f} < $5M")
+            continue
+        # NEW 2026-11-24 - MEXC 24H BLOCK - FIRST GATE, BEFORE ANYTHING ELSE
+        # Uses MEXC ticker 24h change, NOT CoinGecko, NOT search. Search was wrong on 24 Nov.
+        if abs(change_24h) > MEXC_24H_BLOCK:
+            print(f"{sym} SKIP V900.3 - MEXC 24H BLOCK - 24h change {change_24h:+.2f}% > +-{MEXC_24H_BLOCK:.0f}% - too hot, crash or pump in progress")
             continue
         spike_count = count_spikes_7d(spark)
         fresh_48h = fresh_spike_48h_pct(spark)
@@ -621,7 +661,7 @@ def run_once():
         reason = ""
         if pumped >= pump_thresh:
             days_ago, spike_pct, daily_closes = days_since_spike(spark)
-            print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%) | Spikes 7d: {spike_count} | Fresh 48h: +{fresh_48h:.1f}% | Shed ratio: {shed_ratio*100:.0f}%")
+            print(f"{sym} Spike check: last +50% day was {days_ago}d ago (+{spike_pct:.0f}%) | Spikes 7d: {spike_count} | Fresh 48h: +{fresh_48h:.1f}% | Shed ratio: {shed_ratio*100:.0f}% | MEXC 24h: {change_24h:+.2f}%")
             if days_ago < 2:
                 print(f"{sym} SKIP V900.3 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
                 continue
@@ -637,10 +677,14 @@ def run_once():
                 if net <= 0:
                     print(f"{sym} SKIP LONG - Net {net:.1f}% <= 0, broke below 7d low, dead coin")
                     continue
+                # NEW 2026-11-24 - SHED COOLING FOR LONG
+                if abs(change_24h) > SHED_COOLING_MAX:
+                    print(f"{sym} SKIP LONG V900.3 - SHED COOLING - Shed -{shed:.1f}% DONE but MEXC 24h {change_24h:+.2f}% > +-{SHED_COOLING_MAX:.0f}% - still moving hard, dump not cooled, do NOT catch falling knife")
+                    continue
                 side = "LONG"
-                reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
+                reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled | MEXC 24h {change_24h:+.2f}% cooled"
                 if days_ago == 99:
-                    reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
+                    reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled | MEXC 24h {change_24h:+.2f}% cooled"
         if pump_2d > PUMP_BLOCK_PCT:
             print(f"{sym} SKIP V900.3 - PUMP BLOCK - Pump2d +{pump_2d:.1f}% > +{PUMP_BLOCK_PCT:.0f}% (Low2d {fmt(low_2d)} -> Live {fmt(global_price)}). Pump ALIVE, DO NOT {side}. Wait for Pump Dead: Live < Low2d {fmt(low_2d)} or Weakening: Live < Mid {fmt(pump_midpoint)}")
             continue
