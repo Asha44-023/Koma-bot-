@@ -24,6 +24,10 @@
 # 2) SECOND PUMP GUARD: Block BOTH SIDES if 2x +50% daily spikes in 7d. BLESS pumped 16th AND 21st - whipsaw coin.
 # 3) FRESH SPIKE GUARD: Block BOTH SIDES if +30% range in last 48h hourly. BLESS spiked to 0.023 on 21st - not cooled, old days_since_spike missed it.
 # V900.3 PATCH 2026-11-22 - 4 BEST SIGNALS: Was 1 best only, now Top 4 best per scan. Still V900.3, same name.
+# V900.3 UPDATE - RANGE MATHS: TPs from Range = High - Low, NOT from Entry, NOT fixed % from High/Low
+# SHORT: TP = High - Retracement x Range | LONG: TP = Low + Retracement x Range
+# Retracement TP2: Small 75%, Mid 60%, Big 53% | TP1 = TP2 / 2 | Runner = 100% Range = Low (SHORT) / High (LONG)
+# SL: SHORT = Entry x 1.10 | LONG = Entry x 0.90
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -43,15 +47,14 @@ MAX_SIGNALS_PER_SCAN = 4
 GROUP_RANK = {"Big": 3, "Mid": 2, "Small": 1}
 
 # V900.3 - 2D PUMP BLOCK - BOTH SIDES
-PUMP_BLOCK_PCT = 15.0  # If Pump from 2d Low > 15%, BLOCK BOTH SHORT and LONG - pump/bounce already in progress
+PUMP_BLOCK_PCT = 15.0
 
 # V900.3 - BLESS GUARDS
-SHED_DONE_BLOCK = 0.90  # SHORT blocked if shed >=90% of expected
-MAX_SPIKES_7D = 2  # Block if >=2 daily spikes >50% in 7d
-FRESH_SPIKE_48H_PCT = 30.0  # Block if (max-min)/min in last 48h >30%
+SHED_DONE_BLOCK = 0.90
+MAX_SPIKES_7D = 2
+FRESH_SPIKE_48H_PCT = 30.0
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
-# V900.3 - Leg 2 settings
 LEG2_BOUNCE_PCT = 0.12
 LEG2_CONFIRM_PCT = 0.02
 
@@ -59,7 +62,6 @@ def load_json(path, default):
     try:
         with open(path) as f:
             data = json.load(f)
-            # FIX: if file is {} but we wanted [], return []
             if isinstance(default, list) and not isinstance(data, list):
                 return []
             if isinstance(default, dict) and not isinstance(data, dict):
@@ -85,16 +87,31 @@ def send_telegram(msg):
 def fmt(p):
     return f"{p:.8f}".rstrip('0').rstrip('.')
 
+# --- V900.3 RANGE MATHS ---
 def get_group(cap_at_low):
     if cap_at_low < 200_000_000:
-        return "Small", 150.0, 45.0
+        return "Small", 150.0, 45.0, 0.75
     elif cap_at_low <= 2_000_000_000:
-        return "Mid", 100.0, 30.0
+        return "Mid", 100.0, 30.0, 0.60
     else:
-        return "Big", 60.0, 20.0
+        return "Big", 60.0, 20.0, 0.53
+
+def get_tps_range(side, high, low, ret2, entry):
+    rng = high - low
+    ret1 = ret2 * 0.5
+    if side == "SHORT":
+        tp1 = high - ret1 * rng
+        tp2 = high - ret2 * rng
+        runner = high - 1.00 * rng
+        sl = entry * 1.10
+    else:
+        tp1 = low + ret1 * rng
+        tp2 = low + ret2 * rng
+        runner = low + 1.00 * rng
+        sl = low * 0.0 + entry * 0.90
+    return tp1, tp2, runner, sl
 
 def get_low_2d(spark):
-    # spark is 7d hourly (~168 points). 2d = last ~48 points. Fallback to last 2/7 if length differs.
     if not spark:
         return 0
     if len(spark) >= 48:
@@ -139,9 +156,7 @@ def days_since_spike(spark):
     days_ago = (len(daily_closes) - 1) - spike_idx
     return days_ago, spike_pct, daily_closes
 
-# --- V900.3 NEW HELPERS ---
 def count_spikes_7d(spark):
-    # Count how many +50% daily jumps in 7d - BLESS had 2
     if not spark or len(spark) < 48:
         return 0
     n = len(spark)
@@ -161,7 +176,6 @@ def count_spikes_7d(spark):
     return count
 
 def fresh_spike_48h_pct(spark):
-    # Range in last 48h hourly: (max-min)/min - catches intra-day spike to 0.023 that daily closes miss
     if not spark or len(spark) < 10:
         return 0
     window = spark[-48:] if len(spark) >= 48 else spark
@@ -374,7 +388,7 @@ def check_active_tps(active, mexc, global_data):
                     new_sl = round(bounce_high * 1.02, 8)
                     new_tp1 = tp2
                     new_tp2 = runner
-                    new_runner = round(tp2 * 0.85, 8) if side == "SHORT" else round(tp2 * 1.15, 8)
+                    new_runner = round(sig.get("low_7d", tp2), 8)
                     msg = (
                         f"🔁 <b>LEG 2 RE-ENTRY SHORT {sym}</b> - {group}\n"
                         f"Leg 1 TP1 {fmt(tp1_price)} hit, bounced to {fmt(bounce_high)}, rejected.\n"
@@ -383,7 +397,7 @@ def check_active_tps(active, mexc, global_data):
                         f"SL: {fmt(new_sl)} (above bounce high)\n"
                         f"TP1: {fmt(new_tp1)} (old TP2)\n"
                         f"TP2: {fmt(new_tp2)} (old Runner)\n"
-                        f"Runner: {fmt(new_runner)}\n"
+                        f"Runner: {fmt(new_runner)} (= Low 7d)\n"
                         f"Valid Until: {(now + timedelta(hours=1)).strftime('%H:%M')} EAT (+1h) - If outside zone, SKIP"
                     )
                     send_telegram(msg)
@@ -411,7 +425,7 @@ def check_active_tps(active, mexc, global_data):
                     new_sl = round(bounce_high * 0.98, 8)
                     new_tp1 = tp2
                     new_tp2 = runner
-                    new_runner = round(tp2 * 1.15, 8)
+                    new_runner = round(sig.get("high_7d", tp2), 8)
                     msg = (
                         f"🔁 <b>LEG 2 RE-ENTRY LONG {sym}</b> - {group}\n"
                         f"Leg 1 TP1 {fmt(tp1_price)} hit, dipped to {fmt(bounce_high)}, held.\n"
@@ -420,7 +434,7 @@ def check_active_tps(active, mexc, global_data):
                         f"SL: {fmt(new_sl)} (below dip low)\n"
                         f"TP1: {fmt(new_tp1)} (old TP2)\n"
                         f"TP2: {fmt(new_tp2)} (old Runner)\n"
-                        f"Runner: {fmt(new_runner)}\n"
+                        f"Runner: {fmt(new_runner)} (= High 7d)\n"
                         f"Valid Until: {(now + timedelta(hours=1)).strftime('%H:%M')} EAT (+1h) - If outside zone, SKIP"
                     )
                     send_telegram(msg)
@@ -573,7 +587,6 @@ def run_once():
             continue
         low_7d = min(spark)
         high_7d = max(spark)
-        # === V900.3 UPDATE - 2D PUMP BLOCK - BOTH SIDES ===
         low_2d = get_low_2d(spark)
         pump_2d = (global_price - low_2d) / low_2d * 100 if low_2d > 0 else 0
         pump_midpoint = (low_2d + high_7d) / 2 if low_2d > 0 else 0
@@ -585,7 +598,7 @@ def run_once():
         else:
             pump_state = "ALIVE"
         cap_at_low = cap_now * (low_7d / global_price) if global_price > 0 else cap_now
-        group, pump_thresh, expected_shed = get_group(cap_at_low)
+        group, pump_thresh, expected_shed, ret2 = get_group(cap_at_low)
         pumped = (high_7d - low_7d) / low_7d * 100 if low_7d > 0 else 0
         shed = (high_7d - global_price) / high_7d * 100 if high_7d > 0 else 0
         net = (global_price - low_7d) / low_7d * 100 if low_7d > 0 else 0
@@ -593,7 +606,6 @@ def run_once():
         if max(global_vol, vol_local) < MIN_VOLUME:
             print(f"{sym} SKIP - Vol ${max(global_vol, vol_local):,.0f} < $5M")
             continue
-        # === V900.3 - BLESS GUARDS - BEFORE side decision ===
         spike_count = count_spikes_7d(spark)
         fresh_48h = fresh_spike_48h_pct(spark)
         shed_ratio = shed / expected_shed if expected_shed > 0 else 0
@@ -612,7 +624,6 @@ def run_once():
                 print(f"{sym} SKIP V900.3 - Spike {days_ago}d ago (+{spike_pct:.0f}%) - TOO EARLY, whale still defending. Wait.")
                 continue
             if shed < expected_shed:
-                # V900.3 - SHED DONE GUARD: don't SHORT the last <10%
                 if shed_ratio >= SHED_DONE_BLOCK:
                     print(f"{sym} SKIP V900.3 - SHED DONE GUARD - Shed -{shed:.1f}% / Expected -{expected_shed}% = {shed_ratio*100:.0f}% done >= {SHED_DONE_BLOCK*100:.0f}% - no edge left, bounce likely")
                     continue
@@ -628,9 +639,6 @@ def run_once():
                 reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago (+{spike_pct:.0f}%), cooled"
                 if days_ago == 99:
                     reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed -{shed:.1f}% DONE (expected -{expected_shed}%), net still +{net:.1f}% - LONG bounce now | No 1-day spike, grind pump, cooled"
-        # === V900.3 UPDATE - BLOCK BOTH SIDES IF PUMP ALREADY STARTED ===
-        # Cap = Order, Pump = Gate. Same 15% rule for SHORT and LONG. No structure, pure %.
-        # SHORT: Don't short into a +15% pump. LONG: Don't chase a +15% bounce from 2d Low.
         if pump_2d > PUMP_BLOCK_PCT:
             print(f"{sym} SKIP V900.3 - PUMP BLOCK - Pump2d +{pump_2d:.1f}% > +{PUMP_BLOCK_PCT:.0f}% (Low2d {fmt(low_2d)} -> Live {fmt(global_price)}). Pump ALIVE, DO NOT {side}. Wait for Pump Dead: Live < Low2d {fmt(low_2d)} or Weakening: Live < Mid {fmt(pump_midpoint)}")
             continue
@@ -647,20 +655,12 @@ def run_once():
         entry_high = round(price_exec * 1.02, 8)
         entry_low = round(price_exec * 0.98, 8)
         valid_until = now + timedelta(hours=1)
-        if side == "SHORT":
-            sl = round(price_exec * 1.10, 8)
-            tp1 = round(price_exec * (1 - (expected_shed/100)*0.5), 8)
-            tp2 = round(price_exec * (1 - expected_shed/100), 8)
-            runner = round(price_exec * (1 - (expected_shed/100)*1.5), 8)
-            emoji = "🔴"
-        else:
-            sl = round(price_exec * 0.90, 8)
-            tp1 = round(price_exec * (1 + (expected_shed/100)*0.5), 8)
-            tp2 = round(price_exec * (1 + expected_shed/100), 8)
-            runner = round(price_exec * (1 + (expected_shed/100)*1.5), 8)
-            emoji = "🟢"
+        tp1, tp2, runner, sl = get_tps_range(side, high_7d, low_7d, ret2, entry_price)
+        tp1, tp2, runner, sl = round(tp1, 8), round(tp2, 8), round(runner, 8), round(sl, 8)
+        emoji = "🔴" if side == "SHORT" else "🟢"
         tp1_only = is_tp1_only(group, shed, expected_shed, days_ago)
         print(f"{sym} TP1-ONLY check: group={group} shed={shed:.1f}% / expected={expected_shed}% = {shed/expected_shed*100:.0f}% done, spike {days_ago}d ago -> TP1_ONLY={tp1_only}")
+        print(f"{sym} RANGE MATHS: High {fmt(high_7d)} Low {fmt(low_7d)} Range {fmt(high_7d-low_7d)} Ret2 {ret2*100:.0f}% -> TP1 {fmt(tp1)} TP2 {fmt(tp2)} Runner {fmt(runner)} SL {fmt(sl)}")
         candidates.append({
             "sym": sym, "side": side, "price": entry_price,
             "entry_high": entry_high, "entry_low": entry_low,
@@ -673,7 +673,7 @@ def run_once():
             "reason": reason, "emoji": emoji,
             "vol": max(global_vol, vol_local),
             "days_ago": days_ago, "spike_pct": spike_pct,
-            "expected_shed": expected_shed,
+            "expected_shed": expected_shed, "ret2": ret2,
             "tp1_only": tp1_only
         })
     if candidates:
@@ -710,7 +710,7 @@ def run_once():
                 f"Pumped: +{best['pumped']:.1f}%\n"
                 f"Shed so far: -{best['shed']:.1f}% (Expected -{best['expected_shed']}%)\n"
                 f"Net: +{best['net']:.1f}%\n"
-                f"Low 7d: {fmt(best['low_7d'])} | High 7d: {fmt(best['high_7d'])}\n"
+                f"Low 7d: {fmt(best['low_7d'])} | High 7d: {fmt(best['high_7d'])} | Range: {fmt(best['high_7d']-best['low_7d'])}\n"
                 f"Low 2d: {fmt(best['low_2d'])} | Pump 2d: +{best['pump_2d']:.1f}% (Block >{PUMP_BLOCK_PCT:.0f}%) | Pump Mid: {fmt(best['pump_midpoint'])} | State: {best['pump_state']}\n"
                 f"Global Vol: ${best['vol']:,.0f}\n"
                 f"{best['reason']}\n"
