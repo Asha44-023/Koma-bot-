@@ -29,6 +29,7 @@
 # Retracement TP2: Small 75%, Mid 60%, Big 53% | TP1 = TP2 / 2 | Runner = 100% Range = Low (SHORT) / High (LONG)
 # SL: SHORT = Entry x 1.10 | LONG = Entry x 0.90
 # V900.3 PATCH 2026-11-24 - FRESH SPIKE GUARD 30 -> 90: 30 blocked everything (MMT 45%, PIEVERSE 67%, EVAA 84% all blocked, 0 signals). 90 only blocks if coin almost doubled in 48h. Still V900.3, same logic.
+# V900.3 PATCH 2026-11-24 - TP1 ALREADY PASSED GUARD: PIEVERSE LONG Entry 3.1771 TP1 2.7912 - TP1 below entry, fake signal. Now skip if LONG TP1 <= Entry or SHORT TP1 >= Entry.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -658,6 +659,13 @@ def run_once():
         valid_until = now + timedelta(hours=1)
         tp1, tp2, runner, sl = get_tps_range(side, high_7d, low_7d, ret2, entry_price)
         tp1, tp2, runner, sl = round(tp1, 8), round(tp2, 8), round(runner, 8), round(sl, 8)
+        # V900.3 PATCH - TP1 ALREADY PASSED GUARD
+        if side == "LONG" and tp1 <= entry_price:
+            print(f"{sym} SKIP V900.3 - TP1 ALREADY PASSED - LONG TP1 {fmt(tp1)} <= Entry {fmt(entry_price)} - price already above TP1, no edge")
+            continue
+        if side == "SHORT" and tp1 >= entry_price:
+            print(f"{sym} SKIP V900.3 - TP1 ALREADY PASSED - SHORT TP1 {fmt(tp1)} >= Entry {fmt(entry_price)} - price already below TP1, no edge")
+            continue
         emoji = "🔴" if side == "SHORT" else "🟢"
         tp1_only = is_tp1_only(group, shed, expected_shed, days_ago)
         print(f"{sym} TP1-ONLY check: group={group} shed={shed:.1f}% / expected={expected_shed}% = {shed/expected_shed*100:.0f}% done, spike {days_ago}d ago -> TP1_ONLY={tp1_only}")
