@@ -28,6 +28,7 @@
 # SHORT: TP = High - Retracement x Range | LONG: TP = Low + Retracement x Range
 # Retracement TP2: Small 75%, Mid 60%, Big 53% | TP1 = TP2 / 2 | Runner = 100% Range = Low (SHORT) / High (LONG)
 # SL: SHORT = Entry x 1.10 | LONG = Entry x 0.90
+# V900.3 PATCH 2026-11-24 - FRESH SPIKE GUARD 30 -> 90: 30 blocked everything (MMT 45%, PIEVERSE 67%, EVAA 84% all blocked, 0 signals). 90 only blocks if coin almost doubled in 48h. Still V900.3, same logic.
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -52,7 +53,7 @@ PUMP_BLOCK_PCT = 15.0
 # V900.3 - BLESS GUARDS
 SHED_DONE_BLOCK = 0.90
 MAX_SPIKES_7D = 2
-FRESH_SPIKE_48H_PCT = 30.0
+FRESH_SPIKE_48H_PCT = 90.0
 
 EXPECTED_DAYS = {"Small": "3-5 days", "Mid": "2-4 days", "Big": "1-3 days"}
 LEG2_BOUNCE_PCT = 0.12
