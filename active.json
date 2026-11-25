@@ -81,12 +81,16 @@
     "tp2": 3.81131981,
     "runner": 4.9579156,
     "reason": "Mid pumped +137.1% hit +100.0%, shed -40.9% DONE (expected -30.0%), net still +40.1% - LONG bounce now | No 1-day spike, grind pump, cooled | MEXC 24h -0.41% cooled",
-    "time": "2026-11-25T05:00:20.822264+03:00",
+    "time": "2026-11-25T05:09:06.907924+03:00",
     "warned_5d": false,
     "days_since_spike": 99,
     "spike_pct": 0,
-    "leg": 1,
+    "leg": 2,
     "leg2_active": false,
-    "tp1_only": false
+    "tp1_only": false,
+    "tp1_hit_price": 2.9961,
+    "bounce_target": 2.636568,
+    "bounce_high": 2.9961,
+    "bounce_done": false
   }
 }
