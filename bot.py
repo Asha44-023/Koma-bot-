@@ -1,10 +1,11 @@
-# V900.3 FINAL - PERPS ONLY - Pumped vs Shed - BOTH WAYS - BEST ONLY + LEG 2 RE-ENTRY
-# V900.3 UPDATE 2026-11-25 - PERPS ONLY - MEXC PERPS KLINE FIXED
-# MEXC PERPS = TRUTH. Kline URL: /kline?symbol=EVAA_USDT&interval=Month1 - NOT /kline/EVAA_USDT
-# CoinGecko = BACKUP only if Perps kline empty. If disagree >5%, PERPS wins.
+# V900.3 FINAL - PERPS ONLY - BINANCE OUT - MULTI-EXCHANGE MONTHLY/WEEKLY
+# MONTHLY/WEEKLY: MEXC Perps -> Bybit Perps -> Bitget Perps -> OKX Perps -> CoinGecko
+# BINANCE REMOVED - NOT USED ANYWHERE
+# ENTRY / SL / TP / VOL / 24H = MEXC ONLY. Other exchanges ONLY for Monthly High/Low + Weekly Low.
+# MEXC PERPS KLINE: /kline/EVAA_USDT?interval=Month1 - Columnar: {"time":[], "open":[], "high":[], "low":[], "close":[]}
 # MONTHLY: Pump >100% + Shed -30% to -60% = TAKE. WEEKLY: Last Low > Prev Low = HL = TAKE, Last Low < Prev Low = LL = WAIT.
 # PUMP 2D BLOCK = 10% | MEXC 24H BLOCK = 30% | SHED COOLING = 10% | TRACKER = tracker.json
-# MONTHLY CHECK IS AFTER 7D PUMPED FILTER - only calls kline for coins that already pumped, to avoid rate limit
+# MONTHLY CHECK IS AFTER 7D PUMPED FILTER - only calls kline for coins that already pumped
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -69,7 +70,7 @@ def send_telegram(msg):
 def fmt(p):
     return f"{p:.8f}".rstrip('0').rstrip('.')
 
-# --- MONTHLY / WEEKLY - PERPS ONLY, COINGECKO BACKUP ---
+# --- MONTHLY / WEEKLY - MULTI-EXCHANGE, BINANCE OUT ---
 def calc_monthly_pump(monthly_low, monthly_high):
     if monthly_low <= 0: return 0
     return (monthly_high - monthly_low) / monthly_low * 100
@@ -88,33 +89,103 @@ def check_weekly_structure(weekly_lows):
         return "LL", "New LL - Anticipate LH next - WAIT, DO NOT BUY"
 
 def get_mexc_kline(sym, interval):
-    # PERPS ONLY - MEXC Contract Kline - CORRECT FORMAT
-    # interval: Month1, Week1, Day1
-    # URL MUST BE: /kline?symbol=EVAA_USDT&interval=Month1 - NOT /kline/EVAA_USDT
+    # PERPS - MEXC - FIRST TRY
+    # URL: /kline/EVAA_USDT?interval=Month1 - Columnar: {"time":[], "open":[], "high":[], "low":[], "close":[]}
     try:
-        url = f"https://contract.mexc.com/api/v1/contract/kline?symbol={sym}_USDT&interval={interval}"
-        r = requests.get(url, timeout=15).json()
-        data = r.get("data", []) if isinstance(r, dict) else r
-        if not data:
-            print(f"MEXC PERP KLINE EMPTY {sym} {interval}")
+        url = f"https://contract.mexc.com/api/v1/contract/kline/{sym}_USDT?interval={interval}"
+        headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+        resp = requests.get(url, timeout=10, headers=headers)
+        if not resp.text.strip().startswith("{"):
+            print(f"MEXC PERP KLINE NON-JSON {sym} {interval} - got HTML/block")
             return []
-        candles = []
-        for c in data:
-            if isinstance(c, list) and len(c) >= 5:
-                candles.append({"time": c[0], "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])})
-            elif isinstance(c, dict):
-                candles.append({"time": c.get("time", c.get("t", 0)), "open": float(c.get("open", c.get("o", 0)) or 0), "high": float(c.get("high", c.get("h", 0)) or 0), "low": float(c.get("low", c.get("l", 0)) or 0), "close": float(c.get("close", c.get("c", 0)) or 0)})
-        return candles
+        r = resp.json()
+        data = r.get("data", {}) if isinstance(r, dict) else {}
+        if isinstance(data, dict) and "time" in data:
+            candles = []
+            for i in range(len(data["time"])):
+                candles.append({"time": data["time"][i], "open": float(data["open"][i]), "high": float(data["high"][i]), "low": float(data["low"][i]), "close": float(data["close"][i])})
+            return candles
+        if isinstance(data, list):
+            candles = []
+            for c in data:
+                if isinstance(c, list) and len(c) >= 5:
+                    candles.append({"time": c[0], "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])})
+                elif isinstance(c, dict):
+                    candles.append({"time": c.get("time", 0), "open": float(c.get("open", 0) or 0), "high": float(c.get("high", 0) or 0), "low": float(c.get("low", 0) or 0), "close": float(c.get("close", 0) or 0)})
+            return candles
+        return []
     except Exception as e:
         print(f"MEXC PERP KLINE ERROR {sym} {interval}: {e}")
         return []
+
+def get_bybit_kline(sym, interval):
+    # PERPS - Bybit - SECOND TRY - NO BINANCE
+    mapping = {"Month1": "M", "Week1": "W", "Day1": "D"}
+    b_interval = mapping.get(interval, interval)
+    try:
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}USDT&interval={b_interval}&limit=5"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, timeout=10, headers=headers).json()
+        lst = r.get("result", {}).get("list", []) if isinstance(r, dict) else []
+        if not lst:
+            return []
+        candles = []
+        for c in lst:
+            candles.append({"time": int(c[0]), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])})
+        return candles[::-1]
+    except:
+        return []
+
+def get_bitget_kline(sym, interval):
+    # PERPS - Bitget - THIRD TRY - NO BINANCE
+    mapping = {"Month1": "1M", "Week1": "1W", "Day1": "1D"}
+    g = mapping.get(interval, interval)
+    try:
+        url = f"https://api.bitget.com/api/v2/mix/market/candles?symbol={sym}USDT&granularity={g}&limit=5"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, timeout=10, headers=headers).json()
+        lst = r.get("data", []) if isinstance(r, dict) else []
+        if not lst:
+            return []
+        candles = []
+        for c in lst:
+            candles.append({"time": int(c[0]), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])})
+        return candles[::-1]
+    except:
+        return []
+
+def get_okx_kline(sym, interval):
+    # PERPS - OKX - FOURTH TRY - NO BINANCE
+    mapping = {"Month1": "1M", "Week1": "1W", "Day1": "1D"}
+    bar = mapping.get(interval, interval)
+    try:
+        url = f"https://www.okx.com/api/v5/market/candles?instId={sym}-USDT-SWAP&bar={bar}&limit=5"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, timeout=10, headers=headers).json()
+        lst = r.get("data", []) if isinstance(r, dict) else []
+        if not lst:
+            return []
+        candles = []
+        for c in lst:
+            candles.append({"time": int(c[0]), "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])})
+        return candles[::-1]
+    except:
+        return []
+
+def get_kline_any(sym, interval):
+    # MEXC -> Bybit -> Bitget -> OKX - NO BINANCE
+    for name, func in [("MEXC-PERPS", get_mexc_kline), ("BYBIT-PERPS", get_bybit_kline), ("BITGET-PERPS", get_bitget_kline), ("OKX-PERPS", get_okx_kline)]:
+        candles = func(sym, interval)
+        if candles and len(candles) >= 1:
+            return candles, name
+    return [], "NONE"
 
 def get_gecko_90d(gecko_id):
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart?vs_currency=usd&days=90"
         r = requests.get(url, timeout=20).json()
         if isinstance(r, dict) and "status" in r:
-            print(f"GECKO RATE LIMITED for {gecko_id} - will use PERPS only")
+            print(f"GECKO RATE LIMITED for {gecko_id} - will use Perps only")
             return []
         prices = r.get("prices", [])
         return [p[1] for p in prices]
@@ -123,48 +194,36 @@ def get_gecko_90d(gecko_id):
         return []
 
 def get_monthly_weekly(sym, gecko_id, current_price):
-    # PERPS FIRST, COINGECKO SECOND
+    # MULTI-EXCHANGE - MEXC -> Bybit -> Bitget -> OKX -> CoinGecko - NO BINANCE
     monthly_low = 0
     monthly_high = 0
     weekly_lows = []
     source = "NONE"
-    mexc_month = get_mexc_kline(sym, "Month1")
-    mexc_week = get_mexc_kline(sym, "Week1")
-    mexc_ok = False
-    if mexc_month and len(mexc_month) >= 1:
-        last_months = mexc_month[-2:] if len(mexc_month) >= 2 else mexc_month
+    month_candles, month_source = get_kline_any(sym, "Month1")
+    week_candles, week_source = get_kline_any(sym, "Week1")
+    if month_candles:
+        last_months = month_candles[-2:] if len(month_candles) >= 2 else month_candles
         monthly_low = min([c["low"] for c in last_months if c["low"] > 0])
         monthly_high = max([c["high"] for c in last_months if c["high"] > 0])
-        mexc_ok = True
-    if mexc_week and len(mexc_week) >= 2:
-        weekly_lows = [c["low"] for c in mexc_week[-3:] if c["low"] > 0]
-    gecko_low = 0
-    gecko_high = 0
-    gecko_weekly = []
-    if not mexc_ok or not weekly_lows:
+        source = month_source
+    if week_candles:
+        weekly_lows = [c["low"] for c in week_candles[-3:] if c["low"] > 0]
+        if source == "NONE":
+            source = week_source
+        elif week_source != source:
+            source = source + "+" + week_source
+    if monthly_low == 0 or not weekly_lows:
         if gecko_id:
             prices_90d = get_gecko_90d(gecko_id)
             if prices_90d and len(prices_90d) >= 30:
-                last_30d = prices_90d[-30:]
-                gecko_low = min(last_30d)
-                gecko_high = max(last_30d)
-                chunks = [prices_90d[i:i+7] for i in range(0, len(prices_90d), 7)]
-                gecko_weekly = [min(ch) for ch in chunks[-3:] if ch]
-    if mexc_ok and monthly_low > 0:
-        source = "MEXC-PERPS"
-        if gecko_high > 0 and monthly_high > 0:
-            diff = abs(gecko_high - monthly_high) / monthly_high * 100
-            if diff > MEXC_VS_GECKO_MAX_DIFF:
-                print(f"{sym} PERPS vs GECKO diff {diff:.1f}% on monthly high - TRUST PERPS: {fmt(monthly_high)} vs Gecko {fmt(gecko_high)}")
-        if not weekly_lows and gecko_weekly:
-            weekly_lows = gecko_weekly
-            source = "MEXC-PERPS + GECKO-WEEKLY"
-    elif gecko_low > 0:
-        monthly_low = gecko_low
-        monthly_high = gecko_high
-        weekly_lows = gecko_weekly
-        source = "COINGECKO-BACKUP"
-    else:
+                if monthly_low == 0:
+                    monthly_low = min(prices_90d[-30:])
+                    monthly_high = max(prices_90d[-30:])
+                    source = source + "+GECKO" if source != "NONE" else "COINGECKO-BACKUP"
+                if not weekly_lows:
+                    chunks = [prices_90d[i:i+7] for i in range(0, len(prices_90d), 7)]
+                    weekly_lows = [min(ch) for ch in chunks[-3:] if ch]
+    if monthly_low == 0:
         return {"monthly_pump": 0, "monthly_shed": 0, "monthly_low": 0, "monthly_high": 0, "weekly_lows": [], "weekly_state": "UNKNOWN", "source": "NONE", "has_data": False}
     monthly_pump = calc_monthly_pump(monthly_low, monthly_high)
     monthly_shed = calc_monthly_shed(monthly_high, current_price)
@@ -554,14 +613,12 @@ def run_once():
             print(f"{sym} SKIP - SECOND PUMP GUARD - {spike_count}x spikes"); continue
         if fresh_48h > FRESH_SPIKE_48H_PCT:
             print(f"{sym} SKIP - FRESH SPIKE GUARD - +{fresh_48h:.1f}%"); continue
-        # FIXED ORDER - 7D PUMPED FIRST, THEN MONTHLY/WEEKLY - only for coins that already pumped
         if pumped < pump_thresh:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
             continue
-        # NOW - REAL MONTHLY / WEEKLY - PERPS FIRST, COINGECKO BACKUP - only for pumped coins
         mw = get_monthly_weekly(sym, gecko_id, price_exec)
         if not mw.get("has_data"):
-            print(f"{sym} SKIP - No Monthly/Weekly data from PERPS or CoinGecko"); continue
+            print(f"{sym} SKIP - No Monthly/Weekly data from MEXC/Bybit/Bitget/OKX/CoinGecko"); continue
         monthly_pump = mw["monthly_pump"]; monthly_shed = mw["monthly_shed"]
         weekly_state = mw["weekly_state"]; weekly_lows = mw["weekly_lows"]; mw_source = mw["source"]
         print(f"{sym} MONTHLY [{mw_source}] Pump +{monthly_pump:.1f}% (need >{MONTHLY_PUMP_MIN:.0f}%) | Shed {monthly_shed:.1f}% (need -{MONTHLY_SHED_MIN:.0f}% to -{MONTHLY_SHED_MAX:.0f}%) | WEEKLY {weekly_state} Lows {weekly_lows}")
@@ -574,7 +631,6 @@ def run_once():
         if weekly_state == "UNKNOWN":
             print(f"{sym} SKIP - WEEKLY UNKNOWN - Not enough weekly lows"); continue
         side = None; reason = ""
-        # 7d logic - we already know pumped >= thresh here
         days_ago, spike_pct, daily_closes = days_since_spike(spark)
         print(f"{sym} Spike: {days_ago}d ago (+{spike_pct:.0f}%) | Shed ratio: {shed_ratio*100:.0f}% | MEXC 24h: {change_24h:+.2f}%")
         if days_ago < 2:
