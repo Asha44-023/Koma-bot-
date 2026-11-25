@@ -1,34 +1,4 @@
 {
-  "AKE": {
-    "sym": "AKE",
-    "side": "LONG",
-    "price": 0.002038,
-    "entry_high": 0.00207876,
-    "entry_low": 0.00199724,
-    "valid_until": "2026-11-24T20:00:28.311017+03:00",
-    "pumped": 452.0738178404427,
-    "shed": 81.36112671659848,
-    "net": 2.900339338117136,
-    "cap_at_low": 45294472.59338147,
-    "group": "Small",
-    "low_7d": 0.00198692250497044,
-    "high_7d": 0.010969278930721266,
-    "low_2d": 0.00198692250497044,
-    "pump_2d": 2.900339338117136,
-    "pump_midpoint": 0.006478100717845853,
-    "sl": 0.0018342,
-    "tp1": 0.00535531,
-    "tp2": 0.00872369,
-    "runner": 0.01096928,
-    "reason": "Small pumped +452.1% hit +150.0%, shed -81.4% DONE (expected -45.0%), net still +2.9% - LONG bounce now | No 1-day spike, grind pump, cooled | MEXC 24h -0.34% cooled",
-    "time": "2026-11-24T19:00:28.311017+03:00",
-    "warned_5d": false,
-    "days_since_spike": 99,
-    "spike_pct": 0,
-    "leg": 1,
-    "leg2_active": false,
-    "tp1_only": false
-  },
   "IDOL": {
     "sym": "IDOL",
     "side": "LONG",
@@ -90,7 +60,7 @@
     "tp1_only": false,
     "tp1_hit_price": 2.9961,
     "bounce_target": 2.636568,
-    "bounce_high": 2.9961,
+    "bounce_high": 2.9169,
     "bounce_done": false
   }
 }
