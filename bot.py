@@ -6,6 +6,7 @@
 # MONTHLY: Pump >100% + Shed -30% to -60% = TAKE. WEEKLY: Last Low > Prev Low = HL = TAKE, Last Low < Prev Low = LL = WAIT.
 # PUMP 2D BLOCK = 10% | MEXC 24H BLOCK = 30% | SHED COOLING = 10% | TRACKER = tracker.json
 # MONTHLY CHECK IS AFTER 7D PUMPED FILTER - only calls kline for coins that already pumped
+# TP UPDATE V900.3 - SAME NAME: TPs from next consolidation / liquidity area (MEXC 4h), fallback to old 30%/60% math if none found
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -252,14 +253,72 @@ def get_group(cap_at_low):
     elif cap_at_low <= 2_000_000_000: return "Mid", 100.0, 30.0, 0.60
     else: return "Big", 60.0, 20.0, 0.53
 
-def get_tps_range(side, high, low, ret2, entry):
+# --- V900.3 LIQUIDITY TPs - SAME NAME ---
+def get_consolidation_levels(sym, side, entry):
+    # MEXC 4h candles - find where price consolidated
+    candles = []
+    for interval in ["Hour4", "Min240", "4h"]:
+        candles = get_mexc_kline(sym, interval)
+        if candles and len(candles) >= 10:
+            break
+    if not candles:
+        return []
+    levels = []
+    for c in candles[-30:]:
+        levels.append(c["high"])
+        levels.append(c["low"])
+    clusters = []
+    for lv in sorted(levels):
+        found = None
+        for cl in clusters:
+            if abs(lv - cl["price"]) / cl["price"] * 100 <= 2.0:
+                found = cl
+                break
+        if found:
+            found["touches"] += 1
+            found["price"] = (found["price"] * (found["touches"]-1) + lv) / found["touches"]
+        else:
+            clusters.append({"price": lv, "touches": 1})
+    real = [c["price"] for c in clusters if c["touches"] >= 2]
+    real = sorted(set([round(x, 8) for x in real]))
+    if side == "LONG":
+        above = [x for x in real if x > entry * 1.02]
+        return sorted(above)
+    else:
+        below = [x for x in real if x < entry * 0.98]
+        return sorted(below, reverse=True)
+
+def get_tps_range(side, high, low, ret2, entry, sym=""):
     rng = high - low
     ret1 = ret2 * 0.5
     if side == "SHORT":
-        tp1 = high - ret1 * rng; tp2 = high - ret2 * rng; runner = high - 1.00 * rng; sl = entry * 1.10
+        tp1_old = high - ret1 * rng; tp2_old = high - ret2 * rng; runner_old = high - 1.00 * rng; sl = entry * 1.10
     else:
-        tp1 = low + ret1 * rng; tp2 = low + ret2 * rng; runner = low + 1.00 * rng; sl = entry * 0.90
-    return tp1, tp2, runner, sl
+        tp1_old = low + ret1 * rng; tp2_old = low + ret2 * rng; runner_old = low + 1.00 * rng; sl = entry * 0.90
+    if sym:
+        try:
+            levels = get_consolidation_levels(sym, side, entry)
+            if len(levels) >= 1:
+                tp1 = levels[0]
+                if side == "LONG":
+                    if tp1 > entry and tp1 <= high:
+                        tp2 = levels[1] if len(levels) >= 2 and levels[1] > tp1 and levels[1] <= high else tp2_old
+                        runner = runner_old
+                        if (tp1 - entry) / entry * 100 < 1.0:
+                            tp1 = tp1_old
+                        print(f"{sym} LIQUIDITY TP - TP1 {fmt(tp1)} TP2 {fmt(tp2)} (old TP1 was {fmt(tp1_old)})")
+                        return tp1, tp2, runner, sl
+                else:
+                    if tp1 < entry and tp1 >= low:
+                        tp2 = levels[1] if len(levels) >= 2 and levels[1] < tp1 and levels[1] >= low else tp2_old
+                        runner = runner_old
+                        if (entry - tp1) / entry * 100 < 1.0:
+                            tp1 = tp1_old
+                        print(f"{sym} LIQUIDITY TP - TP1 {fmt(tp1)} TP2 {fmt(tp2)} (old TP1 was {fmt(tp1_old)})")
+                        return tp1, tp2, runner, sl
+        except Exception as e:
+            print(f"{sym} LIQUIDITY TP FAILED, using old math: {e}")
+    return tp1_old, tp2_old, runner_old, sl
 
 def get_low_2d(spark):
     if not spark: return 0
@@ -655,7 +714,7 @@ def run_once():
         if side is None:
             print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%"); continue
         entry_price = price_exec; entry_high = round(price_exec * 1.02, 8); entry_low = round(price_exec * 0.98, 8); valid_until = now + timedelta(hours=1)
-        tp1, tp2, runner, sl = get_tps_range(side, high_7d, low_7d, ret2, entry_price)
+        tp1, tp2, runner, sl = get_tps_range(side, high_7d, low_7d, ret2, entry_price, sym=sym)
         tp1, tp2, runner, sl = round(tp1, 8), round(tp2, 8), round(runner, 8), round(sl, 8)
         if side == "LONG" and tp1 <= entry_price:
             print(f"{sym} SKIP - TP1 ALREADY PASSED - LONG TP1 {fmt(tp1)} <= Entry {fmt(entry_price)}"); continue
