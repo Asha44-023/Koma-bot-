@@ -1,10 +1,10 @@
-# V900.3 FINAL - Pumped vs Shed - BOTH WAYS - BEST ONLY + LEG 2 RE-ENTRY
-# V900.3 UPDATE 2026-11-25 - MEXC + COINGECKO BOTH - REAL MONTHLY / WEEKLY FETCH
-# MEXC = TRUTH (price, monthly, weekly). CoinGecko = BACKUP if MEXC kline empty.
-# If both disagree >5%, MEXC wins. CoinGecko was wrong 24 Nov: EVAA $2.54 vs MEXC $1.9762.
-# PURE MATH ONLY - No trendlines, no support, no patterns. Only % + Low > Low comparisons.
+# V900.3 FINAL - PERPS ONLY - Pumped vs Shed - BOTH WAYS - BEST ONLY + LEG 2 RE-ENTRY
+# V900.3 UPDATE 2026-11-25 - PERPS ONLY - MEXC PERPS KLINE FIXED
+# MEXC PERPS = TRUTH. Kline URL: /kline?symbol=EVAA_USDT&interval=Month1 - NOT /kline/EVAA_USDT
+# CoinGecko = BACKUP only if Perps kline empty. If disagree >5%, PERPS wins.
 # MONTHLY: Pump >100% + Shed -30% to -60% = TAKE. WEEKLY: Last Low > Prev Low = HL = TAKE, Last Low < Prev Low = LL = WAIT.
 # PUMP 2D BLOCK = 10% | MEXC 24H BLOCK = 30% | SHED COOLING = 10% | TRACKER = tracker.json
+# MONTHLY CHECK IS AFTER 7D PUMPED FILTER - only calls kline for coins that already pumped, to avoid rate limit
 import json, os, requests, time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -69,7 +69,7 @@ def send_telegram(msg):
 def fmt(p):
     return f"{p:.8f}".rstrip('0').rstrip('.')
 
-# --- NEW 2026-11-25 - MONTHLY / WEEKLY - MEXC + COINGECKO BOTH ---
+# --- MONTHLY / WEEKLY - PERPS ONLY, COINGECKO BACKUP ---
 def calc_monthly_pump(monthly_low, monthly_high):
     if monthly_low <= 0: return 0
     return (monthly_high - monthly_low) / monthly_low * 100
@@ -88,30 +88,34 @@ def check_weekly_structure(weekly_lows):
         return "LL", "New LL - Anticipate LH next - WAIT, DO NOT BUY"
 
 def get_mexc_kline(sym, interval):
+    # PERPS ONLY - MEXC Contract Kline - CORRECT FORMAT
     # interval: Month1, Week1, Day1
-    # MEXC returns list of [time, open, high, low, close, volume...] or dict
+    # URL MUST BE: /kline?symbol=EVAA_USDT&interval=Month1 - NOT /kline/EVAA_USDT
     try:
-        url = f"https://contract.mexc.com/api/v1/contract/kline/{sym}_USDT?interval={interval}"
+        url = f"https://contract.mexc.com/api/v1/contract/kline?symbol={sym}_USDT&interval={interval}"
         r = requests.get(url, timeout=15).json()
         data = r.get("data", []) if isinstance(r, dict) else r
-        if not data: return []
+        if not data:
+            print(f"MEXC PERP KLINE EMPTY {sym} {interval}")
+            return []
         candles = []
         for c in data:
-            # Handle both list and dict formats
             if isinstance(c, list) and len(c) >= 5:
                 candles.append({"time": c[0], "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])})
             elif isinstance(c, dict):
                 candles.append({"time": c.get("time", c.get("t", 0)), "open": float(c.get("open", c.get("o", 0)) or 0), "high": float(c.get("high", c.get("h", 0)) or 0), "low": float(c.get("low", c.get("l", 0)) or 0), "close": float(c.get("close", c.get("c", 0)) or 0)})
         return candles
     except Exception as e:
-        print(f"MEXC KLINE ERROR {sym} {interval}: {e}")
+        print(f"MEXC PERP KLINE ERROR {sym} {interval}: {e}")
         return []
 
 def get_gecko_90d(gecko_id):
-    # Fallback: 90 days daily prices from CoinGecko
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{gecko_id}/market_chart?vs_currency=usd&days=90"
         r = requests.get(url, timeout=20).json()
+        if isinstance(r, dict) and "status" in r:
+            print(f"GECKO RATE LIMITED for {gecko_id} - will use PERPS only")
+            return []
         prices = r.get("prices", [])
         return [p[1] for p in prices]
     except Exception as e:
@@ -119,25 +123,21 @@ def get_gecko_90d(gecko_id):
         return []
 
 def get_monthly_weekly(sym, gecko_id, current_price):
-    # Tries MEXC first, CoinGecko second. Returns dict with monthly_pump, monthly_shed, weekly_lows, source
+    # PERPS FIRST, COINGECKO SECOND
     monthly_low = 0
     monthly_high = 0
     weekly_lows = []
     source = "NONE"
-    # 1. MEXC Monthly
     mexc_month = get_mexc_kline(sym, "Month1")
     mexc_week = get_mexc_kline(sym, "Week1")
     mexc_ok = False
     if mexc_month and len(mexc_month) >= 1:
-        # Use last completed month candle + current month if available
-        # Take last 2 candles to cover full monthly range
         last_months = mexc_month[-2:] if len(mexc_month) >= 2 else mexc_month
         monthly_low = min([c["low"] for c in last_months if c["low"] > 0])
         monthly_high = max([c["high"] for c in last_months if c["high"] > 0])
         mexc_ok = True
     if mexc_week and len(mexc_week) >= 2:
         weekly_lows = [c["low"] for c in mexc_week[-3:] if c["low"] > 0]
-    # If MEXC monthly missing, try CoinGecko 90d
     gecko_low = 0
     gecko_high = 0
     gecko_weekly = []
@@ -148,21 +148,17 @@ def get_monthly_weekly(sym, gecko_id, current_price):
                 last_30d = prices_90d[-30:]
                 gecko_low = min(last_30d)
                 gecko_high = max(last_30d)
-                # Weekly lows from 90d: split into 7-day chunks, take low of each week, last 3 weeks
                 chunks = [prices_90d[i:i+7] for i in range(0, len(prices_90d), 7)]
                 gecko_weekly = [min(ch) for ch in chunks[-3:] if ch]
-    # Decide source
     if mexc_ok and monthly_low > 0:
-        source = "MEXC"
-        # If Gecko also exists and disagrees >5% on monthly high, trust MEXC, log it
+        source = "MEXC-PERPS"
         if gecko_high > 0 and monthly_high > 0:
             diff = abs(gecko_high - monthly_high) / monthly_high * 100
             if diff > MEXC_VS_GECKO_MAX_DIFF:
-                print(f"{sym} MEXC vs GECKO diff {diff:.1f}% on monthly high - TRUST MEXC: {fmt(monthly_high)} vs Gecko {fmt(gecko_high)}")
-        # If MEXC weekly missing but Gecko has it, use Gecko weekly as backup
+                print(f"{sym} PERPS vs GECKO diff {diff:.1f}% on monthly high - TRUST PERPS: {fmt(monthly_high)} vs Gecko {fmt(gecko_high)}")
         if not weekly_lows and gecko_weekly:
             weekly_lows = gecko_weekly
-            source = "MEXC+ GECKO-WEEKLY"
+            source = "MEXC-PERPS + GECKO-WEEKLY"
     elif gecko_low > 0:
         monthly_low = gecko_low
         monthly_high = gecko_high
@@ -558,10 +554,14 @@ def run_once():
             print(f"{sym} SKIP - SECOND PUMP GUARD - {spike_count}x spikes"); continue
         if fresh_48h > FRESH_SPIKE_48H_PCT:
             print(f"{sym} SKIP - FRESH SPIKE GUARD - +{fresh_48h:.1f}%"); continue
-        # NEW - REAL MONTHLY / WEEKLY - MEXC FIRST, COINGECKO BACKUP
+        # FIXED ORDER - 7D PUMPED FIRST, THEN MONTHLY/WEEKLY - only for coins that already pumped
+        if pumped < pump_thresh:
+            print(f"{sym} SKIP - Pumped +{pumped:.1f}% < +{pump_thresh}%")
+            continue
+        # NOW - REAL MONTHLY / WEEKLY - PERPS FIRST, COINGECKO BACKUP - only for pumped coins
         mw = get_monthly_weekly(sym, gecko_id, price_exec)
         if not mw.get("has_data"):
-            print(f"{sym} SKIP - No Monthly/Weekly data from MEXC or CoinGecko"); continue
+            print(f"{sym} SKIP - No Monthly/Weekly data from PERPS or CoinGecko"); continue
         monthly_pump = mw["monthly_pump"]; monthly_shed = mw["monthly_shed"]
         weekly_state = mw["weekly_state"]; weekly_lows = mw["weekly_lows"]; mw_source = mw["source"]
         print(f"{sym} MONTHLY [{mw_source}] Pump +{monthly_pump:.1f}% (need >{MONTHLY_PUMP_MIN:.0f}%) | Shed {monthly_shed:.1f}% (need -{MONTHLY_SHED_MIN:.0f}% to -{MONTHLY_SHED_MAX:.0f}%) | WEEKLY {weekly_state} Lows {weekly_lows}")
@@ -574,21 +574,21 @@ def run_once():
         if weekly_state == "UNKNOWN":
             print(f"{sym} SKIP - WEEKLY UNKNOWN - Not enough weekly lows"); continue
         side = None; reason = ""
-        if pumped >= pump_thresh:
-            days_ago, spike_pct, daily_closes = days_since_spike(spark)
-            print(f"{sym} Spike: {days_ago}d ago (+{spike_pct:.0f}%) | Shed ratio: {shed_ratio*100:.0f}% | MEXC 24h: {change_24h:+.2f}%")
-            if days_ago < 2:
-                print(f"{sym} SKIP - Spike {days_ago}d ago - TOO EARLY"); continue
-            if shed < expected_shed:
-                if shed_ratio >= SHED_DONE_BLOCK:
-                    print(f"{sym} SKIP - SHED DONE GUARD - {shed_ratio*100:.0f}% done"); continue
-                side = "SHORT"; reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}%, expected -{expected_shed}% - SHORT now | Spike was {days_ago}d ago | Monthly Pump +{monthly_pump:.1f}% Shed {monthly_shed:.1f}% Weekly {weekly_state}"
-            else:
-                if net <= 0:
-                    print(f"{sym} SKIP LONG - Net {net:.1f}% <= 0"); continue
-                if abs(change_24h) > SHED_COOLING_MAX:
-                    print(f"{sym} SKIP LONG - SHED COOLING - MEXC 24h {change_24h:+.2f}%"); continue
-                side = "LONG"; reason = f"{group} pumped +{pumped:.1f}%, shed -{shed:.1f}% DONE, net +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago | Monthly Pump +{monthly_pump:.1f}% Shed {monthly_shed:.1f}% Weekly {weekly_state} = HL, expect HH | MEXC 24h {change_24h:+.2f}% cooled"
+        # 7d logic - we already know pumped >= thresh here
+        days_ago, spike_pct, daily_closes = days_since_spike(spark)
+        print(f"{sym} Spike: {days_ago}d ago (+{spike_pct:.0f}%) | Shed ratio: {shed_ratio*100:.0f}% | MEXC 24h: {change_24h:+.2f}%")
+        if days_ago < 2:
+            print(f"{sym} SKIP - Spike {days_ago}d ago - TOO EARLY"); continue
+        if shed < expected_shed:
+            if shed_ratio >= SHED_DONE_BLOCK:
+                print(f"{sym} SKIP - SHED DONE GUARD - {shed_ratio*100:.0f}% done"); continue
+            side = "SHORT"; reason = f"{group} pumped +{pumped:.1f}% hit +{pump_thresh}%, shed only -{shed:.1f}%, expected -{expected_shed}% - SHORT now | Spike was {days_ago}d ago | Monthly Pump +{monthly_pump:.1f}% Shed {monthly_shed:.1f}% Weekly {weekly_state}"
+        else:
+            if net <= 0:
+                print(f"{sym} SKIP LONG - Net {net:.1f}% <= 0"); continue
+            if abs(change_24h) > SHED_COOLING_MAX:
+                print(f"{sym} SKIP LONG - SHED COOLING - MEXC 24h {change_24h:+.2f}%"); continue
+            side = "LONG"; reason = f"{group} pumped +{pumped:.1f}%, shed -{shed:.1f}% DONE, net +{net:.1f}% - LONG bounce now | Spike was {days_ago}d ago | Monthly Pump +{monthly_pump:.1f}% Shed {monthly_shed:.1f}% Weekly {weekly_state} = HL, expect HH | MEXC 24h {change_24h:+.2f}% cooled"
         if pump_2d > PUMP_BLOCK_PCT:
             print(f"{sym} SKIP V900.3 - PUMP BLOCK - Pump2d +{pump_2d:.1f}% > +{PUMP_BLOCK_PCT:.0f}% (Low2d {fmt(low_2d)} -> Live {fmt(global_price)})")
             continue
