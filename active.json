@@ -1,1 +1,36 @@
-{}
+{
+  "PIEVERSE": {
+    "sym": "PIEVERSE",
+    "side": "LONG",
+    "price": 3.0496,
+    "entry_high": 3.110592,
+    "entry_low": 2.988608,
+    "valid_until": "2026-11-25T16:57:44.884656+03:00",
+    "pumped": 102.55228975000963,
+    "shed": 37.67542144405313,
+    "net": 26.23986094211388,
+    "cap_at_low": 671617526.090886,
+    "group": "Mid",
+    "low_7d": 2.447721327431508,
+    "high_7d": 4.95791559541185,
+    "low_2d": 2.892268229050988,
+    "pump_2d": 6.836564083611693,
+    "pump_midpoint": 3.9250919122314194,
+    "sl": 2.74464,
+    "tp1": 3.20077961,
+    "tp2": 3.95383789,
+    "runner": 4.9579156,
+    "reason": "Mid pumped +102.6%, shed -37.7% DONE, net +26.2% - LONG bounce now | Spike was 3d ago | Monthly Pump +466.5% Shed -43.1% Weekly HL = HL, expect HH | MEXC 24h +3.49% cooled",
+    "time": "2026-11-25T15:57:44.884656+03:00",
+    "warned_5d": false,
+    "days_since_spike": 3,
+    "spike_pct": 62.676277341423024,
+    "leg": 1,
+    "leg2_active": false,
+    "tp1_only": false,
+    "monthly_pump": 466.45890555672935,
+    "monthly_shed": -43.1267600380448,
+    "weekly_state": "HL",
+    "mw_source": "MEXC-PERPS"
+  }
+}
