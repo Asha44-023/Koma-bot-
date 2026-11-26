@@ -70,5 +70,23 @@
     "tp2": 0.00872369,
     "runner": 0.01096928,
     "sl": 0.0018342
+  },
+  {
+    "sym": "PIEVERSE",
+    "side": "LONG",
+    "group": "Mid",
+    "entry": 3.0565,
+    "exit_price": 4.0199,
+    "hit": "TP2 HIT WITHOUT LEG 2 - LEG 2 SKIPPED",
+    "pumped": 102.55228975000963,
+    "shed": 37.67542144405313,
+    "time_in": "2026-11-25T18:00:24.378322+03:00",
+    "time_out": "2026-11-26T10:00:24.022430+03:00",
+    "days_taken": 0.67,
+    "expected_days": "2-4 days",
+    "tp1": 3.20077961,
+    "tp2": 3.95383789,
+    "runner": 4.9579156,
+    "sl": 3.0565
   }
 ]
